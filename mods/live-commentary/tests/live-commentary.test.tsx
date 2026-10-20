@@ -124,7 +124,7 @@ test('場面・ファイル名・時間の書き方', () => {
   expect(fill('{tool} と {x}', { tool: 'Bash' })).toBe('Bash と {x}')
 })
 
-test('絵: 照明はオンで動き、オフで止まる・テロップは流れる・数の板にアニメは無い', () => {
+test('絵: 照明はオンで動き、オフで止まる・テロップは流れる・数の板は試合中だけ動かない', () => {
   const on = stadiumSvg(true, '熱血')
   const off = stadiumSvg(false, '熱血')
   for (const s of [on, off]) {
@@ -140,6 +140,8 @@ test('絵: 照明はオンで動き、オフで止まる・テロップは流れ
   expect(board).toMatch(/>12<.*>3<.*>4</)
   expect(board).toContain('試合時間 1:23')
   expect(board).not.toContain('<animate')
+  // 試合の外は描き直さないので、数字が 0 から増える
+  expect(boardSvg({ ok: 12, err: 3, streak: 4 }, { startedAt: 0, now: 0, lastMs: 42_000 })).toMatch(/<text [^>]*opacity="0">12<animate/)
   expect(boardSvg({ ok: 0, err: 0, streak: 0 }, { startedAt: 0, now: 0, lastMs: 42_000 })).toContain('前の試合 42 秒')
   const ticker = tickerSvg({ at: NOW, text: 'a<b & "c"', kind: 'error' }, true)
   expect(ticker).toContain('a&lt;b &amp; &quot;c&quot;')
@@ -256,7 +258,7 @@ test('エラーの行はログで赤い', async ($, on) => {
     t => isFrom('熱血', 'error', t.text),
   )
   expect(texts).toHaveLength(1)
-  expect(texts[0]?.props.color).toBe('#f85149')
+  expect(texts[0]?.props.color).toBe('error')
 })
 
 test('5 分を超えたターンの決着はトーストで、中断は静かに', async ($, on) => {
@@ -392,4 +394,27 @@ test('ファイル名の制御文字は実況に入れない', async ($, on) => 
   expect(last()).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
   const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
   expect((await svgs(ui))[2]).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const [stadium, board, ticker] = await svgs(ui)
+  expect(board).toMatch(/fill="#ffffff"/)
+  expect(ticker).toMatch(/fill="#ffffff"/)
+  // 夜のスタジアムは情景なので、明るいテーマでも題は明るい字のまま
+  expect(stadium).toMatch(/fill="#c9d1d9" text-anchor="middle">実況席</)
+
+  theme = 'dark'
+  await $.config.set({
+    key: 'theme',
+    value: 'dark',
+    previous: 'light',
+    provider: { plugin: 'core', tier: 'core' } as never,
+    origin: { kind: 'composer' },
+  })
+  expect((await svgs(ui))[1]).toMatch(/fill="#0d1117"/)
 })

@@ -1,0 +1,7 @@
+{
+  "name": "toast-inbox",
+  "version": "0.1.0",
+  "description": "/inbox でほかの mod が出したトーストとステータス行を 100 件まで残し、未読・mod ごとの件数・絞り込みで見返す",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

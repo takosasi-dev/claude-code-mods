@@ -1,23 +1,10 @@
 // git の出力を表示用のデータに変え、SVG と terminal 用の行を組む。どれも純関数
 import type { GitPaneCommit, GitPaneFile, GitPaneSnapshot } from '../types'
+import { C, HEADER_H, countUp, fadeIn, frame, header } from './style'
 
 type Repo = Extract<GitPaneSnapshot, { kind: 'repo' }>
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
 export const TOP = 12
-const W = 380
 const MID = 190
 const HALF = 170
 const MONO = 'ui-monospace, Consolas, monospace'
@@ -151,9 +138,9 @@ const sum = (r: Repo) => ({
   del: r.files.reduce((n, f) => n + f.del, 0),
 })
 
-const svgDoc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く) */
+const svgDoc = (h: number, body: string, sub = '', accent = C.orange) =>
+  frame(h + HEADER_H, header('git', sub, accent) + `<g transform="translate(0 ${HEADER_H})">${body}</g>`)
 
 function messageSvg(title: string, color: string, sub: string, hint: string) {
   return svgDoc(
@@ -163,8 +150,10 @@ function messageSvg(title: string, color: string, sub: string, hint: string) {
       `<line x1="34" y1="34" x2="34" y2="41" stroke="${color}" stroke-width="2" stroke-linecap="round"/>` +
       `<circle cx="34" cy="46" r="1.5" fill="${color}"/>` +
       `<text x="56" y="45" font-size="15" font-weight="bold" fill="${color}">${esc(title)}</text>` +
-      `<text x="20" y="76" font-size="12" fill="${C.weak}">${esc(tailFit(sub, 52))}</text>` +
-      `<text x="20" y="98" font-size="12" fill="${C.weak}">${esc(headFit(hint, 52))}</text>`,
+      `<text x="20" y="76" font-size="12" fill="${C.dim}">${esc(tailFit(sub, 52))}</text>` +
+      `<text x="20" y="98" font-size="12" fill="${C.dim}">${esc(headFit(hint, 52))}</text>`,
+    '',
+    color,
   )
 }
 
@@ -183,39 +172,40 @@ export function paneSvg(snap: GitPaneSnapshot, now: number) {
   // ── ヘッダー: ブランチ・ahead/behind・3 つのタイル
   s += `<rect x="8" y="8" width="364" height="128" rx="8" fill="${C.face}" stroke="${C.line}"/>`
   s +=
-    `<g stroke="${C.weak}" stroke-width="2" fill="none" stroke-linecap="round">` +
+    `<g stroke="${C.dim}" stroke-width="2" fill="none" stroke-linecap="round">` +
     `<line x1="22" y1="22" x2="22" y2="38"/><path d="M32 25 C32 32 22 30 22 36"/>` +
     `<circle cx="22" cy="21" r="2.6" fill="${C.face}"/><circle cx="22" cy="40" r="2.6" fill="${C.face}"/><circle cx="32" cy="23" r="2.6" fill="${C.face}"/></g>`
   s += `<text x="42" y="37" font-size="17" font-weight="bold" fill="${C.text}">${esc(headFit(snap.branch, 22))}</text>`
   if (snap.upstream) {
     s +=
       `<text x="364" y="37" font-size="15" font-weight="bold" text-anchor="end">` +
-      `<tspan fill="${snap.ahead ? C.green : C.weak}">↑${snap.ahead}</tspan>` +
-      `<tspan dx="8" fill="${snap.behind ? C.orange : C.weak}">↓${snap.behind}</tspan></text>`
-  } else s += `<text x="364" y="36" font-size="12" fill="${C.weak}" text-anchor="end">上流なし</text>`
-  const where = snap.upstream ? `${base(snap.cwd)}  →  ${snap.upstream}` : base(snap.cwd)
-  s += `<text x="20" y="58" font-size="12" fill="${C.weak}">${esc(tailFit(where, 52))}</text>`
-  const tiles: [string, string, string][] = [
-    ['変更ファイル', String(t.files), C.blue],
-    ['追加した行', `+${t.add}`, C.green],
-    ['消した行', `−${t.del}`, C.red],
+      `<tspan fill="${snap.ahead ? C.green : C.dim}">↑${snap.ahead}</tspan>` +
+      `<tspan dx="8" fill="${snap.behind ? C.orange : C.dim}">↓${snap.behind}</tspan></text>`
+  } else s += `<text x="364" y="36" font-size="12" fill="${C.dim}" text-anchor="end">上流なし</text>`
+  const where = snap.upstream ? `上流  ${snap.upstream}` : '上流の設定はありません'
+  s += `<text x="20" y="58" font-size="12" fill="${C.dim}">${esc(tailFit(where, 52))}</text>`
+  const tiles: [string, number, string, (n: number) => string][] = [
+    ['変更ファイル', t.files, C.blue, n => String(n)],
+    ['追加した行', t.add, C.green, n => `+${n}`],
+    ['消した行', t.del, C.red, n => `−${n}`],
   ]
-  tiles.forEach(([label, value, color], i) => {
+  tiles.forEach(([label, value, color, format], i) => {
     const x = 16 + i * 119
+    const size = format(value).length > 6 ? 20 : 26
     s +=
       `<rect x="${x}" y="70" width="110" height="58" rx="6" fill="${C.bg}" stroke="${C.line}"/>` +
       `<rect x="${x}" y="70" width="3" height="58" rx="1.5" fill="${color}"/>` +
-      `<text x="${x + 12}" y="87" font-size="12" fill="${C.weak}">${label}</text>` +
-      `<text x="${x + 12}" y="118" font-size="${value.length > 6 ? 20 : 26}" font-weight="bold" fill="${color}">${value}</text>`
+      `<text x="${x + 12}" y="87" font-size="12" fill="${C.dim}">${label}</text>` +
+      countUp(value, `x="${x + 12}" y="118" font-size="${size}" font-weight="bold" fill="${color}"`, format, i * 0.1)
   })
 
   // ── ファイルごとの差分バー
   let y = 164
   s += `<text x="12" y="${y}" font-size="13" font-weight="bold" fill="${C.text}">ファイルごとの変更</text>`
-  if (t.files > 0) s += `<text x="368" y="${y}" font-size="12" fill="${C.weak}" text-anchor="end">${Math.min(TOP, t.files)} / ${t.files}</text>`
+  if (t.files > 0) s += `<text x="368" y="${y}" font-size="12" fill="${C.dim}" text-anchor="end">${Math.min(TOP, t.files)} / ${t.files}</text>`
   y += 20
   s +=
-    `<g font-size="12" fill="${C.weak}">` +
+    `<g font-size="12" fill="${C.dim}">` +
     `<circle cx="16" cy="${y - 4}" r="4" fill="${C.blue}"/><text x="24" y="${y}">ステージ済</text>` +
     `<circle cx="104" cy="${y - 4}" r="4" fill="${C.yellow}"/><text x="112" y="${y}">未ステージ</text>` +
     `<circle cx="192" cy="${y - 4}" r="3.5" fill="none" stroke="${C.purple}" stroke-width="1.5"/><text x="200" y="${y}">未追跡</text></g>`
@@ -237,7 +227,7 @@ export function paneSvg(snap: GitPaneSnapshot, now: number) {
       const count = f.isUntracked
         ? `<tspan fill="${C.purple}">新規</tspan>`
         : f.isBinary && f.add + f.del === 0
-          ? `<tspan fill="${C.weak}">バイナリ</tspan>`
+          ? `<tspan fill="${C.dim}">バイナリ</tspan>`
           : `<tspan fill="${C.green}">+${f.add}</tspan><tspan dx="6" fill="${C.red}">−${f.del}</tspan>`
       s +=
         dots +
@@ -253,7 +243,7 @@ export function paneSvg(snap: GitPaneSnapshot, now: number) {
       y += 34
     }
     if (t.files > TOP) {
-      s += `<text x="30" y="${y + 6}" font-size="12" fill="${C.weak}">ほか ${t.files - TOP} ファイル</text>`
+      s += `<text x="30" y="${y + 6}" font-size="12" fill="${C.dim}">ほか ${t.files - TOP} ファイル</text>`
       y += 16
     }
     y += 8
@@ -264,23 +254,25 @@ export function paneSvg(snap: GitPaneSnapshot, now: number) {
   s += `<text x="12" y="${y}" font-size="13" font-weight="bold" fill="${C.text}">直近のコミット</text>`
   y += 14
   if (snap.commits.length === 0) {
-    s += `<text x="12" y="${y + 14}" font-size="12" fill="${C.weak}">まだコミットがありません</text>`
+    s += `<text x="12" y="${y + 14}" font-size="12" fill="${C.dim}">まだコミットがありません</text>`
     y += 28
   } else {
     const n = snap.commits.length
     if (n > 1) s += `<line x1="20" y1="${y + 8}" x2="20" y2="${y + 8 + (n - 1) * 40}" stroke="${C.line}" stroke-width="2"/>`
     snap.commits.forEach((c, i) => {
-      s +=
+      s += fadeIn(
         (i === 0
           ? `<circle cx="20" cy="${y + 8}" r="5.5" fill="${C.blue}"/>`
           : `<circle cx="20" cy="${y + 8}" r="4.5" fill="${C.bg}" stroke="${C.blue}" stroke-width="2"/>`) +
         `<text x="34" y="${y + 12}" font-size="12" font-family="${MONO}" fill="${C.blue}">${esc(c.hash)}</text>` +
-        `<text x="368" y="${y + 12}" font-size="12" fill="${C.weak}" text-anchor="end">${ago(c.time, now)}</text>` +
-        `<text x="34" y="${y + 29}" font-size="13" fill="${C.text}">${esc(headFit(c.subject, 44))}</text>`
+        `<text x="368" y="${y + 12}" font-size="12" fill="${C.dim}" text-anchor="end">${ago(c.time, now)}</text>` +
+        `<text x="34" y="${y + 29}" font-size="13" fill="${C.text}">${esc(headFit(c.subject, 44))}</text>`,
+        0.3 + i * 0.08,
+      )
       y += 40
     })
   }
-  return svgDoc(y + 8, s)
+  return svgDoc(y + 8, s, base(snap.cwd))
 }
 
 type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }

@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { GitPaneSnapshot } from '../types'
 import { paneLines, paneSvg, toRepo } from './git'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'git-pane'
 const TITLE = 'git'
@@ -106,8 +107,10 @@ const openPane = async ($: EngineInterface) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /git が組み込みと被って拒まれたら /gitpane にする
     const got = await $.command.register({ name: 'git', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'git'

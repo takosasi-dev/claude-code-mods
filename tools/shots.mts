@@ -2,6 +2,7 @@
 //
 //   node tools/shots.mts                 画面のある mod を全部撮る
 //   node tools/shots.mts git-pane cc-dash 名前を渡した mod だけ撮る
+//   --light                              明るいテーマで撮って docs/images/<mod>-light.png に書く
 //   --chrome=<path> か 環境変数 CHROME   Chrome の場所 (既定は Windows の標準の場所)
 //
 // 各 mod の hooks/*.ts の SVG を作る関数に架空のデータを渡し、幅 380px・背景 #0d1117 の HTML に
@@ -49,7 +50,14 @@ type Pic = string | { svg: string; at: number }
 const SHOTS: Record<string, () => Promise<Pic[]>> = {
   'mod-hub': async () => {
     const m = await load('mod-hub/hooks/hub.ts')
-    return [m.headerSvg(14)]
+    const i = await load('mod-hub/hooks/icons.ts')
+    // アイコンは 32x32 なので、1 枚ずつ載せると引き伸ばされる。iconStrip に通す
+    return [
+      m.headerSvg(14),
+      i.iconStrip(['git-pane', 'todo-board', 'test-runner', 'cc-dash', 'usage-history', 'file-map', 'focus-timer', 'toast-inbox', 'aqua-pet', 'turn-gacha', 'wait-games']),
+      i.bandSvg('固定', 2),
+      i.bandSvg('開発', 9),
+    ]
   },
 
   'cc-dash': async () => {
@@ -237,8 +245,15 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
     )
     h = { ...h, hpPct: 64, xpFrom: 0.2 }
     for (let i = 0; i < 9; i++) h = m.onTool(h, ['Grep', 'Edit', 'Bash'][i % 3], i === 4, NOW)
-    // 実績の書 (achievementsSvg) は別のタブで縦に長いので載せない
-    return [m.statusSvg(h)]
+    // 実績の書 (achievementsSvg) は別のタブで縦に長いので載せない。装備はガチャのカードから
+    const g = await load('turn-gacha/hooks/gacha.ts')
+    const owned = g.PUBLIC_CARDS.filter((c: any) => ['x01', 's02', 'n02', 'r01'].includes(c.id))
+    for (const id of ['x01', 's02', 'n02']) {
+      const c = owned.find((x: any) => x.id === id)
+      h = m.setGear(h, c.slot, c)
+    }
+    // 装備の画面 (gearSvg) も載せると重くなるので、装備が写るステータスだけ
+    return [m.statusSvg(m.wear(h, owned))]
   },
 
   'code-omikuji': async () => {
@@ -283,13 +298,24 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
 
   'wait-games': async () => {
     const svg = await load('wait-games/hooks/svg.ts')
-    const stats = { best2048: 6_412, wins2048: 1, winsMines: 7, fastestMines: 41_300 }
+    const sudoku = await load('wait-games/hooks/sudoku.ts')
+    const memory = await load('wait-games/hooks/memory.ts')
+    const r = seeded(7)
+    const stats = {
+      best2048: 6_412, wins2048: 1, winsMines: 7, fastestMines: 41_300,
+      puzzles: {
+        fifteen: { wins: 4, bestMoves: 58, fastest: 72_400 },
+        lights: { wins: 9, bestMoves: 7, fastest: 15_800 },
+        sudoku9: { wins: 2, bestMoves: 51, fastest: 412_000 },
+        memory: { wins: 12, bestMoves: 11, fastest: 38_200 },
+      },
+    }
     const g = {
       board: [2, 4, 8, 2, 0, 16, 32, 4, 2, 64, 128, 8, 0, 2, 256, 16],
       score: 3_184, moves: 212, hasWon: false, isOver: false, slides: [], merged: [], spawned: [],
     }
-    // マインスイーパーは別のタブで、SVG は見出しだけ (盤はボタン) なので 2048 だけ載せる
-    return [svg.board2048Svg(g, stats)]
+    // マインスイーパーと新しい 4 つは盤がボタンで、SVG は見出しだけ。2048 と見出し 2 つを載せる
+    return [svg.board2048Svg(g, stats), svg.sudokuSvg(sudoku.newSudoku(9, r), stats), svg.memorySvg({ ...memory.newMemory(r), moves: 6 }, stats)]
   },
 
   'spec-board': async () => {
@@ -395,11 +421,85 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
   // 季節と時刻で背景が変わる。秋の夕方 (JST 17:30 = 15 分刻みの 70 番) で撮る
   'aqua-pet': async () => {
     const m = await load('aqua-pet/hooks/tank.ts')
+    const fish = [
+      { id: 0, kind: 'maru', bornAt: NOW - 12 * DAY, turnsSeen: 64 },
+      { id: 1, kind: 'shima', bornAt: NOW - 9 * DAY, turnsSeen: 30 },
+      { id: 2, kind: 'mizutama', bornAt: NOW - 6 * DAY, turnsSeen: 21 },
+      { id: 3, kind: 'hirenaga', bornAt: NOW - 3 * DAY, turnsSeen: 9 },
+      { id: 4, kind: 'ougi', bornAt: NOW - DAY, turnsSeen: 3 },
+      { id: 5, kind: 'akari', bornAt: NOW, turnsSeen: 0, name: 'ぴか' },
+    ]
     const tank = {
-      ...m.INITIAL, turns: 35, bornAt: NOW - 12 * DAY, fullness: 80, fedAt: NOW, murk: 1, name: 'demo', isRunning: true, lastActiveAt: NOW,
+      ...m.INITIAL, turns: 55, bornAt: NOW - 12 * DAY, fullness: 80, fedAt: NOW, murk: 1, name: 'demo', isRunning: true, lastActiveAt: NOW, fish,
       view: { period: '夕', season: '秋', slot: 70, fullness: 80, isIdle: false, isUpset: false, isFeeding: false, days: 12 },
     }
-    return [m.drawTank(tank)]
+    return [m.drawTank(tank), m.fishListSvg(fish)]
+  },
+
+  'session-timeline': async () => {
+    const m = await load('session-timeline/hooks/timeline.ts')
+    const S = 1000
+    const tool = (name: string, a: number, b: number | undefined, extra: Record<string, unknown> = {}) =>
+      ({ id: `${name}${a}`, tool: name, start: a, ...(b === undefined ? {} : { end: b }), isError: false, isSub: false, ...extra })
+    const turn = (id: string, agoMin: number, secs: number | undefined, label: string, reason?: string) => {
+      const start = NOW - agoMin * 60 * S
+      return { turnId: id, start, ...(secs === undefined ? {} : { end: start + secs * S }), label, ...(reason ? { reason } : {}), tools: [] as unknown[] }
+    }
+    const turns = [
+      turn('t1', 40, 25, '型の定義を読んで', 'answer'),
+      turn('t2', 30, 150, '帯のタイムラインを作って', 'answer'),
+      turn('t3', 20, 80, 'テストを走らせて', 'answer'),
+      turn('t4', 10, 12, 'やっぱり止めて', 'aborted'),
+      turn('t5', 1, undefined, 'サブエージェントで調べて'),
+    ]
+    const at = (i: number, s: number) => turns[i]!.start + s * S
+    turns[0]!.tools = [tool('Read', at(0, 2), at(0, 4)), tool('Grep', at(0, 5), at(0, 7)), tool('Read', at(0, 9), at(0, 12))]
+    turns[1]!.tools = [
+      tool('Read', at(1, 3), at(1, 8)), tool('Edit', at(1, 20), at(1, 24)), tool('Write', at(1, 40), at(1, 46)),
+      tool('Bash', at(1, 60), at(1, 95), { isError: true }), tool('Edit', at(1, 100), at(1, 104)), tool('Bash', at(1, 110), at(1, 140)),
+    ]
+    turns[2]!.tools = [tool('Bash', at(2, 2), at(2, 60)), tool('WebFetch', at(2, 62), at(2, 70))]
+    turns[3]!.tools = [tool('Read', at(3, 1), at(3, 3))]
+    turns[4]!.tools = [
+      tool('Agent', at(4, 2), at(4, 50)), tool('Read', at(4, 5), at(4, 9), { isSub: true }), tool('Grep', at(4, 12), at(4, 15), { isSub: true }),
+      tool('Bash', at(4, 20), at(4, 35), { isSub: true }), tool('Read', at(4, 52), undefined),
+    ]
+    return [m.timelineSvg(turns, NOW)]
+  },
+
+  'file-map': async () => {
+    const m = await load('file-map/hooks/filemap.ts')
+    const f = (label: string, group: string, reads: number, writes = 0, subs = 0) => ({ label, group, reads, writes, subs, last: 0 })
+    const files = [
+      f('src/hooks/register.tsx', 'src/hooks', 9, 6), f('src/hooks/timeline.ts', 'src/hooks', 4, 8), f('src/hooks/style.ts', 'src/hooks', 3),
+      f('src/types/index.d.ts', 'src/types', 5, 1), f('tests/session-timeline.test.tsx', 'tests', 2, 5), f('README.md', '直下', 4, 1),
+      f('package.json', '直下', 2), f('docs/mod-guide.md', 'docs', 6, 0, 2), f('docs/images/a.png', 'docs/images', 1),
+      f('../other/settings.json', '外', 2), f('src/lib/util.ts', 'src/lib', 3), f('src/lib/path.ts', 'src/lib', 1, 1),
+    ]
+    return [m.fileMapSvg(files, 'all')]
+  },
+
+  'toast-inbox': async () => {
+    const m = await load('toast-inbox/hooks/inbox.ts')
+    const plugins = ['focus-timer', 'dev-rpg', 'dev-rpg', 'live-commentary', 'live-commentary', 'live-commentary', 'aqua-pet', 'engine']
+    const items = plugins.map((plugin, k) => ({ plugin, text: `通知 ${k}`, at: NOW - (plugins.length - k) * 7 * MIN, kind: k % 3 === 0 ? 'status' : 'toast' }))
+    return [m.inboxSvg(items, NOW - 20 * MIN)]
+  },
+
+  'usage-history': async () => {
+    const m = await load('usage-history/hooks/history.ts')
+    const days: Record<string, unknown> = {}
+    for (let k = 0; k < 40; k++) {
+      const turns = Math.round(8 + 14 * Math.abs(Math.sin(k * 1.7)) + (k % 7 === 2 ? 15 : 0))
+      days[m.dayKey(NOW - k * DAY)] = {
+        turns, tools: turns * 6, inputTokens: turns * 900, outputTokens: turns * 2400, cacheRead: turns * 40_000, durationMs: turns * 95_000, subTurns: Math.round(turns / 4),
+      }
+    }
+    const heat = Array.from({ length: 168 }, (_, s) => {
+      const h = s % 24
+      return h >= 9 ? Math.round((Math.floor(s / 24) < 5 ? 6 : 3) * Math.abs(Math.sin(h / 3)) + (h >= 20 ? 6 : 0)) : 0
+    })
+    return [m.chartSvg(days, NOW, 7, 'turns'), m.heatSvg(heat)]
   },
 }
 
@@ -451,9 +551,9 @@ const settle = (svg: string, at = SETTLE) =>
     return tag.replace(/^<\w+/, name => `${name} begin="-${at}s"`)
   })
 
-const page = (svgs: Pic[]) =>
-  `<!doctype html><html style="background:#0d1117"><head><meta charset="utf-8"></head>` +
-  `<body style="margin:0;background:#0d1117;width:380px;padding:${PAD}px;box-sizing:border-box">` +
+const page = (svgs: Pic[], bg: string) =>
+  `<!doctype html><html style="background:${bg}"><head><meta charset="utf-8"></head>` +
+  `<body style="margin:0;background:${bg};width:380px;padding:${PAD}px;box-sizing:border-box">` +
   svgs
     .map((s, i) => `<img style="width:100%;display:block;${i < svgs.length - 1 ? `margin-bottom:${GAP}px` : ''}" src="data:image/svg+xml;base64,${Buffer.from(typeof s === 'string' ? settle(s) : settle(s.svg, s.at)).toString('base64')}">`)
     .join('') +
@@ -462,6 +562,7 @@ const page = (svgs: Pic[]) =>
 const args = process.argv.slice(2)
 const chrome = args.find(a => a.startsWith('--chrome='))?.slice(9) ?? process.env.CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const only = args.filter(a => !a.startsWith('--'))
+const isLight = args.includes('--light')
 const unknown = only.filter(n => !(n in SHOTS))
 if (unknown.length) throw new Error(`知らない mod: ${unknown.join(', ')}`)
 
@@ -471,11 +572,14 @@ const tmp = mkdtempSync(join(tmpdir(), 'shots-'))
 try {
   for (const [mod, make] of Object.entries(SHOTS)) {
     if (only.length && !only.includes(mod)) continue
+    // その mod の style.ts の色を替えてから描く (色は描く時に C から読まれる)
+    const style = await load(`${mod}/hooks/style.ts`)
+    style.setTheme(isLight)
     const svgs = await make()
     const height = Math.ceil(PAD * 2 + GAP * (svgs.length - 1) + svgs.reduce((n, s) => n + heightOf(typeof s === 'string' ? s : s.svg), 0))
     const html = join(tmp, `${mod}.html`)
-    const png = join(outDir, `${mod}.png`)
-    writeFileSync(html, page(svgs))
+    const png = join(outDir, `${mod}${isLight ? '-light' : ''}.png`)
+    writeFileSync(html, page(svgs, style.C.bg))
     execFileSync(
       chrome,
       [
@@ -494,7 +598,7 @@ try {
       // Chrome は TEMP に .tmp や scoped_dir を残すので、TEMP も消す一時フォルダに向ける
       { stdio: 'ignore', timeout: 60_000, env: { ...process.env, TEMP: tmp, TMP: tmp } },
     )
-    console.log(`${mod}.png  380x${height}  ${Math.round(statSync(png).size / 1024)}KB`)
+    console.log(`${mod}${isLight ? '-light' : ''}.png  380x${height}  ${Math.round(statSync(png).size / 1024)}KB`)
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })

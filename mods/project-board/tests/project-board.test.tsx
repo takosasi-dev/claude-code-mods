@@ -92,7 +92,8 @@ for (const surface of SURFACES) {
     if (surface === 'vscode') {
       const svg = await ui.find({ type: 'Svg' })
       expect(String(svg?.props.source)).toMatch(/鮮度/)
-      expect(String(svg?.props.source)).toMatch(/#3fb950[\s\S]*#d29922[\s\S]*#6e7681/)
+      // 凡例の色の並び: 3日以内は緑、14日以内は黄、それ以上は弱い色
+      expect(String(svg?.props.source)).toMatch(/fill="#3fb950"\/><text[^>]*>3日以内<[\s\S]*fill="#d29922"\/><text[^>]*>14日以内<[\s\S]*fill="#8b949e"\/><text[^>]*>それ以上</)
     } else {
       expect(await ui.find({ type: 'Svg' })).toBeUndefined()
       expect((await ui.find({ type: 'Text', text: /^鮮度 / }))?.text).toBe('鮮度 3日以内 1 / 14日以内 1 / それ以上 1')
@@ -261,4 +262,22 @@ test('本文の file: リンクは押せない(https: はそのまま)', { optio
     await ui.press({ key: 'back' })
     await ui.unmount()
   }
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', OPTIONS, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockFs(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'reload' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#ffffff"\/>/)
+  expect(await source()).toContain('fill="#1a7f37"') // 明るい緑(3日以内)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
 })

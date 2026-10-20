@@ -1,13 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { RpgHero, RpgSaved } from '../types'
+import type { RpgGachaCard, RpgHero, RpgSaved, RpgSlot } from '../types'
 import {
   INITIAL,
   INITIAL_SAVED,
+  SLOTS,
+  SLOT_LABEL,
   achievementLines,
   achievementsSvg,
   fromSaved,
+  gearLines,
+  gearSvg,
   grant,
   hpPctAt,
   levelInfo,
@@ -16,12 +20,17 @@ import {
   onTool,
   onTurnEnd,
   onTurnStart,
+  ownedCards,
+  setGear,
   startSession,
   statusLines,
   statusSvg,
   toSaved,
+  wear,
+  wornOf,
 } from './rpg'
 import type { Achievement } from './rpg'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'dev-rpg'
 const TITLE = '冒険の書'
@@ -32,6 +41,9 @@ const HERO = atom({ plugin: 'dev-rpg', key: 'hero' } as const, INITIAL)
 const TAB = atom({ plugin: 'dev-rpg', key: 'tab' } as const, 'status')
 const CONFIRM = atom({ plugin: 'dev-rpg', key: 'isConfirmingReset' } as const, false)
 const NEWS = atom({ plugin: 'dev-rpg', key: 'news' } as const, '')
+// turn-gacha の state (読むだけ。turn-gacha が無ければ undefined のまま)
+const GACHA_SAVE = { plugin: 'turn-gacha', key: 'save' } as const
+const GACHA_CARDS = { plugin: 'turn-gacha', key: 'cards' } as const
 
 type $ = EngineInterface
 
@@ -86,15 +98,28 @@ const save = ($: $) =>
     })
   })
 
+/** 装備の候補の並び (レア度の高い順) */
+const RANK: Record<RpgGachaCard['rarity'], number> = { SSR: 0, SR: 1, R: 2, N: 3 }
+
+/** ガチャで持っているカード。turn-gacha が無い・読めない時は undefined。描画の中で呼ぶと、ガチャが変わった時に描き直る */
+async function readOwned($: $): Promise<RpgGachaCard[] | undefined> {
+  try {
+    return ownedCards((await $.state.get(GACHA_SAVE)).value, (await $.state.get(GACHA_CARDS)).value)
+  } catch {
+    return undefined
+  }
+}
+
 /** 変える → 実績を見る。レベルが上がった時だけトーストを出す (store に書くのは save) */
 async function change($: $, fn: (h: RpgHero, now: number) => RpgHero, isTurnEnd = false) {
   await ensureLoaded($)
   const now = await $.clock.now()
+  const owned = await readOwned($)
   let before = 1
   let gained: Achievement[] = []
   const hero = await update($, HERO, x => {
     before = levelInfo(x.xp).level
-    const r = grant(fn(x, now), now, isTurnEnd)
+    const r = grant(fn(x, now), now, isTurnEnd, owned)
     gained = r.gained
     return r.hero
   })
@@ -116,6 +141,18 @@ async function refresh($: $) {
   await update($, HERO, x => ({ ...x, hpPct: hpPctAt(x, now), xpFrom: levelInfo(x.xp).frac }))
 }
 
+/** 枠にカードを着ける (id が空なら外す)。持っていないカードは着けない。装備は最後に書いた物が勝つ */
+async function equip($: $, slot: RpgSlot, id: string) {
+  const card = (await readOwned($))?.find(c => c.id === id && c.slot === slot)
+  if (id !== '' && !card) {
+    await update($, NEWS, () => 'そのカードは持っていません')
+    return
+  }
+  await update($, NEWS, () => (card ? `${SLOT_LABEL[slot]}に「${card.name}」を着けた` : `${SLOT_LABEL[slot]}を外した`))
+  await change($, h => setGear(h, slot, card))
+  await save($)
+}
+
 /** やり直しは消す操作なので、store を丸ごと書き替える */
 const reset = ($: $) =>
   serial(async () => {
@@ -135,8 +172,11 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /rpg が拒まれたら (組み込みと被ったら) /dev-rpg にする
     const got = await $.command.register({ name: 'rpg', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'rpg'
@@ -185,18 +225,28 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)
     const { Box, Text, Button } = t
+    const Select = 'Select' in t ? t.Select : undefined
     // terminal の表にも Svg の名前があるので、画面の種類でも分ける
     const Svg = e.surface !== 'terminal' && 'Svg' in t ? t.Svg : undefined
-    const hero = await read($, HERO)
+    const owned = await readOwned($)
+    // 持っていない装備は外した姿で見せる (store の装備はそのまま)
+    const hero = wear(await read($, HERO), owned)
     const tab = await read($, TAB)
     const isConfirming = await read($, CONFIRM)
     const news = await read($, NEWS)
-    const lines = tab === 'status' ? statusLines(hero) : achievementLines(hero)
+    const lines = tab === 'status' ? statusLines(hero) : tab === 'gear' ? gearLines(hero, owned) : achievementLines(hero)
+    const source = tab === 'status' ? statusSvg(hero) : tab === 'gear' ? gearSvg(hero, owned) : achievementsSvg(hero)
+    const worn = wornOf(hero.equip, owned)
+    const go = (to: 'status' | 'gear' | 'achievements') =>
+      void (async () => {
+        await update($, CONFIRM, () => false)
+        await update($, TAB, () => to)
+      })()
 
     return (
       <Box flexDirection="column" gap={1}>
         {Svg ? (
-          <Svg source={tab === 'status' ? statusSvg(hero) : achievementsSvg(hero)} alt={lines.map(l => l.text).join('\n')} />
+          <Svg source={source} alt={lines.map(l => l.text).join('\n')} />
         ) : (
           <Box key="lines" flexDirection="column">
             {lines.map(l => (
@@ -206,19 +256,34 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
+        {tab === 'gear' && owned !== undefined && Select && (
+          <Box key="equip" flexDirection="column">
+            {SLOTS.map(k => (
+              <Select
+                key={`equip:${k}`}
+                label={`${SLOT_LABEL[k]}: `}
+                options={[
+                  { value: '', label: 'なし' },
+                  ...owned
+                    .filter(c => c.slot === k)
+                    .sort((a, b) => RANK[a.rarity] - RANK[b.rarity] || a.id.localeCompare(b.id))
+                    .map(c => ({ value: c.id, label: `${c.rarity} ${c.name}` })),
+                ]}
+                value={worn[k]?.id ?? ''}
+                onSelect={(v: string) => void equip($, k, v)}
+              />
+            ))}
+          </Box>
+        )}
         {news !== '' && <Text color="yellow">{news}</Text>}
         <Box flexDirection="column">
           <Button
             key="tab"
-            label={tab === 'status' ? '実績を見る' : 'ステータスに戻る'}
+            label={tab === 'achievements' ? 'ステータスに戻る' : '実績を見る'}
             variant="primary"
-            onPress={() =>
-              void (async () => {
-                await update($, CONFIRM, () => false)
-                await update($, TAB, x => (x === 'status' ? 'achievements' : 'status'))
-              })()
-            }
+            onPress={() => go(tab === 'achievements' ? 'status' : 'achievements')}
           />
+          <Button key="gear" label={tab === 'gear' ? 'ステータスに戻る' : '装備'} onPress={() => go(tab === 'gear' ? 'status' : 'gear')} />
           <Button
             key="reset"
             label={isConfirming ? '本当にやり直す(すべて消えます)' : '冒険をやり直す'}

@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
+import { followTheme, readTheme } from './style'
 import { barSvg, clean, clock, flowColor, flowSvg, lastSvg, parsePresets, short } from './svg'
 
 const run = atom({ plugin: 'work-bar', key: 'run' } as const, null)
@@ -25,8 +26,10 @@ function startTick($: EngineInterface) {
 
 export const register: Register = (on, options) => {
   const presets = parsePresets(String(options.presets ?? ''))
+  followTheme(on)
 
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     await $.command.register({ name: 'work-bar', description: '作業バーの表示を切り替える' }).catch(() => {})
     // VS Code は帯を「フック無し」と 2 回見ると聞きに来なくなる。後から読み込まれた時のために描き直しを頼む
     $.ui.invalidate('ui.render')

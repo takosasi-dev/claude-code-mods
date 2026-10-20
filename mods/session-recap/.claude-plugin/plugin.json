@@ -1,6 +1,6 @@
 {
   "name": "session-recap",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "/recap でセッションのふりかえり(ターンの帯タイムライン・一覧・押した時だけの要約)をペインに表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

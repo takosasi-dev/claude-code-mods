@@ -1,7 +1,7 @@
 {
   "name": "wait-games",
-  "version": "0.1.0",
-  "description": "/games で、Claude の返事を待つ間に 2048 とマインスイーパーをペインで遊ぶ",
+  "version": "0.2.0",
+  "description": "/games で、Claude の返事を待つ間に 2048・マインスイーパー・15 パズル・ライツアウト・数独・神経衰弱をペインで遊ぶ",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"
 }

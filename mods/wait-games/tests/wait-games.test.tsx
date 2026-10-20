@@ -5,8 +5,12 @@ import type { Engine } from 'claude-code/testing'
 import { canMove, linesOf, move, newGame, play, slideLine, spawn } from '../hooks/game2048'
 import { around, CELLS, countAt, isCleared, look, MINE_COUNT, minesLeft, newMines, place, reveal, toggleFlag } from '../hooks/mines'
 import { addStats, EMPTY_STATS, statsFromSaved } from '../hooks/stats'
-import { board2048Svg, clean, esc, minesSvg } from '../hooks/svg'
-import type { Game2048, Mines } from '../types'
+import { board2048Svg, clean, esc, fifteenSvg, lightsSvg, memorySvg, minesSvg, sudokuSvg } from '../hooks/svg'
+import type { Fifteen, Game2048, GameStats, Lights, Memory, Mines, Sudoku } from '../types'
+import { applyFifteen, isSolvable as solvable15, isSolved, look as look15, newFifteen, neighbors, SOLVED } from '../hooks/fifteen'
+import { applyLights, isDark, isSolvable as solvableLights, look as lookLights, newLights, press, QUIET } from '../hooks/lights'
+import { applySudoku, clashes, countSolutions, isComplete, look as lookSudoku, newSudoku, peers, selectCell, solutionFor } from '../hooks/sudoku'
+import { applyMemory, FACES, look as lookMemory, newMemory } from '../hooks/memory'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const SURFACES = ['vscode', 'terminal'] as const
@@ -364,8 +368,13 @@ test('SVG: 制御文字を落とし、幅を付けず、動いたタイルが滑
 // ---------------- 画面 ----------------
 
 /** エンジンの代わりに一番下で答える。store は手元の Map、トーストは集める */
-const boot = async ($: Engine, on: On, init?: unknown) => {
+const boot = async ($: Engine, on: On, init?: unknown, opts: { theme?: () => string } = {}) => {
   const clock = mock.clock(on, { now: NOW })
+  const theme = opts.theme
+  if (theme) {
+    on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme(), provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+    on('config.set', (_$, e) => ({ value: e.value }))
+  }
   const m = new Map<string, unknown>(init === undefined ? [] : [['stats', init]])
   on('store.get', (_$, e) => ({ value: m.get(e.key) }))
   on('store.set', (_$, e) => {
@@ -397,7 +406,8 @@ const boot = async ($: Engine, on: On, init?: unknown) => {
     store: m,
     g2048: () => last.g2048 as Game2048,
     mines: () => last.mines as Mines,
-    arm: (key: 'g2048' | 'mines', value: Game2048 | Mines) => armed.set(key, value),
+    last: <T,>(key: string) => last[key] as T,
+    arm: (key: string, value: unknown) => armed.set(key, value),
   }
 }
 
@@ -644,4 +654,376 @@ test('/games が取れなかった時は、元の /games を横取りしない',
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
   expect(await $.command.run({ command: 'games', ...run })).toMatchObject({ text: '組み込みの games' })
   expect(opened).toEqual([])
+})
+
+// ================ 0.2.0 で足したゲーム ================
+
+const range = (n: number) => Array.from({ length: n }, (_, i) => i)
+
+// ---------------- 15 パズル ----------------
+
+test('15 パズル: 解けるかの判定と、新しい盤はいつも解ける並び', () => {
+  expect(solvable15(SOLVED)).toBe(true)
+  // 14 と 15 を入れ替えた有名な解けない並び
+  expect(solvable15([...range(13).map(i => i + 1), 15, 14, 0])).toBe(false)
+  // 解けた形から合法な手を何回打っても解ける
+  let t = [...SOLVED]
+  const r = seeded(5)
+  for (let k = 0; k < 300; k++) {
+    const blank = t.indexOf(0)
+    const ns = neighbors(blank)
+    const j = ns[Math.floor(r() * ns.length)]!
+    ;[t[blank], t[j]] = [t[j]!, 0]
+    expect(solvable15(t)).toBe(true)
+  }
+  for (let k = 0; k < 200; k++) {
+    const g = newFifteen(seeded(k))
+    expect([...g.tiles].sort((a, b) => a - b)).toEqual(range(16))
+    expect(solvable15(g.tiles)).toBe(true)
+    expect(isSolved(g.tiles)).toBe(false)
+    expect(g).toMatchObject({ moves: 0, status: 'play', startedAt: 0 })
+  }
+  // 乱数が偏っても (いつも 0) 解ける・そろっていない盤
+  for (const v of [0, 0.9999999]) {
+    const g = newFifteen(() => v)
+    expect(solvable15(g.tiles)).toBe(true)
+    expect(isSolved(g.tiles)).toBe(false)
+  }
+})
+
+test('15 パズル: 空きの隣だけ動き、そろうと勝ち', () => {
+  // 1..14, 空き, 15
+  const g: Fifteen = { tiles: [...range(14).map(i => i + 1), 0, 15], moves: 0, startedAt: 0, endedAt: 0, status: 'play' }
+  expect(applyFifteen(g, 0, NOW)).toBe(g) // 隣でない
+  expect(applyFifteen(g, 14, NOW)).toBe(g) // 空き自身
+  expect(applyFifteen(g, 99, NOW)).toBe(g)
+  const up = applyFifteen(g, 10, NOW) // 11 が下へ
+  expect(up.tiles[14]).toBe(11)
+  expect(up.tiles[10]).toBe(0)
+  expect(up).toMatchObject({ moves: 1, startedAt: NOW, status: 'play' })
+  const won = applyFifteen(g, 15, NOW + 4200)
+  expect(won).toMatchObject({ status: 'won', moves: 1, startedAt: NOW + 4200, endedAt: NOW + 4200 })
+  expect(applyFifteen(won, 14, NOW)).toBe(won)
+  // マスの字はどれも 2 桁
+  for (const i of range(16)) expect(look15(g, i).text).toHaveLength(2)
+  expect(look15(g, 14)).toMatchObject({ text: ' .', isBlank: true })
+  expect(look15(g, 0)).toMatchObject({ text: ' 1', isHome: true })
+  expect(look15(g, 15).isHome).toBe(false)
+})
+
+// ---------------- ライツアウト ----------------
+
+test('ライツアウト: 何も変えない押し方 2 つと、解ける盤の判定', () => {
+  const dark = Array(25).fill(false)
+  // QUIET のマスを全部押しても盤は変わらない (だから重なりの偶奇が解けるかの印になる)
+  for (const q of QUIET) expect(range(25).filter(i => q[i]).reduce((on, i) => press(on, i), dark)).toEqual(dark)
+  expect(solvableLights(dark)).toBe(true)
+  for (const i of range(25)) expect(solvableLights(press(dark, i))).toBe(true)
+  // 隅の 1 つだけ点いた盤は解けない
+  expect(solvableLights(dark.map((_, i) => i === 0))).toBe(false)
+  for (let k = 0; k < 200; k++) {
+    const g = newLights(seeded(k))
+    expect(solvableLights(g.on)).toBe(true)
+    expect(isDark(g.on)).toBe(false)
+  }
+  expect(isDark(newLights(() => 0.99).on)).toBe(false)
+})
+
+test('ライツアウト: 押すと十字が切り替わり、全部消えると勝ち', () => {
+  const dark = Array(25).fill(false)
+  // 中央は 5 マス、隅は 3 マス、右端と次の行の左端はつながらない
+  expect(press(dark, 12).filter(Boolean)).toHaveLength(5)
+  expect(range(25).filter(i => press(dark, 0)[i])).toEqual([0, 1, 5])
+  expect(range(25).filter(i => press(dark, 4)[i])).toEqual([3, 4, 9])
+  const g: Lights = { on: press(dark, 12), moves: 3, startedAt: NOW - 5000, endedAt: 0, status: 'play' }
+  const once = applyLights(g, 0, NOW)
+  expect(once.on.filter(Boolean)).toHaveLength(8)
+  expect(once).toMatchObject({ moves: 4, status: 'play', startedAt: NOW - 5000 })
+  const won = applyLights(g, 12, NOW)
+  expect(won).toMatchObject({ status: 'won', moves: 4, endedAt: NOW })
+  expect(applyLights(won, 3, NOW)).toBe(won)
+  expect(applyLights(g, 25, NOW)).toBe(g)
+  expect(lookLights(g, 12)).toMatchObject({ text: '#', wide: '■', isOn: true })
+  expect(lookLights(g, 0)).toMatchObject({ text: '.', wide: '・', isOn: false })
+})
+
+// ---------------- 数独 ----------------
+
+test('数独: 完成した盤は行・列・箱に重なりが無く、問題は答えが 1 つ', () => {
+  expect(peers(9, 0)).toHaveLength(20)
+  expect(peers(4, 0).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 8, 12])
+  for (let k = 0; k < 30; k++) expect(isComplete({ size: 4, cells: solutionFor(4, seeded(k)) })).toBe(true)
+  for (let k = 0; k < 10; k++) expect(isComplete({ size: 9, cells: solutionFor(9, seeded(k)) })).toBe(true)
+  const check = (g: Sudoku) => {
+    expect(countSolutions(g.size, g.cells)).toBe(1)
+    g.cells.forEach((v, i) => {
+      expect(g.givens[i]).toBe(v !== 0)
+      if (v !== 0) expect(v).toBe(g.solution[i])
+    })
+    expect(g).toMatchObject({ selected: -1, moves: 0, status: 'play' })
+  }
+  for (let k = 0; k < 30; k++) {
+    const g = newSudoku(4, seeded(k))
+    check(g)
+    expect(g.cells.filter(v => v === 0).length).toBeGreaterThan(4)
+  }
+  for (let k = 0; k < 3; k++) {
+    const g = newSudoku(9, seeded(k))
+    check(g)
+    expect(g.cells.filter(v => v !== 0).length).toBeLessThanOrEqual(36)
+  }
+  // 空の盤は答えがたくさん (2 で打ち切り)
+  expect(countSolutions(4, Array(16).fill(0))).toBe(2)
+})
+
+test('数独: マスを選んで数字を入れ、重なりは印、全部正しく埋まると勝ち', () => {
+  const base = newSudoku(4, seeded(7))
+  const empty = range(16).filter(i => !base.givens[i])
+  const given = range(16).find(i => base.givens[i])!
+  // 初めからある数字は選べない、選ばずに入れても変わらない
+  expect(selectCell(base, given)).toBe(base)
+  expect(applySudoku(base, 1, NOW)).toBe(base)
+  const sel = selectCell(base, empty[0]!)
+  expect(sel.selected).toBe(empty[0])
+  expect(selectCell(sel, empty[0]!).selected).toBe(-1)
+  // 同じ行にある数字を入れると重なりの印
+  const rowMate = peers(4, empty[0]!).find(j => base.givens[j])!
+  const clash = applySudoku(sel, base.cells[rowMate]!, NOW)
+  expect(clash).toMatchObject({ moves: 1, startedAt: NOW })
+  expect(clashes(clash, empty[0]!)).toBe(true)
+  expect(lookSudoku(clash, empty[0]!)).toMatchObject({ isClash: true, isSelected: true, isGiven: false })
+  expect(applySudoku(clash, base.cells[rowMate]!, NOW)).toBe(clash) // 同じ数字
+  expect(applySudoku(clash, 5, NOW)).toBe(clash) // 4x4 に 5 は無い
+  // 0 で消す
+  expect(applySudoku(clash, 0, NOW).cells[empty[0]!]).toBe(0)
+  // 答えのとおりに埋めると勝ち
+  let g = base
+  for (const i of empty) g = applySudoku(selectCell(g, i), base.solution[i]!, NOW + 30_000)
+  expect(g).toMatchObject({ status: 'won', selected: -1, moves: empty.length, endedAt: NOW + 30_000 })
+  expect(selectCell(g, empty[0]!)).toBe(g)
+  expect(lookSudoku(base, given)).toMatchObject({ isGiven: true, text: String(base.cells[given]) })
+  expect(lookSudoku(base, empty[0]!)).toMatchObject({ text: '.', wide: '・' })
+})
+
+// ---------------- 神経衰弱 ----------------
+
+test('神経衰弱: 8 組の札、違う 2 枚は次に押すまで見せ、同じ 2 枚はそろう', () => {
+  const g0 = newMemory(seeded(3))
+  expect(range(8).map(f => g0.cards.filter(c => c === f).length)).toEqual(Array(8).fill(2))
+  // 札の並びを決める: 0,0,1,1,...
+  const g: Memory = { ...g0, cards: range(16).map(i => Math.floor(i / 2)) }
+  const a = applyMemory(g, 0, NOW)
+  expect(a).toMatchObject({ up: [0], moves: 0, startedAt: NOW })
+  expect(applyMemory(a, 0, NOW)).toBe(a) // 表の札をもう一度
+  const miss = applyMemory(a, 2, NOW)
+  expect(miss).toMatchObject({ up: [0, 2], moves: 1 })
+  expect(lookMemory(miss, 0)).toMatchObject({ text: '赤', isMiss: true, isUp: true })
+  expect(lookMemory(miss, 2).text).toBe('青')
+  // 次に押すと 2 枚とも伏せて、押した札だけ表
+  const next = applyMemory(miss, 5, NOW)
+  expect(next.up).toEqual([5])
+  expect(lookMemory(next, 0)).toMatchObject({ text: '##', wide: '■', isUp: false })
+  // 違う 2 枚を見せている時に、その 1 枚を押すと、それが 1 枚目になる
+  expect(applyMemory(miss, 2, NOW).up).toEqual([2])
+  const hit = applyMemory(applyMemory(g, 4, NOW), 5, NOW)
+  expect(hit).toMatchObject({ up: [], moves: 1 })
+  expect(hit.done.filter(Boolean)).toHaveLength(2)
+  expect(lookMemory(hit, 4)).toMatchObject({ text: '緑', isDone: true, isMiss: false })
+  expect(applyMemory(hit, 4, NOW)).toBe(hit) // そろった札
+  // 全部そろうと勝ち
+  let all = g
+  for (const i of range(16)) all = applyMemory(all, i, NOW + 20_000)
+  expect(all).toMatchObject({ status: 'won', moves: 8, endedAt: NOW + 20_000 })
+  expect(applyMemory(all, 0, NOW)).toBe(all)
+  expect(FACES.every(f => [...f].length === 1)).toBe(true)
+})
+
+// ---------------- 記録・見出し ----------------
+
+test('記録: 各ゲームの勝ち・最短手数・最速、古い store は壊さない', () => {
+  // 0.1.x の記録 (puzzles の欄が無い) はそのまま読める
+  expect(statsFromSaved({ best2048: 10, wins2048: 0, winsMines: 1, fastestMines: 5 })).toEqual({ best2048: 10, wins2048: 0, winsMines: 1, fastestMines: 5 })
+  const s1 = addStats(EMPTY_STATS, { puzzle: { kind: 'fifteen', moves: 80, ms: 60_000 } })
+  expect(s1.puzzles).toEqual({ fifteen: { wins: 1, bestMoves: 80, fastest: 60_000 } })
+  const s2 = addStats(s1, { puzzle: { kind: 'fifteen', moves: 95, ms: 40_000 } })
+  expect(s2.puzzles?.fifteen).toEqual({ wins: 2, bestMoves: 80, fastest: 40_000 })
+  const s3 = addStats(s2, { puzzle: { kind: 'sudoku9', moves: 51, ms: 300_000 } })
+  expect(Object.keys(s3.puzzles ?? {}).sort()).toEqual(['fifteen', 'sudoku9'])
+  // 2048 やマインの記録を足しても、ほかのゲームの記録は残る
+  expect(addStats(s3, { winsMines: 1 }).puzzles).toEqual(s3.puzzles)
+  // 壊れた欄は 0、知らないゲームと形の違う物は落とす
+  expect(statsFromSaved({ puzzles: { lights: { wins: 'x', bestMoves: -1, fastest: 9000 }, memory: 3, chess: { wins: 9 } } })).toEqual({
+    ...EMPTY_STATS,
+    puzzles: { lights: { wins: 0, bestMoves: 0, fastest: 9000 } },
+  })
+  expect(statsFromSaved({ puzzles: [1] })).toEqual(EMPTY_STATS)
+  // store に書いた物を読み直しても同じ
+  expect(statsFromSaved(JSON.parse(JSON.stringify(s3)))).toEqual(s3)
+})
+
+test('見出し SVG: 遊び方の一言・手数・クリアと記録。幅を付けない', () => {
+  const stats: GameStats = { ...EMPTY_STATS, puzzles: { fifteen: { wins: 3, bestMoves: 61, fastest: 45_200 } } }
+  const g: Fifteen = { tiles: [...range(14).map(i => i + 1), 0, 15], moves: 0, startedAt: 0, endedAt: 0, status: 'play' }
+  const fresh = fifteenSvg(g, stats)
+  expect(fresh).toMatch(/15 パズル[\s\S]*正しい位置 14 \/ 15[\s\S]*空きの隣を押して[\s\S]*勝ち 3 回 \/ 最短 61 手 \/ 最速 45\.2秒/)
+  expect(fresh).not.toMatch(/<svg[^>]*\swidth=/)
+  const won = fifteenSvg(applyFifteen(g, 15, NOW), stats)
+  expect(won).toMatch(/クリア 0\.0秒 \/ 1 手/)
+  expect(won).toMatch(/values="0;0\.35;0"/)
+  expect(fresh).not.toMatch(/values="0;0\.35;0"/)
+  expect(lightsSvg(newLights(seeded(1)), EMPTY_STATS)).toMatch(/ライツアウト[\s\S]*点灯 \d+ 個[\s\S]*勝ち 0 回</)
+  const sd = newSudoku(4, seeded(2))
+  expect(sudokuSvg(sd, EMPTY_STATS)).toMatch(/数独 4x4[\s\S]*空き \d+ マス/)
+  // 埋まったのに重なっている
+  const full: Sudoku = { ...sd, cells: sd.cells.map(v => v || 1) }
+  expect(sudokuSvg(full, EMPTY_STATS)).toMatch(/同じ数字が重なっています/)
+  expect(memorySvg(newMemory(seeded(1)), EMPTY_STATS)).toMatch(/神経衰弱[\s\S]*そろった 0 \/ 8 組[\s\S]*同じ色の名前/)
+})
+
+// ---------------- 画面 ----------------
+
+/** 盤の Button (key が prefix + 数字) */
+const cellsOf = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string; props: Record<string, unknown> }[]> }, prefix: string) =>
+  (await ui.findAll({ type: 'Button' })).filter(b => new RegExp(`^${prefix}\\d+$`).test(b.key ?? ''))
+/** 画面の桁数 (全角は 2 桁) */
+const cols = (s: string) => [...s].reduce((n, ch) => n + (/[ -~]/.test(ch) ? 1 : 2), 0)
+
+for (const surface of SURFACES) {
+  test(`${surface}: 15 パズルは 16 マスの Button、そろえると記録が残る`, async ($, on) => {
+    const { store, arm, last } = await boot($, on)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.select({ key: 'game', value: 'fifteen' })
+    const cells = await cellsOf(ui, 'f')
+    expect(cells).toHaveLength(16)
+    for (const b of cells) {
+      expect(b.props.plain).toBe(true)
+      expect(String(b.props.label)).toHaveLength(2)
+    }
+    expect(await ui.find({ key: 'new-fifteen' })).toBeDefined()
+    // そろう直前の盤で 15 を滑らせる
+    arm('fifteen', { tiles: [...range(14).map(i => i + 1), 0, 15], moves: 40, startedAt: NOW - 61_000, endedAt: 0, status: 'play' } satisfies Fifteen)
+    await ui.press({ key: 'new-fifteen' })
+    await ui.press({ key: 'f0' }) // 隣でないので動かない
+    expect(last<Fifteen>('fifteen').moves).toBe(40)
+    await ui.press({ key: 'f15' })
+    expect(last<Fifteen>('fifteen').status).toBe('won')
+    expect((store.get('stats') as GameStats).puzzles?.fifteen).toEqual({ wins: 1, bestMoves: 41, fastest: 61_000 })
+    if (surface === 'vscode') expect(String((await ui.find({ type: 'Svg' }))?.props.source)).toMatch(/クリア 61\.0秒 \/ 41 手/)
+    else expect(await ui.find({ type: 'Text', text: 'クリア 61.0秒 / 41 手' })).toBeDefined()
+    // 解いた盤をもう一度押しても数えない
+    await ui.press({ key: 'f14' })
+    expect((store.get('stats') as GameStats).puzzles?.fifteen?.wins).toBe(1)
+  })
+
+  test(`${surface}: ライツアウトは 25 マス、押すと十字が切り替わり、消すと勝ち`, async ($, on) => {
+    const { store, arm, last } = await boot($, on)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.select({ key: 'game', value: 'lights' })
+    expect(await cellsOf(ui, 'l')).toHaveLength(25)
+    arm('lights', { on: press(Array(25).fill(false), 12), moves: 0, startedAt: 0, endedAt: 0, status: 'play' } satisfies Lights)
+    await ui.press({ key: 'new-lights' })
+    const lit = surface === 'terminal' ? '#' : '■'
+    const litCount = async () => (await cellsOf(ui, 'l')).filter(b => b.props.label === lit).length
+    expect(await litCount()).toBe(5)
+    await ui.press({ key: 'l0' })
+    expect(await litCount()).toBe(8)
+    await ui.press({ key: 'l0' })
+    await ui.press({ key: 'l12' })
+    expect(last<Lights>('lights')).toMatchObject({ status: 'won', moves: 3 })
+    expect(await litCount()).toBe(0)
+    expect((store.get('stats') as GameStats).puzzles?.lights).toMatchObject({ wins: 1, bestMoves: 3 })
+  })
+
+  test(`${surface}: 数独はマスを選んで下の数字で入れる。9x9 も 29 桁に収まる`, async ($, on) => {
+    const { store, arm, last } = await boot($, on)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.select({ key: 'game', value: 'sudoku' })
+    expect(await cellsOf(ui, 's')).toHaveLength(16)
+    for (const d of ['d1', 'd2', 'd3', 'd4', 'd0']) expect(await ui.find({ key: d })).toBeDefined()
+    expect(await ui.find({ key: 'd5' })).toBeUndefined()
+    // 1 マスだけ空いた盤
+    const base = newSudoku(4, seeded(11))
+    const hole = 6
+    const one: Sudoku = { ...base, cells: base.solution.map((v, i) => (i === hole ? 0 : v)), givens: range(16).map(i => i !== hole), startedAt: NOW - 12_000 }
+    arm('sudoku', one)
+    await ui.press({ key: 'sudoku-4' })
+    await ui.press({ key: 'd1' }) // 選ぶ前は入らない
+    expect(last<Sudoku>('sudoku').cells[hole]).toBe(0)
+    await ui.press({ key: `s${hole}` })
+    expect(last<Sudoku>('sudoku').selected).toBe(hole)
+    const wrong = (one.solution[hole]! % 4) + 1
+    await ui.press({ key: `d${wrong}` })
+    if (surface === 'vscode') expect(String((await ui.find({ type: 'Svg' }))?.props.source)).toMatch(/同じ数字が重なっています/)
+    else expect(await ui.find({ type: 'Text', text: '同じ数字が重なっています' })).toBeDefined()
+    await ui.press({ key: `d${one.solution[hole]}` })
+    expect(last<Sudoku>('sudoku')).toMatchObject({ status: 'won', moves: 2 })
+    expect((store.get('stats') as GameStats).puzzles?.sudoku4).toEqual({ wins: 1, bestMoves: 2, fastest: 12_000 })
+
+    // 9x9
+    await ui.press({ key: 'sudoku-9' })
+    const cells = await cellsOf(ui, 's')
+    expect(cells).toHaveLength(81)
+    expect(last<Sudoku>('sudoku').size).toBe(9)
+    // 1 行 = 箱 3 つ (中の間 1 桁) + 箱の間 2 桁
+    const row = await ui.find({ key: 's-r0' })
+    expect(row?.props.columnGap).toBe(2)
+    expect((await ui.find({ key: 's-r0g0' }))?.props.columnGap).toBe(1)
+    const width = Math.max(...cells.map(b => cols(String(b.props.label)))) * 9 + 3 * 2 + 2 * 2
+    expect(width).toBeLessThanOrEqual(29)
+    if (surface === 'terminal') expect(width).toBe(19)
+    const tree = await ui.drawn()
+    const size = measure(tree)
+    expect(size.nodes).toBeLessThan(400)
+    expect(size.depth).toBeLessThan(16)
+    expect(JSON.stringify(tree).length).toBeLessThan(60_000)
+    for (const d of range(9)) expect(await ui.find({ key: `d${d + 1}` })).toBeDefined()
+  })
+
+  test(`${surface}: 神経衰弱は 16 枚、違う 2 枚は次に押すまで見せ、全部そろえると勝ち`, async ($, on) => {
+    const { store, arm, last } = await boot($, on)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.select({ key: 'game', value: 'memory' })
+    const closed = surface === 'terminal' ? '##' : '■'
+    const shown = async () => (await cellsOf(ui, 'c')).filter(b => b.props.label !== closed).map(b => b.key)
+    expect(await cellsOf(ui, 'c')).toHaveLength(16)
+    expect(await shown()).toEqual([])
+    const g: Memory = { ...newMemory(seeded(1)), cards: range(16).map(i => Math.floor(i / 2)) }
+    arm('memory', g)
+    await ui.press({ key: 'new-memory' })
+    await ui.press({ key: 'c0' })
+    await ui.press({ key: 'c2' })
+    expect(await shown()).toEqual(['c0', 'c2'])
+    expect((await cellsOf(ui, 'c')).find(b => b.key === 'c0')?.props.label).toBe('赤')
+    await ui.press({ key: 'c1' })
+    expect(await shown()).toEqual(['c1'])
+    for (const i of range(16)) await ui.press({ key: `c${i}` })
+    expect(last<Memory>('memory').status).toBe('won')
+    expect(await shown()).toHaveLength(16)
+    expect((store.get('stats') as GameStats).puzzles?.memory?.wins).toBe(1)
+  })
+}
+
+test('選べるのは 6 つのゲームだけ (知らない値では変えない)', async ($, on) => {
+  await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const sel = await ui.find({ key: 'game' })
+  expect((sel?.props.options as { value: string }[]).map(o => o.value)).toEqual(['2048', 'mines', 'fifteen', 'lights', 'sudoku', 'memory'])
+  await ui.select({ key: 'game', value: 'memory' })
+  expect(await ui.find({ key: 'c0' })).toBeDefined()
+  await ui.select({ key: 'game', value: 'chess' }).catch(() => {})
+  expect(await ui.find({ key: 'c0' })).toBeDefined()
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  await boot($, on, undefined, { theme: () => theme })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/<rect width="360" height="\d+" fill="#ffffff"/)
+  await ui.select({ key: 'game', value: 'lights' })
+  expect(await source()).toMatch(/fill="#ffffff"/)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/fill="#0d1117"/)
+  expect(await source()).not.toMatch(/fill="#ffffff"/)
 })

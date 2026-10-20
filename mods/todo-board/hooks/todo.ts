@@ -1,5 +1,6 @@
 // git grep の出力を表示用のデータに変え、SVG と terminal 用の行を組む。どれも純関数
 import type { TodoFile, TodoItem, TodoKind, TodoPoint, TodoSnapshot } from '../types'
+import { C, HEADER_H, countUp, frame, header } from './style'
 
 type Repo = Extract<TodoSnapshot, { kind: 'repo' }>
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }
@@ -13,21 +14,8 @@ export const TOP = 10
 export const PATTERN = '\\b(TODO|FIXME|HACK|XXX)\\b'
 const KIND_RE = /\b(TODO|FIXME|HACK|XXX)\b/
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
-export const KIND_COLOR: Record<TodoKind, string> = { FIXME: C.red, TODO: C.blue, HACK: C.orange, XXX: C.purple }
-const W = 380
+/** 種類ごとの色(C は今のテーマの色なので、呼ぶたびに引く) */
+export const kindColor = (k: TodoKind) => ({ FIXME: C.red, TODO: C.blue, HACK: C.orange, XXX: C.purple })[k]
 
 const zero = (): Record<TodoKind, number> => ({ FIXME: 0, TODO: 0, HACK: 0, XXX: 0 })
 
@@ -107,9 +95,9 @@ export function headFit(s: string, max: number) {
 const esc = (s: string) => plain(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const base = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
 
-const svgDoc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く) */
+const svgDoc = (h: number, body: string, sub = '', accent = C.blue) =>
+  frame(h + HEADER_H, header('TODO ボード', sub, accent) + `<g transform="translate(0 ${HEADER_H})">${body}</g>`)
 
 function messageSvg(title: string, color: string, sub: string, hint: string) {
   return svgDoc(
@@ -119,8 +107,10 @@ function messageSvg(title: string, color: string, sub: string, hint: string) {
       `<line x1="34" y1="34" x2="34" y2="41" stroke="${color}" stroke-width="2" stroke-linecap="round"/>` +
       `<circle cx="34" cy="46" r="1.5" fill="${color}"/>` +
       `<text x="56" y="45" font-size="15" font-weight="bold" fill="${color}">${esc(title)}</text>` +
-      `<text x="20" y="76" font-size="12" fill="${C.weak}">${esc(tailFit(sub, 52))}</text>` +
-      `<text x="20" y="98" font-size="12" fill="${C.weak}">${esc(headFit(hint, 52))}</text>`,
+      `<text x="20" y="76" font-size="12" fill="${C.dim}">${esc(tailFit(sub, 52))}</text>` +
+      `<text x="20" y="98" font-size="12" fill="${C.dim}">${esc(headFit(hint, 52))}</text>`,
+    '',
+    color,
   )
 }
 
@@ -143,8 +133,8 @@ function trendSvg(history: readonly TodoPoint[], y: number) {
   s +=
     `<line x1="${left}" y1="${top}" x2="${right}" y2="${top}" stroke="${C.line}" stroke-dasharray="2 3"/>` +
     `<line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}" stroke="${C.line}"/>` +
-    `<text x="${left - 6}" y="${top + 4}" font-size="12" fill="${C.weak}" text-anchor="end">${max}</text>` +
-    `<text x="${left - 6}" y="${bottom + 4}" font-size="12" fill="${C.weak}" text-anchor="end">${lo}</text>`
+    `<text x="${left - 6}" y="${top + 4}" font-size="12" fill="${C.dim}" text-anchor="end">${max}</text>` +
+    `<text x="${left - 6}" y="${bottom + 4}" font-size="12" fill="${C.dim}" text-anchor="end">${lo}</text>`
   if (pts.length === 0) return s
   const xy = pts.map((p, i) => `${px(i).toFixed(1)},${py(p.total).toFixed(1)}`)
   const last = pts[pts.length - 1]
@@ -178,24 +168,24 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
   // ── 見出しと合計
   s +=
     `<rect x="8" y="8" width="364" height="56" rx="8" fill="${C.face}" stroke="${C.line}"/>` +
-    `<g stroke="${C.weak}" stroke-width="2" fill="none" stroke-linecap="round">` +
+    `<g stroke="${C.dim}" stroke-width="2" fill="none" stroke-linecap="round">` +
     `<rect x="18" y="20" width="18" height="22" rx="3"/><line x1="23" y1="28" x2="31" y2="28"/><line x1="23" y1="34" x2="29" y2="34"/></g>` +
-    `<text x="46" y="35" font-size="16" font-weight="bold" fill="${C.text}">TODO ボード</text>` +
-    `<text x="46" y="54" font-size="12" fill="${C.weak}">${esc(tailFit(base(snap.cwd), 26))}</text>` +
-    `<text x="350" y="46" font-size="28" font-weight="bold" fill="${C.text}" text-anchor="end">${snap.total}</text>` +
-    `<text x="364" y="46" font-size="12" fill="${C.weak}" text-anchor="end">件</text>`
+    `<text x="46" y="35" font-size="15" font-weight="bold" fill="${C.text}">見つかった印</text>` +
+    `<text x="46" y="54" font-size="12" fill="${C.dim}">${KINDS.join('・')}</text>` +
+    countUp(snap.total, `x="350" y="46" font-size="28" font-weight="bold" fill="${C.text}" text-anchor="end"`) +
+    `<text x="364" y="46" font-size="12" fill="${C.dim}" text-anchor="end">件</text>`
 
   // ── 種類ごとのタイル
   KINDS.forEach((k, i) => {
     const x = 8 + i * 93
     const n = snap.counts[k]
-    const color = KIND_COLOR[k]
+    const color = kindColor(k)
     const ratio = snap.total ? n / snap.total : 0
     s +=
       `<rect x="${x}" y="74" width="85" height="84" rx="6" fill="${C.face}" stroke="${n ? color : C.line}" stroke-opacity="${n ? 0.6 : 1}"/>` +
       `<rect x="${x}" y="74" width="85" height="4" rx="2" fill="${color}"/>` +
       `<text x="${x + 10}" y="96" font-size="12" font-weight="bold" fill="${color}">${k}</text>` +
-      `<text x="${x + 10}" y="134" font-size="${n > 999 ? 20 : 28}" font-weight="bold" fill="${n ? color : C.weak}">${n}</text>` +
+      countUp(n, `x="${x + 10}" y="134" font-size="${n > 999 ? 20 : 28}" font-weight="bold" fill="${n ? color : C.dim}"`, String, 0.1 + i * 0.08) +
       `<rect x="${x + 10}" y="144" width="65" height="5" rx="2.5" fill="${C.bg}"/>` +
       (ratio > 0 ? `<rect x="${x + 10}" y="144" width="${(65 * ratio).toFixed(1)}" height="5" rx="2.5" fill="${color}">${grow('width', 0, Number((65 * ratio).toFixed(1)), i * 0.08)}</rect>` : '')
   })
@@ -204,13 +194,13 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
   let y = 186
   const pts = history.slice(-20)
   s += `<text x="12" y="${y}" font-size="13" font-weight="bold" fill="${C.text}">件数の推移</text>`
-  s += `<text x="368" y="${y}" font-size="12" fill="${C.weak}" text-anchor="end">直近 ${pts.length} 回</text>`
+  s += `<text x="368" y="${y}" font-size="12" fill="${C.dim}" text-anchor="end">直近 ${pts.length} 回</text>`
   y += 10
   s += trendSvg(pts, y)
   y += 112
   const d = delta(pts)
   y += 22
-  if (d === undefined) s += `<text x="12" y="${y}" font-size="12" fill="${C.weak}">ファイルを変えると、読み直した件数が並びます</text>`
+  if (d === undefined) s += `<text x="12" y="${y}" font-size="12" fill="${C.dim}">ファイルを変えると、読み直した件数が並びます</text>`
   else if (d > 0)
     s +=
       `<g><path d="M14 ${y - 11} L26 ${y - 11} L20 ${y - 1} Z" fill="${C.green}"/>` +
@@ -218,16 +208,16 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
       `<text x="32" y="${y}" font-size="13" font-weight="bold" fill="${C.green}">${deltaText(d)}</text>`
   else if (d < 0)
     s += `<path d="M14 ${y - 1} L26 ${y - 1} L20 ${y - 11} Z" fill="${C.orange}"/><text x="32" y="${y}" font-size="13" font-weight="bold" fill="${C.orange}">${deltaText(d)}</text>`
-  else s += `<text x="12" y="${y}" font-size="12" fill="${C.weak}">${deltaText(d)}</text>`
+  else s += `<text x="12" y="${y}" font-size="12" fill="${C.dim}">${deltaText(d)}</text>`
 
   // ── ファイルごとの横棒
   y += 34
   s += `<text x="12" y="${y}" font-size="13" font-weight="bold" fill="${C.text}">多いファイル</text>`
-  if (snap.fileCount > 0) s += `<text x="368" y="${y}" font-size="12" fill="${C.weak}" text-anchor="end">${snap.files.length} / ${snap.fileCount} ファイル</text>`
+  if (snap.fileCount > 0) s += `<text x="368" y="${y}" font-size="12" fill="${C.dim}" text-anchor="end">${snap.files.length} / ${snap.fileCount} ファイル</text>`
   y += 20
-  s += `<g font-size="12" fill="${C.weak}">`
+  s += `<g font-size="12" fill="${C.dim}">`
   KINDS.forEach((k, i) => {
-    s += `<circle cx="${16 + i * 70}" cy="${y - 4}" r="4" fill="${KIND_COLOR[k]}"/><text x="${24 + i * 70}" y="${y}">${k}</text>`
+    s += `<circle cx="${16 + i * 70}" cy="${y - 4}" r="4" fill="${kindColor(k)}"/><text x="${24 + i * 70}" y="${y}">${k}</text>`
   })
   s += `</g>`
   y += 12
@@ -249,7 +239,7 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
       let x = 16
       for (const k of KINDS) {
         const w = (f.byKind[k] / max) * 348
-        if (w > 0) bars += `<rect x="${x.toFixed(1)}" y="${y + 18}" width="${Math.max(1.5, w).toFixed(1)}" height="8" fill="${KIND_COLOR[k]}"/>`
+        if (w > 0) bars += `<rect x="${x.toFixed(1)}" y="${y + 18}" width="${Math.max(1.5, w).toFixed(1)}" height="8" fill="${kindColor(k)}"/>`
         x += w
       }
       y += 32
@@ -261,7 +251,7 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
     s += `<text x="12" y="${y + 12}" font-size="12" fill="${C.yellow}">出力が大きすぎて、途中までしか読めていません</text>`
     y += 20
   }
-  return svgDoc(y + 8, s)
+  return svgDoc(y + 8, s, tailFit(base(snap.cwd), 26))
 }
 
 /** Svg の alt と terminal で使う文の行 */

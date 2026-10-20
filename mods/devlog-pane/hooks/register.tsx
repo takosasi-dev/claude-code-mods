@@ -1,5 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
+import { followTheme, readTheme } from './style'
 import { fit, jstDate } from './text'
 
 const PANE = 'devlog'
@@ -25,7 +26,10 @@ async function refresh($: EngineInterface, logDir: string) {
 export const register: Register = (on, options) => {
   const logDir = String(options.logDir ?? '').trim().replace(/[\\/]+$/, '')
 
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     await $.command.register({ name: 'devlog', description: '今日の開発ログをペインに表示' }).catch(() => {})
     // ペインが開いている間だけ 30 秒ごとに確認
     $.clock.every(30_000, async () => {

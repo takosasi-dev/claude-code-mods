@@ -16,8 +16,11 @@ export type ModHubCommand = {
   plugin: string
 }
 
-/** カテゴリー別か名前順か */
-export type ModHubSort = 'category' | 'name'
+/** カテゴリー別か名前順か最近開いた順か */
+export type ModHubSort = 'category' | 'name' | 'recent'
+
+/** 起動ボタンを押した記録 (新しい順、最大 20) */
+export type ModHubRecent = { name: string; at: number }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -28,6 +31,12 @@ declare module 'claude-code' {
       notice: string
       /** 並べ方。$.store の 'sort' にも残す */
       sort: ModHubSort
+      /** 検索欄の文字 (セッションの間だけ) */
+      filter: string
+      /** 固定した mod の名前。$.store の 'pins' にも残す */
+      pins: string[]
+      /** 最近開いた mod。$.store の 'recent' にも残す */
+      recent: ModHubRecent[]
     }
   }
 }

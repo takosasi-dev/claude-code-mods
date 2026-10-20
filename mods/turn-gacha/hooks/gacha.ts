@@ -1,52 +1,53 @@
 // カードの表・抽選・保存の形・SVG と terminal 用の行。どれも純関数
-import type { GachaDraw, GachaRarity, GachaSave } from '../types'
+import type { GachaCard, GachaDraw, GachaRarity, GachaSave, GachaSlot } from '../types'
+import { C, esc, header, HEADER_H } from './style'
 
-export type Card = { id: string; rarity: GachaRarity; name: string; line: string }
+export type Card = GachaCard & { line: string }
 
-const c = (id: string, rarity: GachaRarity, name: string, line: string): Card => ({ id, rarity, name, line })
+const c = (id: string, rarity: GachaRarity, slot: GachaSlot, name: string, line: string): Card => ({ id, rarity, slot, name, line })
 
-/** カードの表 (N 16 / R 12 / SR 8 / SSR 4)。id は保存に使うので変えない */
+/** カードの表 (N 16 / R 12 / SR 8 / SSR 4)。id は保存に使うので変えない。slot は dev-rpg で装備する枠 */
 export const CARDS: readonly Card[] = [
-  c('n01', 'N', '消し忘れた console.log', '本番で誰かが読んでいる'),
-  c('n02', 'N', 'TODO: あとで直す', 'あとは来ない'),
-  c('n03', 'N', '行末の空白', '差分にだけ姿を見せる'),
-  c('n04', 'N', 'タブと空白の混在', '静かな戦争'),
-  c('n05', 'N', '謎の数字 42', '意味は誰も知らない'),
-  c('n06', 'N', 'コメントアウトした旧コード', 'いつか使うかもしれない'),
-  c('n07', 'N', '開きっぱなしのタブ 50 枚', 'どれが本物の資料か'),
-  c('n08', 'N', '長すぎる変数名', '説明だけはできている'),
-  c('n09', 'N', 'final_v3_本当の最終版', '最終版はまだ先'),
-  c('n10', 'N', '再起動で直ったバグ', '原因は闇の中'),
-  c('n11', 'N', '読まれない README', '書いた日が一番輝いていた'),
-  c('n12', 'N', '黄色い警告', 'エラーじゃないから'),
-  c('n13', 'N', '空っぽの catch', '何も起きなかったことにする'),
-  c('n14', 'N', 'どこかで見たコード片', '出どころは覚えていない'),
-  c('n15', 'N', '終わらないビルド', 'お茶を淹れる時間'),
-  c('n16', 'N', '使われない import', 'いつかの名残'),
-  c('r01', 'R', 'きれいな差分', 'レビューが一瞬で終わる'),
-  c('r02', 'R', '型エラー 0 件', '赤い波線が消えた'),
-  c('r03', 'R', '意味のあるコミットメッセージ', '半年後の自分が喜ぶ'),
-  c('r04', 'R', 'すぐ終わった CI', '待つ間もなかった'),
-  c('r05', 'R', '見つかった再現手順', '半分は直ったも同然'),
-  c('r06', 'R', '消せたデッドコード', '消すのは書くより気持ちいい'),
-  c('r07', 'R', '効いたキャッシュ', '二回目は一瞬'),
-  c('r08', 'R', '読める関数名', 'コメントがいらない'),
-  c('r09', 'R', '通った lint', '文句ひとつない'),
-  c('r10', 'R', '小さなプルリク', '誰もこわがらない'),
-  c('r11', 'R', '先に書いたテスト', '迷わず進める'),
-  c('r12', 'R', '当たった仮説', 'ログが味方した'),
-  c('s01', 'SR', '一行で直ったバグ', '三時間さがして一行'),
-  c('s02', 'SR', '競合なしのマージ', '何事もなかったように混ざる'),
-  c('s03', 'SR', 'ぴたりと決まった名前', '命名の神が降りてきた'),
-  c('s04', 'SR', '金曜夕方の無事なデプロイ', '誰も呼び出されない週末'),
-  c('s05', 'SR', '二倍速くなった処理', '計測は嘘をつかない'),
-  c('s06', 'SR', '静かなビルドログ', '警告がひとつも出ない'),
-  c('s07', 'SR', '一度で通ったレビュー', '承認がすぐに付いた'),
-  c('s08', 'SR', '説明書どおりに動いた API', '書いてある通りだった'),
-  c('x01', 'SSR', '一発で通ったテスト', '書いて走らせたら全部緑'),
-  c('x02', 'SSR', 'つかまえた幽霊バグ', 'たまにしか出ないあの子をついに'),
-  c('x03', 'SSR', '千行の削除', '機能はそのまま、コードは半分'),
-  c('x04', 'SSR', '障害ゼロの一年', 'ずっと平和だった'),
+  c('n01', 'N', 'weapon', '消し忘れた console.log', '本番で誰かが読んでいる'),
+  c('n02', 'N', 'charm', 'TODO: あとで直す', 'あとは来ない'),
+  c('n03', 'N', 'armor', '行末の空白', '差分にだけ姿を見せる'),
+  c('n04', 'N', 'armor', 'タブと空白の混在', '静かな戦争'),
+  c('n05', 'N', 'charm', '謎の数字 42', '意味は誰も知らない'),
+  c('n06', 'N', 'weapon', 'コメントアウトした旧コード', 'いつか使うかもしれない'),
+  c('n07', 'N', 'charm', '開きっぱなしのタブ 50 枚', 'どれが本物の資料か'),
+  c('n08', 'N', 'weapon', '長すぎる変数名', '説明だけはできている'),
+  c('n09', 'N', 'charm', 'final_v3_本当の最終版', '最終版はまだ先'),
+  c('n10', 'N', 'weapon', '再起動で直ったバグ', '原因は闇の中'),
+  c('n11', 'N', 'charm', '読まれない README', '書いた日が一番輝いていた'),
+  c('n12', 'N', 'armor', '黄色い警告', 'エラーじゃないから'),
+  c('n13', 'N', 'armor', '空っぽの catch', '何も起きなかったことにする'),
+  c('n14', 'N', 'weapon', 'どこかで見たコード片', '出どころは覚えていない'),
+  c('n15', 'N', 'armor', '終わらないビルド', 'お茶を淹れる時間'),
+  c('n16', 'N', 'charm', '使われない import', 'いつかの名残'),
+  c('r01', 'R', 'weapon', 'きれいな差分', 'レビューが一瞬で終わる'),
+  c('r02', 'R', 'armor', '型エラー 0 件', '赤い波線が消えた'),
+  c('r03', 'R', 'charm', '意味のあるコミットメッセージ', '半年後の自分が喜ぶ'),
+  c('r04', 'R', 'armor', 'すぐ終わった CI', '待つ間もなかった'),
+  c('r05', 'R', 'weapon', '見つかった再現手順', '半分は直ったも同然'),
+  c('r06', 'R', 'weapon', '消せたデッドコード', '消すのは書くより気持ちいい'),
+  c('r07', 'R', 'armor', '効いたキャッシュ', '二回目は一瞬'),
+  c('r08', 'R', 'charm', '読める関数名', 'コメントがいらない'),
+  c('r09', 'R', 'armor', '通った lint', '文句ひとつない'),
+  c('r10', 'R', 'charm', '小さなプルリク', '誰もこわがらない'),
+  c('r11', 'R', 'weapon', '先に書いたテスト', '迷わず進める'),
+  c('r12', 'R', 'charm', '当たった仮説', 'ログが味方した'),
+  c('s01', 'SR', 'weapon', '一行で直ったバグ', '三時間さがして一行'),
+  c('s02', 'SR', 'armor', '競合なしのマージ', '何事もなかったように混ざる'),
+  c('s03', 'SR', 'charm', 'ぴたりと決まった名前', '命名の神が降りてきた'),
+  c('s04', 'SR', 'armor', '金曜夕方の無事なデプロイ', '誰も呼び出されない週末'),
+  c('s05', 'SR', 'weapon', '二倍速くなった処理', '計測は嘘をつかない'),
+  c('s06', 'SR', 'armor', '静かなビルドログ', '警告がひとつも出ない'),
+  c('s07', 'SR', 'charm', '一度で通ったレビュー', '承認がすぐに付いた'),
+  c('s08', 'SR', 'charm', '説明書どおりに動いた API', '書いてある通りだった'),
+  c('x01', 'SSR', 'weapon', '一発で通ったテスト', '書いて走らせたら全部緑'),
+  c('x02', 'SSR', 'charm', 'つかまえた幽霊バグ', 'たまにしか出ないあの子をついに'),
+  c('x03', 'SSR', 'weapon', '千行の削除', '機能はそのまま、コードは半分'),
+  c('x04', 'SSR', 'armor', '障害ゼロの一年', 'ずっと平和だった'),
 ]
 
 export const RARITIES: readonly GachaRarity[] = ['SSR', 'SR', 'R', 'N']
@@ -138,27 +139,33 @@ export function rarityStats(s: GachaSave) {
 
 export const ownedKinds = (s: GachaSave) => CARDS.filter(x => s.book[x.id]).length
 
+/** 他の mod に見せるカードの表 (一言は除く)。state の cards に置く */
+export const PUBLIC_CARDS: GachaCard[] = CARDS.map(({ id, rarity, slot, name }) => ({ id, rarity, slot, name }))
+
+// ── 図鑑の実績 (図鑑から毎回数えるので、保存はしない)
+
+export type BookGoal = { id: string; name: string; hint: string; test: (s: GachaSave) => boolean }
+const hasAll = (s: GachaSave, r: GachaRarity) => CARDS.every(x => x.rarity !== r || s.book[x.id])
+
+export const BOOK_GOALS: readonly BookGoal[] = [
+  { id: 'first', name: 'はじめの一枚', hint: '1 枚引く', test: s => ownedKinds(s) >= 1 },
+  { id: 'ssr-first', name: '虹色の出会い', hint: 'SSR を 1 枚引く', test: s => CARDS.some(x => x.rarity === 'SSR' && s.book[x.id]) },
+  { id: 'n-all', name: 'N コンプ', hint: 'N を 16 種そろえる', test: s => hasAll(s, 'N') },
+  { id: 'half', name: '図鑑の半分', hint: '20 種そろえる', test: s => ownedKinds(s) >= 20 },
+  { id: 'sr-all', name: 'SR コンプ', hint: 'SR を 8 種そろえる', test: s => hasAll(s, 'SR') },
+  { id: 'all', name: '全 40 種', hint: '全部そろえる', test: s => ownedKinds(s) >= CARDS.length },
+]
+
+export const goalsMet = (s: GachaSave) => BOOK_GOALS.filter(g => g.test(s))
+
 // ── 描画
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-  gold: '#f2cc60',
-}
-/** レア度の色 (SSR は虹の代わりの紫) */
-export const RARITY_COLOR: Record<GachaRarity, string> = { N: C.weak, R: C.blue, SR: C.yellow, SSR: C.purple }
+/** 絵の中身として決まっている色 (金の枠の真ん中) */
+const GOLD_MID = '#f2cc60'
+/** レア度の色 (SSR は虹の代わりの紫)。テーマで変わるので呼ぶたびに読む */
+export const rarityColor = (r: GachaRarity) => ({ N: C.weak, R: C.blue, SR: C.yellow, SSR: C.purple })[r]
 const W = 380
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const wide = (ch: string) => /[⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch)
 const units = (s: string) => [...s].reduce((n, ch) => n + (wide(ch) ? 2 : 1), 0)
 
@@ -193,7 +200,7 @@ const RAINBOW =
   `</linearGradient>`
 const GOLD =
   `<linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">` +
-  `<stop offset="0" stop-color="${C.yellow}"/><stop offset="0.5" stop-color="${C.gold}"/><stop offset="1" stop-color="${C.yellow}"/></linearGradient>`
+  `<stop offset="0" stop-color="${C.yellow}"/><stop offset="0.5" stop-color="${GOLD_MID}"/><stop offset="1" stop-color="${C.yellow}"/></linearGradient>`
 // 光の筋 (SR と SSR)
 const SHINE =
   `<linearGradient id="shine" x1="0" y1="0" x2="1" y2="0">` +
@@ -201,7 +208,7 @@ const SHINE =
   `<stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>`
 const GLOW = `<filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="7"/></filter>`
 
-const strokeOf = (r: GachaRarity) => (r === 'SSR' ? 'url(#rainbow)' : r === 'SR' ? 'url(#gold)' : RARITY_COLOR[r])
+const strokeOf = (r: GachaRarity) => (r === 'SSR' ? 'url(#rainbow)' : r === 'SR' ? 'url(#gold)' : rarityColor(r))
 
 /** 4 つの角を持つきらめき */
 const sparkle = (x: number, y: number, size: number, begin: number) =>
@@ -235,7 +242,7 @@ export function cardSvg(draw: GachaDraw | undefined): string {
   }
   const r = card.rarity
   const stroke = strokeOf(r)
-  const color = RARITY_COLOR[r]
+  const color = rarityColor(r)
   const isHigh = r === 'SR' || r === 'SSR'
   // カードの中身は中心 (0,0) から描き、外の g でめくる
   let body = ''
@@ -315,7 +322,7 @@ export function statsSvg(s: GachaSave, left: number): string {
     `<text x="70" y="136" font-size="12" fill="${C.weak}" text-anchor="middle">${owned} / ${CARDS.length} 種</text>`
   rarityStats(s).forEach((x, i) => {
     const y = 22 + i * 26
-    const col = RARITY_COLOR[x.rarity]
+    const col = rarityColor(x.rarity)
     b +=
       `<rect x="136" y="${y}" width="36" height="18" rx="4" fill="none" stroke="${col}"/>` +
       `<text x="154" y="${y + 13}" font-size="12" font-weight="bold" fill="${col}" text-anchor="middle">${x.rarity}</text>` +
@@ -336,7 +343,7 @@ export function statsSvg(s: GachaSave, left: number): string {
   for (const d of s.history) {
     const card = cardOf(d.cardId)
     if (!card) continue
-    const col = RARITY_COLOR[card.rarity]
+    const col = rarityColor(card.rarity)
     b +=
       `<rect x="12" y="${y + 4}" width="36" height="18" rx="4" fill="${col}" opacity="0.2"/>` +
       `<text x="30" y="${y + 17}" font-size="12" font-weight="bold" fill="${col}" text-anchor="middle">${card.rarity}</text>` +
@@ -347,12 +354,26 @@ export function statsSvg(s: GachaSave, left: number): string {
   return svgDoc(y + 10, '', b)
 }
 
-/** 図鑑の一覧。持っていないカードは ？？？ */
+/** 装備の枠の一文字 (dev-rpg で装備できる場所) */
+export const SLOT_GLYPH: Record<GachaSlot, string> = { weapon: '武', armor: '防', charm: '守' }
+
+/** 図鑑の一覧。上に図鑑の実績、持っていないカードは ？？？ */
 export function bookSvg(s: GachaSave): string {
-  let b = ''
-  let y = 8
+  const met = new Set(goalsMet(s).map(g => g.id))
+  let b = header('図鑑', `${ownedKinds(s)} / ${CARDS.length} 種、実績 ${met.size} / ${BOOK_GOALS.length}`, C.purple)
+  let y = HEADER_H + 8
+  BOOK_GOALS.forEach((g, i) => {
+    const cx = i % 2 === 0 ? 8 : 192
+    const cy = y + Math.floor(i / 2) * 42
+    const isMet = met.has(g.id)
+    b +=
+      `<rect x="${cx}" y="${cy}" width="180" height="36" rx="6" fill="${isMet ? C.face : C.bg}" stroke="${isMet ? C.yellow : C.line}"${isMet ? '' : ' stroke-dasharray="4 3"'}/>` +
+      `<text x="${cx + 10}" y="${cy + 16}" font-size="12" font-weight="bold" fill="${isMet ? C.yellow : C.weak}">${esc(g.name)}</text>` +
+      `<text x="${cx + 10}" y="${cy + 30}" font-size="12" fill="${C.weak}">${isMet ? '達成' : esc(g.hint)}</text>`
+  })
+  y += Math.ceil(BOOK_GOALS.length / 2) * 42 + 6
   for (const x of rarityStats(s)) {
-    const col = RARITY_COLOR[x.rarity]
+    const col = rarityColor(x.rarity)
     b +=
       `<text x="12" y="${y + 18}" font-size="14" font-weight="bold" fill="${col}">${x.rarity}</text>` +
       `<text x="368" y="${y + 18}" font-size="12" fill="${C.weak}" text-anchor="end">${x.owned} / ${x.all} 種</text>`
@@ -363,7 +384,8 @@ export function bookSvg(s: GachaSave): string {
       const has = s.book[k.id]
       b += `<rect x="${cx}" y="${cy}" width="180" height="30" rx="6" fill="${has ? C.face : C.bg}" stroke="${has ? col : C.line}"/>`
       b += has
-        ? `<text x="${cx + 8}" y="${cy + 20}" font-size="12" fill="${C.text}">${esc(wrap(k.name, 21)[0] ?? '')}${wrap(k.name, 21).length > 1 ? '…' : ''}</text>` +
+        ? `<text x="${cx + 8}" y="${cy + 20}" font-size="12" fill="${C.text}">${esc(wrap(k.name, 19)[0] ?? '')}${wrap(k.name, 19).length > 1 ? '…' : ''}</text>` +
+          `<text x="${cx + 150}" y="${cy + 20}" font-size="12" fill="${C.weak}" text-anchor="end">${SLOT_GLYPH[k.slot]}</text>` +
           `<text x="${cx + 172}" y="${cy + 20}" font-size="12" fill="${col}" text-anchor="end">${has.count}</text>`
         : `<text x="${cx + 8}" y="${cy + 20}" font-size="12" fill="${C.weak}">？？？</text>`
     })
@@ -403,10 +425,14 @@ export function statsLines(s: GachaSave, left: number): Line[] {
 
 /** Svg の alt と terminal で使う、図鑑の一覧の行 */
 export function bookLines(s: GachaSave): Line[] {
-  return CARDS.map(k => {
+  const met = new Set(goalsMet(s).map(g => g.id))
+  const goals: Line[] = BOOK_GOALS.map(g =>
+    met.has(g.id) ? { text: `実績 ${g.name} 達成`, color: 'yellow' } : { text: `実績 ${g.name} まだ(${g.hint})`, isDim: true },
+  )
+  return [...goals, ...CARDS.map((k): Line => {
     const has = s.book[k.id]
     return has
       ? { text: `${k.rarity.padEnd(3)} ${k.name} ${has.count}枚`, color: TERM_COLOR[k.rarity] }
       : { text: `${k.rarity.padEnd(3)} ？？？`, isDim: true }
-  })
+  })]
 }

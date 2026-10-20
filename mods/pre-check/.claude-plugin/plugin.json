@@ -1,6 +1,6 @@
 {
   "name": "pre-check",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "/precheck でコミット前に変更の要約・秘密情報らしい文字列・衝突の印・大きいファイル・テストを信号で並べ、全部緑なら「コミットしてよさそう」と出す",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

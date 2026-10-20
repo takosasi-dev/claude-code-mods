@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { addDay, fillText, fortune, isResult, jstDate, paneLines, paneSvg, toDays } from './omikuji'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'code-omikuji'
 const TITLE = 'おみくじ'
@@ -111,8 +112,11 @@ async function fill($: EngineInterface) {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /omikuji が拒まれたら (組み込みと被ったら) /code-omikuji にする
     const got = await $.command.register({ name: 'omikuji', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'omikuji'

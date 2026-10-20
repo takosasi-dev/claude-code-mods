@@ -1,4 +1,5 @@
 import type { FaceBandMood, FaceBandNow } from '../types'
+import { C } from './style'
 
 // 制御文字を落とす(エンジンは制御文字を含む Text の子や alt を拒み、帯が描かれなくなる)
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
@@ -25,13 +26,9 @@ export const FACE_TEXT: Record<FaceBandMood, string> = {
   sad: '(T_T)',
 }
 
-const COLOR: Record<FaceBandMood, string> = {
-  idle: '#8b949e',
-  think: '#bc8cff',
-  tool: '#58a6ff',
-  happy: '#3fb950',
-  sad: '#d29922',
-}
+// 気分ごとの色。テーマに付いていくよう、呼ぶたびに C から読む
+const colorOf = (mood: FaceBandMood) =>
+  ({ idle: C.dim, think: C.purple, tool: C.blue, happy: C.green, sad: C.yellow })[mood]
 
 /** 顔の横の 2 行目: ツール名 */
 export const subLine = (now: FaceBandNow) =>
@@ -58,29 +55,29 @@ ${[0, 1, 2]
   tool: c => `
 <path d="M33 36 h10 M53 36 h10" stroke="${c}" stroke-width="3" stroke-linecap="round"/>
 <ellipse cx="48" cy="52" rx="5" ry="3.5" fill="none" stroke="${c}" stroke-width="2.5"/>
-<path d="M70 14 q-4 7 0 9 q4 -2 0 -9 z" fill="#58a6ff"><animateTransform attributeName="transform" type="translate" values="0 0;0 14" dur="1.2s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;1;0" dur="1.2s" repeatCount="indefinite"/></path>
+<path d="M70 14 q-4 7 0 9 q4 -2 0 -9 z" fill="${C.blue}"><animateTransform attributeName="transform" type="translate" values="0 0;0 14" dur="1.2s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;1;0" dur="1.2s" repeatCount="indefinite"/></path>
 <g><animateTransform attributeName="transform" type="rotate" values="-18 82 66;18 82 66;-18 82 66" dur="0.6s" repeatCount="indefinite"/>
-<rect x="78" y="48" width="8" height="18" rx="4" fill="#161b22" stroke="${c}" stroke-width="2"/></g>`,
+<rect x="78" y="48" width="8" height="18" rx="4" fill="${C.face}" stroke="${c}" stroke-width="2"/></g>`,
   // 答え終わり: にっこり
   happy: c => `
 <path d="M33 38 q5 -8 10 0 M53 38 q5 -8 10 0" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"/>
 <path d="M37 47 q11 12 22 0" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"/>
-<circle cx="29" cy="46" r="3.5" fill="#f78166" opacity="0.5"/><circle cx="67" cy="46" r="3.5" fill="#f78166" opacity="0.5"/>
+<circle cx="29" cy="46" r="3.5" fill="${C.orange}" opacity="0.5"/><circle cx="67" cy="46" r="3.5" fill="${C.orange}" opacity="0.5"/>
 <animateTransform attributeName="transform" type="translate" values="0 0;0 -3;0 0" dur="0.8s" repeatCount="3"/>`,
   // エラー/中断: しょんぼり
   sad: c => `
 <path d="M33 34 l10 4 M63 34 l-10 4" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>
 <circle cx="38" cy="40" r="2.5" fill="${c}"/><circle cx="58" cy="40" r="2.5" fill="${c}"/>
 <path d="M39 56 q9 -8 18 0" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"/>
-<ellipse cx="34" cy="48" rx="1.8" ry="3" fill="#58a6ff"><animate attributeName="cy" values="45;56" dur="1.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0" dur="1.4s" repeatCount="indefinite"/></ellipse>`,
+<ellipse cx="34" cy="48" rx="1.8" ry="3" fill="${C.blue}"><animate attributeName="cy" values="45;56" dur="1.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0" dur="1.4s" repeatCount="indefinite"/></ellipse>`,
 }
 
 /** 顔の Svg。気分だけで決まる (ツール名や一言は別の Text にして、アニメを止めない) */
 export const faceSvg = (mood: FaceBandMood) => {
-  const c = COLOR[mood]
+  const c = colorOf(mood)
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 72">
 <g>
-<circle cx="48" cy="40" r="28" fill="#161b22" stroke="${c}" stroke-width="2.5"/>
+<circle cx="48" cy="40" r="28" fill="${C.face}" stroke="${c}" stroke-width="2.5"/>
 ${parts[mood](c)}
 </g>
 </svg>`

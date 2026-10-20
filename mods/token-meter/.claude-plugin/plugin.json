@@ -1,6 +1,6 @@
 {
   "name": "token-meter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "/tokens でターンごとのトークン数とキャッシュの当たり率をペインに SVG で表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

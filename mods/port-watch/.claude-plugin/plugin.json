@@ -1,6 +1,6 @@
 {
   "name": "port-watch",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "/ports で待ち受けている TCP のポートとプロセスを並べ、このセッションで増えた物に印を付ける。開発サーバーは 2 回押しで止められる",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

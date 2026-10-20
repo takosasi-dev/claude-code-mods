@@ -212,3 +212,19 @@ test('/tokens が拒まれたら /token-meter で開き、/tokens には触ら�
     text: '組み込みの tokens',
   })
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  bottom(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  await turn($, 't1', { input: 30, output: 0, read: 70, write: 0 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await src(ui, /^合計/)).toMatch(/fill="#ffffff"/)
+  expect(await src(ui, /^合計/)).toContain('fill="#1a7f37" text-anchor="middle" font-weight="bold">70%<') // 明るい緑
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await src(ui, /^合計/)).toMatch(/fill="#0d1117"/)
+  expect(await src(ui, /^合計/)).toContain(`fill="${GREEN}" text-anchor="middle" font-weight="bold">70%<`)
+})

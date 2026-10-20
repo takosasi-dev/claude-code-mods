@@ -1,6 +1,6 @@
 {
   "name": "ci-pane",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "/ci で今のブランチの PR・チェック・GitHub Actions の結果を gh で読み、ペインに SVG で出す (読むだけ)",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

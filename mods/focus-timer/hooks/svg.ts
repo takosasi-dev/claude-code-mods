@@ -1,27 +1,7 @@
 // SVG を文字列で組む関数。描画面は <img> なので動きは SMIL だけ。
 // 描き直しは状態が変わる時と 1 分ごとだけなので、その間のリングの減りと秒の表示は SMIL に任せる
 import type { FocusTimerMode } from '../types'
-
-const C = {
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  green: '#3fb950',
-  red: '#f85149',
-  orange: '#f78166',
-}
-
-const W = 360
-const FONT = 'font-family="sans-serif"'
-
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-const svg = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" ${FONT}>` +
-  `<rect x="0.5" y="0.5" width="${W - 1}" height="${h - 1}" rx="12" fill="${C.face}" stroke="${C.line}"/>` +
-  body +
-  `</svg>`
+import { C, HEADER_H, W, esc, fadeIn, frame, header } from './style'
 
 const text = (x: number, y: number, s: string, size: number, fill: string, extra = '') =>
   `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${extra}>${esc(s)}</text>`
@@ -46,10 +26,11 @@ export type RingView = {
 /** 秒の表示を何秒先まで SMIL で用意するか (描き直しは 1 分ごと。遅れても止まらないよう余裕を持たせる) */
 const TICK_AHEAD = 75
 
+/** 1 分ごとに描き直すので、減っていく輪と秒のほかに動きは足さない (mod-guide 2 節) */
 export const ringSvg = (v: RingView) => {
-  const H = 330
+  const H = 330 + HEADER_H
   const cx = W / 2
-  const cy = 178
+  const cy = 178 + HEADER_H
   const r = 112
   const len = 2 * Math.PI * r
   const isBreak = v.mode === 'break'
@@ -65,8 +46,8 @@ export const ringSvg = (v: RingView) => {
   // 状態の札
   const pillW = v.status.length * 15 + 28
   const pill =
-    `<rect x="${cx - pillW / 2}" y="16" width="${pillW}" height="26" rx="13" fill="none" stroke="${accent}"/>` +
-    text(cx, 34, v.status, 14, accent, 'text-anchor="middle" font-weight="bold"')
+    `<rect x="${cx - pillW / 2}" y="${HEADER_H + 14}" width="${pillW}" height="26" rx="13" fill="none" stroke="${accent}"/>` +
+    text(cx, HEADER_H + 32, v.status, 14, accent, 'text-anchor="middle" font-weight="bold"')
 
   // 走っている間は外側の輪がゆっくり呼吸する
   const halo = v.isRunning
@@ -110,30 +91,27 @@ export const ringSvg = (v: RingView) => {
 
   const sub = text(cx, cy + 50, `${isBreak ? '休憩' : '集中'} ${Math.round(v.totalMs / 60_000)} 分`, 14, C.dim, 'text-anchor="middle"')
 
-  return svg(H, defs + pill + halo + ring + clock + sub)
+  return frame(H, defs + header('集中タイマー', '', accent) + pill + halo + ring + clock + sub)
 }
 
-/** 今日の完了本数を丸の列で。4 個ずつ枠を増やす */
+/** 今日の完了本数を丸の列で。4 個ずつ枠を増やす。本数が変わる時だけ描き直すので、塗った丸は順にふわっと出す */
 export const todaySvg = (count: number) => {
   const perRow = 10
+  const gap = 32
   const slots = Math.max(4, Math.ceil(count / 4) * 4)
   const rows = Math.ceil(slots / perRow)
-  const H = 62 + rows * 30
+  const top = HEADER_H + 34
+  const H = top + (rows - 1) * 30 + 26
+  const x0 = (W - (perRow - 1) * gap) / 2
   const dots = Array.from({ length: slots }, (_, i) => {
-    const x = 34 + (i % perRow) * 32
-    const y = 66 + Math.floor(i / perRow) * 30
+    const x = x0 + (i % perRow) * gap
+    const y = top + Math.floor(i / perRow) * 30
     return i < count
-      ? `<circle cx="${x}" cy="${y}" r="10" fill="url(#dot)"/>`
+      ? fadeIn(`<circle cx="${x}" cy="${y}" r="10" fill="url(#dot)"/>`, i * 0.06)
       : `<circle cx="${x}" cy="${y}" r="9.5" fill="none" stroke="${C.line}" stroke-width="2"/>`
   }).join('')
   const defs =
     `<defs><linearGradient id="dot" x1="0" y1="0" x2="1" y2="1">` +
     `<stop offset="0" stop-color="${C.red}"/><stop offset="1" stop-color="${C.orange}"/></linearGradient></defs>`
-  return svg(
-    H,
-    defs +
-      text(16, 30, '今日の集中', 14, C.text, 'font-weight="bold"') +
-      text(W - 16, 30, `${count} 本`, 14, count > 0 ? C.orange : C.dim, 'text-anchor="end" font-weight="bold"') +
-      dots,
-  )
+  return frame(H, defs + header('今日の集中', `${count} 本`, count > 0 ? C.orange : C.dim) + dots)
 }

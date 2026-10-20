@@ -322,3 +322,20 @@ test('terminal の残りは「約 N 分」(1 分ごとの描き直しで古い�
   await clock.advance(MIN)
   expect((await term.find({ type: 'Text', text: /残り/ }))?.text).toBe('集中中  残り約 24 分')
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on)
+  bottom(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(String((await svgOf(ui, /残り/))?.source)).toMatch(/fill="#ffffff"/)
+  expect(String((await svgOf(ui, /^今日の完了/))?.source)).toMatch(/fill="#ffffff"/)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(String((await svgOf(ui, /残り/))?.source)).toMatch(/fill="#0d1117"/)
+  expect(String((await svgOf(ui, /^今日の完了/))?.source)).toMatch(/fill="#0d1117"/)
+})

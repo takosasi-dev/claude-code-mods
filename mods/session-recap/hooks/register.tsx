@@ -3,6 +3,7 @@ import type { EngineInterface, ModelForkResult, Register } from 'claude-code'
 
 import type { RecapSummary, RecapTurn } from '../types'
 import { busySvg, clock, dur, head, hm, timelineSvg, totalsSvg } from './svg'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'session-recap'
 const TITLE = 'ふりかえり'
@@ -90,8 +91,10 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
 
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     // /recap は組み込み (2.1.300 で確認) と被って拒まれる。取れなければ /session-recap にする
     const description = 'セッションのふりかえりをペインに表示'
     const got = await $.command.register({ name: 'recap', description }).catch(() => undefined)

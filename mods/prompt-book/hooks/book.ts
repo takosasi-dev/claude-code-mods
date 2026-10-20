@@ -1,5 +1,6 @@
 // 依頼文の並び・絞り込み・読み戻しと画面の SVG。$ に触らない純関数だけ置く
 import type { PromptBookItem, PromptBookSort } from '../types'
+import { C, countUp, esc, fadeIn, frame, growBar, header } from './style'
 
 export const MAX_TAGS = 3
 const MAX_TAG_LEN = 16
@@ -101,16 +102,8 @@ export function summaryLines(items: readonly PromptBookItem[]): string[] {
   ]
 }
 
-const BG = '#0d1117'
-const FACE = '#161b22'
-const LINE = '#30363d'
-const FG = '#c9d1d9'
-const DIM = '#8b949e'
-const GREEN = '#3fb950'
-const BLUE = '#58a6ff'
-const COLORS = ['#58a6ff', '#3fb950', '#d29922', '#bc8cff', '#f78166']
-
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+/** 上位の棒の色。テーマに付いていくよう、呼ぶたびに C から読む */
+const barColors = () => [C.blue, C.green, C.yellow, C.purple, C.orange]
 
 /** 12px の文字幅のおおよそ (全角 12、半角 7) */
 const textWidth = (s: string, size = 12) => [...s].reduce((w, c) => w + ((c.codePointAt(0) ?? 0) > 0xff ? size : size * 0.6), 0)
@@ -125,76 +118,75 @@ export function chartSvg(items: readonly PromptBookItem[], selectedTag: string, 
   const parts: string[] = []
   const top = topUses(items)
   const max = Math.max(1, ...top.map(p => p.uses))
+  const colors = barColors()
 
-  parts.push(`<text x="${pad}" y="32" font-size="18" font-weight="bold" fill="${FG}">プロンプト帳</text>`)
-  if (!isFlashing) parts.push(`<text x="${W - pad}" y="32" font-size="13" fill="${DIM}" text-anchor="end">${items.length} 件</text>`)
+  // 光っている間は右上を「保存しました」に譲る
+  parts.push(header('プロンプト帳', isFlashing ? '' : `${items.length} 件`, C.blue))
 
   let y = 66
-  parts.push(`<text x="${pad}" y="${y}" font-size="12" fill="${DIM}">よく使う上位 ${top.length} 件</text>`)
+  parts.push(`<text x="${pad}" y="${y}" font-size="12" fill="${C.dim}">よく使う上位 ${top.length} 件</text>`)
   y += 10
   if (top.length === 0) {
-    parts.push(`<text x="${pad}" y="${y + 18}" font-size="13" fill="${DIM}">まだ使った依頼文はありません</text>`)
+    parts.push(`<text x="${pad}" y="${y + 18}" font-size="13" fill="${C.dim}">まだ使った依頼文はありません</text>`)
     y += 32
   }
   const barX = 168
   const barMax = W - pad - barX - 34
   top.forEach((p, i) => {
     const w = Math.max(4, Math.round((p.uses / max) * barMax))
-    const color = COLORS[i % COLORS.length]
+    const color = colors[i % colors.length]!
     const cy = y + 6 + i * 28
     parts.push(
-      `<text x="${pad}" y="${cy + 12}" font-size="13" fill="${FG}">${esc(short(p.title, 11))}</text>`,
-      `<rect x="${barX}" y="${cy}" width="${barMax}" height="16" rx="4" fill="${FACE}"/>`,
-      `<rect x="${barX}" y="${cy}" width="${w}" height="16" rx="4" fill="${color}"><animate attributeName="width" from="0" to="${w}" dur="0.7s" begin="${(i * 0.1).toFixed(1)}s" fill="freeze"/></rect>`,
-      `<text x="${W - pad}" y="${cy + 13}" font-size="12" fill="${DIM}" text-anchor="end">${p.uses}回</text>`,
+      `<text x="${pad}" y="${cy + 12}" font-size="13" fill="${C.text}">${esc(short(p.title, 11))}</text>`,
+      `<rect x="${barX}" y="${cy}" width="${barMax}" height="16" rx="4" fill="${C.face}"/>`,
+      growBar(barX, cy, w, 16, color, i * 0.1),
+      countUp(p.uses, `x="${W - pad}" y="${cy + 13}" font-size="12" fill="${C.dim}" text-anchor="end"`, n => `${n}回`, i * 0.1),
     )
   })
   y += top.length * 28 + 22
 
   const tags = tagCounts(items)
-  parts.push(`<text x="${pad}" y="${y}" font-size="12" fill="${DIM}">タグごとの件数</text>`)
+  parts.push(`<text x="${pad}" y="${y}" font-size="12" fill="${C.dim}">タグごとの件数</text>`)
   y += 10
   if (tags.length === 0) {
-    parts.push(`<text x="${pad}" y="${y + 18}" font-size="13" fill="${DIM}">タグはまだありません</text>`)
+    parts.push(`<text x="${pad}" y="${y + 18}" font-size="13" fill="${C.dim}">タグはまだありません</text>`)
     y += 30
   } else {
     let x = pad
     const shown = tags.slice(0, MAX_CHIPS)
     const rest = tags.length - shown.length
     const chips = [...shown.map(t => ({ label: `${short(t.tag, 10)} ${t.count}`, isOn: t.tag === selectedTag })), ...(rest > 0 ? [{ label: `ほか ${rest}`, isOn: false }] : [])]
-    for (const { label, isOn } of chips) {
+    chips.forEach(({ label, isOn }, i) => {
       const w = Math.ceil(textWidth(label)) + 18
       if (x + w > W - pad && x > pad) {
         x = pad
         y += 30
       }
+      // チップは少しずつずらして出す (多い時も 0.4 秒で出そろう)
       parts.push(
-        `<rect x="${x}" y="${y}" width="${w}" height="22" rx="11" fill="${isOn ? BLUE : FACE}" stroke="${isOn ? BLUE : LINE}"/>`,
-        `<text x="${x + w / 2}" y="${y + 15}" font-size="12" fill="${isOn ? BG : FG}" text-anchor="middle">${esc(label)}</text>`,
+        fadeIn(
+          `<rect x="${x}" y="${y}" width="${w}" height="22" rx="11" fill="${isOn ? C.blue : C.face}" stroke="${isOn ? C.blue : C.line}"/>` +
+            `<text x="${x + w / 2}" y="${y + 15}" font-size="12" fill="${isOn ? C.bg : C.text}" text-anchor="middle">${esc(label)}</text>`,
+          0.3 + Math.min(i, 10) * 0.04,
+        ),
       )
       x += w + 6
-    }
+    })
     y += 34
   }
 
   if (isFlashing) {
     parts.push(
+      `<defs><filter id="glow" x="-30%" y="-80%" width="160%" height="260%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`,
       `<g filter="url(#glow)">`,
-      `<rect x="${W - pad - 128}" y="12" width="128" height="28" rx="14" fill="${FACE}" stroke="${GREEN}" stroke-width="2">`,
+      `<rect x="${W - pad - 128}" y="8" width="128" height="28" rx="14" fill="${C.face}" stroke="${C.green}" stroke-width="2">`,
       `<animate attributeName="stroke-width" values="2;5;2" dur="0.8s" repeatCount="3"/>`,
       `</rect>`,
-      `<text x="${W - pad - 64}" y="31" font-size="13" font-weight="bold" fill="${GREEN}" text-anchor="middle">保存しました</text>`,
+      `<text x="${W - pad - 64}" y="27" font-size="13" font-weight="bold" fill="${C.green}" text-anchor="middle">保存しました</text>`,
       `<animate attributeName="opacity" values="0;1;1;1;0.85" dur="2.4s" fill="freeze"/>`,
       `</g>`,
     )
   }
 
-  const H = y
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="sans-serif">`,
-    `<defs><filter id="glow" x="-30%" y="-80%" width="160%" height="260%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`,
-    `<rect width="${W}" height="${H}" rx="10" fill="${BG}"/>`,
-    ...parts,
-    '</svg>',
-  ].join('')
+  return frame(y, parts.join(''))
 }

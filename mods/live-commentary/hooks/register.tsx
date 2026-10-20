@@ -4,7 +4,8 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { LiveCommentaryClock, LiveCommentaryLine, LiveCommentaryScore } from '../types'
 import type { Scene, Style } from './phrases'
 import { KIND, PHRASES, duration, fileOf, fill, pickIndex, sceneOf, toStyle } from './phrases'
-import { KIND_COLOR, boardSvg, clockLabel, stadiumSvg, tickerSvg } from './svg'
+import { KIND_THEME, boardSvg, clockLabel, stadiumSvg, tickerSvg } from './svg'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'live-commentary'
 const TITLE = '実況席'
@@ -77,6 +78,7 @@ const openPane = async ($: $) => {
 
 export const register: Register = (on, options) => {
   style = toStyle(options.style)
+  followTheme(on)
 
   on('session.start', async ($, e, next) => {
     // /jikkyo が拒まれたら (組み込みと被ったら) /live-commentary にする
@@ -86,6 +88,7 @@ export const register: Register = (on, options) => {
     const saved = await $.store.get(STORE_KEY).catch(() => undefined)
     await update($, ON, () => saved !== false)
     $.clock.every(1000, () => void tick($).catch(() => {}))
+    await readTheme($)
     return next(e)
   })
 
@@ -171,7 +174,7 @@ export const register: Register = (on, options) => {
             <Text bold>{`実況席 (${style}) ${isOn ? '実況中' : '実況オフ'}`}</Text>
             <Text>{scoreText}</Text>
             <Text dimColor>{clockLabel(clock)}</Text>
-            {line !== null && <Text bold color={KIND_COLOR[line.kind]}>{line.text}</Text>}
+            {line !== null && <Text bold color={KIND_THEME[line.kind]}>{line.text}</Text>}
           </Box>
         )}
         <Box flexDirection="row" gap={1}>
@@ -181,7 +184,7 @@ export const register: Register = (on, options) => {
         <Box key="log" flexDirection="column">
           <Text dimColor>{`実況ログ ${log.length} 行 (新しい順)`}</Text>
           {log.map(l => (
-            <Text color={l.kind === 'error' ? KIND_COLOR.error : undefined} dimColor={l.kind === 'play'}>
+            <Text color={l.kind === 'error' ? KIND_THEME.error : undefined} dimColor={l.kind === 'play'}>
               {l.text}
             </Text>
           ))}

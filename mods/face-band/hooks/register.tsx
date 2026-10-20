@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { FaceBandMood, FaceBandNow } from '../types'
+import { followTheme, readTheme } from './style'
 import { FACE_TEXT, IDLE, clean, endWord, faceAlt, faceSvg, subLine } from './face'
 
 const NOW = atom({ plugin: 'face-band', key: 'now' } as const, IDLE)
@@ -34,7 +35,10 @@ const toggle = async ($: $) => {
 const drawsSomething = (tree: RenderElement) => tree.type !== 'engine'
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     const started = await next(e)
     const got = await $.command.register({ name: 'face', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'face'

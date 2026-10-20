@@ -273,3 +273,19 @@ test('顔の SVG は viewBox だけで、気分ごとに違う', () => {
     expect(s).not.toMatch(/<svg[^>]* width=/)
   }
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  setup(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await begin($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(await shown(ui)).toContain('fill="#f6f8fa" stroke="#656d76"') // 顔の面と、待ちの顔の明るい灰の縁
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  await ui.unmount()
+  // setup が ui.invalidate を受け止めて描き直さないので、付け直して見る
+  const again = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(await shown(again)).toContain('fill="#161b22" stroke="#8b949e"')
+})

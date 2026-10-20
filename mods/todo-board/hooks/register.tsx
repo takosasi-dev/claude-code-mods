@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { TodoFilter, TodoItem, TodoSnapshot } from '../types'
-import { KINDS, KIND_COLOR, PATTERN, causePrompt, fixPrompt, headFit, itemId, paneLines, paneSvg, parseGrep } from './todo'
+import { KINDS, PATTERN, causePrompt, fixPrompt, headFit, itemId, kindColor, paneLines, paneSvg, parseGrep } from './todo'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'todo-board'
 const TITLE = 'TODO'
@@ -102,8 +103,10 @@ const loc = (it: TodoItem) => `${it.path}:${it.line}`
 const body = (it: TodoItem) => it.text.slice(it.text.indexOf(it.kind) + it.kind.length).replace(/^[\s:：(（)）\]-]+/, '') || it.text
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /todos が拒まれたら (組み込みと被ったら) /todo-board にする
     const got = await $.command.register({ name: 'todos', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'todos'
@@ -151,7 +154,7 @@ export const register: Register = on => {
           ) : null}
           {open ? (
             <Box key="detail" flexDirection="column">
-              <Text bold color={KIND_COLOR[open.kind]}>{`${open.kind}  ${loc(open)}`}</Text>
+              <Text bold color={kindColor(open.kind)}>{`${open.kind}  ${loc(open)}`}</Text>
               <Text>{open.text}</Text>
               <Button key="fix" label={`この ${open.kind} を片付けて`} variant="primary" onPress={() => void fill($, fixPrompt(open))} />
               <Button key="cause" label={`この ${open.kind} の原因を調べて`} onPress={() => void fill($, causePrompt(open))} />
@@ -161,7 +164,7 @@ export const register: Register = on => {
           <Box key="items" flexDirection="column">
             {shown.map(it => (
               <Button key={`item:${itemId(it)}`} plain onPress={() => void update($, SELECTED, () => itemId(it))}>
-                <Text color={KIND_COLOR[it.kind]}>{it.kind}</Text> {loc(it)} <Text dimColor>{headFit(body(it), 40)}</Text>
+                <Text color={kindColor(it.kind)}>{it.kind}</Text> {loc(it)} <Text dimColor>{headFit(body(it), 40)}</Text>
               </Button>
             ))}
             {shown.length === 0 && <Text dimColor>この種類はありません</Text>}

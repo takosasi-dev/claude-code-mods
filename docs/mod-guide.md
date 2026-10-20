@@ -96,6 +96,37 @@ SVG の地は自前で塗ります。このリポジトリでは GitHub Dark 系
 
 画面のラベルやボタンに絵文字は使いません。
 
+### 共通の見た目(`hooks/style.ts`)
+
+mod は 1 本ずつ別々に入れる物なので、共通のライブラリを import できません。色と部品は正本 `shared/style.ts` に 1 枚だけ書き、各 mod の `hooks/style.ts` に写して持ちます。
+
+```sh
+node tools/copy_shared.mts           # 正本を全 mod に写す
+node tools/copy_shared.mts --check   # 写しがずれていたら名前を出して止まる(公開の前に)
+```
+
+- 色は `C.bg` `C.text` `C.blue` などで書きます。`C` は今のテーマの色を指します
+- 部品: `frame(h, body)`(380 幅の地)、`header(title, sub, accent)`(見出し帯)、`panel`、動きの `growBar` `growColumn` `fadeIn` `countUp`(数字が増える)
+- 動きは 1 回きり(`fill="freeze"`)にします。README の画像を作る `tools/shots.mts` が終わりの値で撮ります
+
+### 明るいテーマ
+
+SVG は `<img>` として描かれるので、中の色はテーマに付いていきません。読めるのは Claude Code の `/config` の theme だけです(VS Code の配色は mod から読めません)。theme が `light` で始まる時に明るい色にします。
+
+```ts
+import { followTheme, readTheme } from './style'
+
+export const register: Register = on => {
+  followTheme(on) // /config で theme が変わったら色を替えて描き直す
+  on('session.start', async ($, e, next) => {
+    await readTheme($) // 今の theme を読む
+    return next(e)
+  })
+}
+```
+
+同じイベントに matcher の無いフックを 2 つ置くと、エンジンは mod の読み込みを拒みます。`readTheme` は自分の `session.start` の中で呼んでください。Text と Box の色は `success` `error` `subtle` などテーマの名前で書くと、そのまま付いていきます。
+
 ## 8. 確かめ方
 
 ```sh

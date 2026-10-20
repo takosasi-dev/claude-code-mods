@@ -220,3 +220,19 @@ test('帯を描く別の mod が下にいれば、その帯も自分の下に並
     await ui.unmount()
   }
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  setup(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(await shown(ui)).toContain('fill="#f6f8fa"') // 帯の面は明るい灰
+  expect(await shown(ui)).toContain('stop-color="#0969da"') // 流れる光は明るい青
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await shown(ui)).toContain('fill="#161b22"')
+  expect(await shown(ui)).toContain('stop-color="#58a6ff"')
+})

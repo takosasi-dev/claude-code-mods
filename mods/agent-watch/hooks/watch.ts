@@ -1,5 +1,6 @@
 // 記録を合わせる純関数と、ペインの SVG。描画面は <img> なので SMIL だけで動かす
 import type { AgentWatchRecord, AgentWatchStatus } from '../types'
+import { C, HEADER_H, W, clean, esc, frame, header } from './style'
 
 /** $.agent.list() の 1 件のうち使う所 */
 export type ListedAgent = { id: string; type: string; description: string; status: AgentWatchStatus }
@@ -8,24 +9,8 @@ export type Agents = Record<string, AgentWatchRecord>
 /** 持っておく記録の数。超えたら終わった物の古い方から捨てる */
 export const KEEP = 30
 
-export const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-}
-
-/** 制御文字を落とし、タブと改行は空白 1 つに。エンジンは制御文字を含む Text の子や alt を拒み、ペインが閉じる */
-export const clean = (s: string) =>
-  s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[\t\n\r]+/g, ' ')
-
-export const esc = (s: string) =>
-  clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+// clean (制御文字を落とす) と esc は style.ts の物。register が ./watch から読むので出し直す
+export { clean, esc }
 
 export const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 2)}..` : s)
 
@@ -163,26 +148,28 @@ export const elapsedOf = (r: AgentWatchRecord, now: number) =>
   r.endedAt === undefined ? now - r.startedAt : r.durationMs > 0 ? r.durationMs : r.endedAt - r.startedAt
 
 export const STATUS_WORD: Record<Kind, string> = { run: '実行中', wait: '待ち', done: '終わり', fail: '失敗', stop: '止めた' }
-export const KIND_COLOR: Record<Kind, string> = { run: C.blue, wait: C.yellow, done: C.green, fail: C.red, stop: C.dim }
+/** 状態の色。テーマに付いていくよう読むたびに C から引く */
+export const KIND_COLOR: Record<Kind, string> = {
+  get run() { return C.blue },
+  get wait() { return C.yellow },
+  get done() { return C.green },
+  get fail() { return C.red },
+  get stop() { return C.dim },
+}
 
 /** 名前の行に出す見出し。種類が無ければ (不明) */
 export const titleOf = (r: AgentWatchRecord) => r.type || '(種類不明)'
 
 // ---- SVG ----
 
-const W = 360
+// ペインは一覧を読むたび・ツールを呼ぶたびに描き直すので、流れる縞と点滅のほかに動きは足さない (mod-guide 2 節)
 const X0 = 16
 const BW = W - 32
-const FONT = 'font-family="sans-serif"'
+/** 見出しの下から中身を始める y */
+const TOP = HEADER_H + 12
 
 const text = (x: number, y: number, s: string, size: number, fill: string, extra = '') =>
   `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${extra}>${esc(s)}</text>`
-
-const svg = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" ${FONT}>` +
-  `<rect x="0.5" y="0.5" width="${W - 1}" height="${h - 1}" rx="12" fill="${C.face}" stroke="${C.line}"/>` +
-  body +
-  `</svg>`
 
 export type PaneView = {
   shown: readonly AgentWatchRecord[]
@@ -198,14 +185,14 @@ const tiles = (c: Counts, now: number) => {
   const tw = (BW - 20) / 3
   const tile = (i: number, label: string, n: number, edge: string, isHot: boolean) => {
     const x = X0 + i * (tw + 10)
-    const y = 44
+    const y = TOP
     const pulse =
       isHot && i === 0
         ? `<circle cx="${x + tw - 14}" cy="${y + 18}" r="4" fill="${edge}">` +
           `<animate attributeName="opacity" values="1;0.2;1" dur="1.2s" begin="${phase(now, 1200)}" repeatCount="indefinite"/></circle>`
         : ''
     return (
-      `<rect x="${x}" y="${y}" width="${tw}" height="64" rx="8" fill="${C.bg}" stroke="${edge}" stroke-width="1.5"/>` +
+      `<rect x="${x}" y="${y}" width="${tw}" height="64" rx="8" fill="${C.face}" stroke="${edge}" stroke-width="1.5"/>` +
       `<rect x="${x + 10}" y="${y}" width="${tw - 20}" height="3" fill="${edge}"/>` +
       pulse +
       text(x + 10, y + 22, label, 12, C.dim) +
@@ -233,15 +220,14 @@ const ROW = 74
 
 export const paneSvg = (v: PaneView) => {
   const head =
-    text(X0, 28, 'サブエージェント', 14, C.text, 'font-weight="bold"') +
-    text(W - 16, 28, v.viewing ? `表示中: ${cut(v.viewing, 20)}` : '表示中: メイン', 12, v.viewing ? C.blue : C.dim, 'text-anchor="end"') +
+    header('サブエージェント', v.viewing ? `表示中: ${cut(v.viewing, 20)}` : '表示中: メイン', v.viewing ? C.purple : C.blue) +
     tiles(v.counts, v.now) +
-    text(X0, 128, `ツールの呼び出し 計 ${v.counts.tools}  /  ツールのエラー 計 ${v.counts.errors}`, 12, C.dim)
+    text(X0, TOP + 84, `ツールの呼び出し 計 ${v.counts.tools}  /  ツールのエラー 計 ${v.counts.errors}`, 12, C.dim)
 
   const rows = v.shown.slice(0, KEEP)
   if (rows.length === 0) {
     const empty = v.hidden > 0 ? `終わった物を隠しています (${v.hidden} 体)` : 'サブエージェントはまだいません'
-    return svg(196, head + text(W / 2, 170, empty, 13, C.dim, 'text-anchor="middle"'))
+    return frame(TOP + 152, head + text(W / 2, TOP + 126, empty, 13, C.dim, 'text-anchor="middle"'))
   }
 
   const t0 = Math.min(...rows.map(r => r.startedAt))
@@ -252,7 +238,7 @@ export const paneSvg = (v: PaneView) => {
 
   const body = rows
     .map((r, i) => {
-      const y = 146 + i * ROW
+      const y = TOP + 102 + i * ROW
       const kind = kindOf(r.status)
       const color = KIND_COLOR[kind]
       const x = xOf(r.startedAt)
@@ -261,7 +247,7 @@ export const paneSvg = (v: PaneView) => {
         text(X0, y + 14, cut(titleOf(r), 18), 13, color, 'font-weight="bold"') +
         text(W - 16, y + 14, `${dur(elapsedOf(r, v.now))}  ツール ${r.tools}`, 12, C.text, 'text-anchor="end"') +
         text(X0, y + 31, cut(r.description || '(説明なし)', 27), 12, C.dim) +
-        `<rect x="${X0}" y="${y + 39}" width="${BW}" height="10" rx="3" fill="${C.bg}"/>` +
+        `<rect x="${X0}" y="${y + 39}" width="${BW}" height="10" rx="3" fill="${C.face}"/>` +
         band(x, y + 39, w, kind, v.now) +
         `<text x="${X0}" y="${y + 64}" font-size="12" fill="${C.dim}"><tspan fill="${color}">${STATUS_WORD[kind]}</tspan>` +
         `  最後 ${esc(cut(r.lastTool || 'なし', 16))}  ` +
@@ -270,7 +256,7 @@ export const paneSvg = (v: PaneView) => {
     })
     .join('')
 
-  const axisY = 146 + rows.length * ROW + 4
+  const axisY = TOP + 102 + rows.length * ROW + 4
   const axis =
     `<line x1="${X0}" y1="${axisY}" x2="${X0 + BW}" y2="${axisY}" stroke="${C.line}"/>` +
     text(X0, axisY + 18, '始まり', 12, C.dim) +
@@ -278,5 +264,5 @@ export const paneSvg = (v: PaneView) => {
     text(W - 16, axisY + 18, isLive ? '今' : '最後', 12, C.dim, 'text-anchor="end"') +
     (v.hidden > 0 ? text(X0, axisY + 38, `終わった物を ${v.hidden} 体隠しています`, 12, C.dim) : '')
 
-  return svg(axisY + (v.hidden > 0 ? 50 : 30), head + body + axis)
+  return frame(axisY + (v.hidden > 0 ? 50 : 30), head + body + axis)
 }

@@ -1,30 +1,16 @@
 // SVG を文字列で組む関数。描画面は <img> なので SMIL だけで動かす
 import type { CcDashCall } from '../types'
+import { C, HEADER_H, W, clean, countUp, esc, frame, growBar, header } from './style'
 
-export const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
-// ツールの色。赤はエラー専用なので外す
-export const TOOL_COLORS = [C.blue, C.green, C.purple, C.orange, C.yellow]
+// ツールの色。赤はエラー専用なので外す。テーマに付いていくよう、要素を読むたびに C から引く
+// (配列の形のままにしておく。tools/shots.mts が TOOL_COLORS[i % TOOL_COLORS.length] と読む)
+const TOOL_KEYS = ['blue', 'green', 'purple', 'orange', 'yellow'] as const
+export const TOOL_COLORS: readonly string[] = TOOL_KEYS.reduce(
+  (a, k, i) => Object.defineProperty(a, i, { get: () => C[k], enumerable: true }),
+  [] as string[],
+)
 
-const W = 360
-const FONT = 'font-family="sans-serif"'
-
-/** 制御文字を落とす。エンジンは制御文字を含む Text の子や alt を拒み、SVG も壊れる */
-export const clean = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-
-export const esc = (s: string) =>
-  clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+export { clean, esc }
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 2)}..` : s)
 
@@ -57,20 +43,14 @@ export const left = (iso: unknown, now: number) => {
   return d > 0 ? `あと${d}日${h}時間` : h > 0 ? `あと${h}時間${m}分` : `あと${m}分`
 }
 
-const svg = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" ${FONT}>` +
-  `<rect x="0.5" y="0.5" width="${W - 1}" height="${h - 1}" rx="12" fill="${C.face}" stroke="${C.line}"/>` +
-  body +
-  `</svg>`
-
 const text = (x: number, y: number, s: string, size: number, fill: string, extra = '') =>
   `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${extra}>${esc(s)}</text>`
 
-const title = (s: string, right = '', rightFill: string = C.dim) =>
-  text(16, 28, s, 14, C.text, 'font-weight="bold"') +
-  (right ? text(W - 16, 28, right, 12, rightFill, 'text-anchor="end"') : '')
+/** 見出しの下から中身を始める y */
+const TOP = HEADER_H + 12
 
 // ---- 概要 ----
+// 概要はツールを呼ぶたびに描き直す(数字が変わる)ので、動きは足さない (mod-guide 2 節)
 
 export type Overview = { elapsedMs: number; turns: number; tools: number; errors: number; isRunning: boolean }
 
@@ -86,17 +66,17 @@ export const overviewSvg = (o: Overview) => {
   const th = 74
   const tile = (i: number, label: string, value: string, edge: string, valueFill: string = C.text) => {
     const x = 16 + (i % 2) * (tw + 12)
-    const y = 44 + Math.floor(i / 2) * (th + 12)
+    const y = TOP + Math.floor(i / 2) * (th + 12)
     return (
-      `<rect x="${x}" y="${y}" width="${tw}" height="${th}" rx="8" fill="${C.bg}" stroke="${edge}" stroke-width="1.5"/>` +
+      `<rect x="${x}" y="${y}" width="${tw}" height="${th}" rx="8" fill="${C.face}" stroke="${edge}" stroke-width="1.5"/>` +
       `<rect x="${x + 10}" y="${y}" width="${tw - 20}" height="3" fill="${edge}"/>` +
       text(x + 12, y + 24, label, 12, C.dim) +
       text(x + 12, y + 60, value, 28, valueFill, 'font-weight="bold"')
     )
   }
-  return svg(
-    44 + th * 2 + 12 + 16,
-    title('セッション') +
+  return frame(
+    TOP + th * 2 + 12 + 16,
+    header('セッション', '', o.isRunning ? C.green : C.blue) +
       pulse +
       tile(0, '経過 (時:分)', clock(o.elapsedMs), C.blue) +
       tile(1, 'ターン', String(o.turns), C.green) +
@@ -107,16 +87,17 @@ export const overviewSvg = (o: Overview) => {
 
 export const turnColor = (ms: number) => (ms > 300_000 ? C.red : ms > 120_000 ? C.yellow : C.blue)
 
+/** ターンが終わった時だけ中身が変わるので、棒は左から順に伸ばす */
 export const turnsSvg = (durations: number[]) => {
-  const h = 210
+  const h = 222
   const recent = durations.slice(-20)
   const last = recent[recent.length - 1]
   if (last === undefined) {
-    return svg(h, title('直近20ターンの所要時間') + text(W / 2, 120, 'まだ完了したターンがありません', 13, C.dim, 'text-anchor="middle"'))
+    return frame(h, header('直近20ターンの所要時間') + text(W / 2, 132, 'まだ完了したターンがありません', 13, C.dim, 'text-anchor="middle"'))
   }
-  const x0 = 48
-  const top = 48
-  const base = 168
+  const x0 = 52
+  const top = TOP + 4
+  const base = 180
   const plotH = base - top
   const max = Math.max(...recent, 1000)
   const slot = (W - 16 - x0) / 20
@@ -134,18 +115,19 @@ export const turnsSvg = (durations: number[]) => {
       const isLast = i === recent.length - 1
       const color = turnColor(ms)
       const op = isLast || color !== C.blue ? 1 : 0.45
+      const begin = `begin="${(i * 0.03).toFixed(2)}s"`
       return (
         `<rect x="${x}" y="${base - bh}" width="${bw}" height="${bh}" rx="2" fill="${color}" opacity="${op}">` +
-        `<animate attributeName="height" from="0" to="${bh}" dur="0.7s" fill="freeze"/>` +
-        `<animate attributeName="y" from="${base}" to="${base - bh}" dur="0.7s" fill="freeze"/></rect>` +
+        `<animate attributeName="height" from="0" to="${bh}" ${begin} dur="0.6s" fill="freeze"/>` +
+        `<animate attributeName="y" from="${base}" to="${base - bh}" ${begin} dur="0.6s" fill="freeze"/></rect>` +
         (isLast ? `<rect x="${x - 2}" y="${base + 4}" width="${bw + 4}" height="3" rx="1.5" fill="${color}"/>` : '')
       )
     })
     .join('')
   const avg = recent.reduce((a, b) => a + b, 0) / recent.length
-  return svg(
+  return frame(
     h,
-    title('直近20ターンの所要時間', `最新 ${dur(last)}`, turnColor(last)) +
+    header('直近20ターンの所要時間', `最新 ${dur(last)}`, turnColor(last)) +
       text(x0 - 6, top + 4, dur(max), 12, C.dim, 'text-anchor="end"') +
       text(x0 - 6, base, '0', 12, C.dim, 'text-anchor="end"') +
       `<line x1="${x0}" y1="${top}" x2="${W - 16}" y2="${top}" stroke="${C.line}"/>` +
@@ -153,7 +135,7 @@ export const turnsSvg = (durations: number[]) => {
       guide(120_000, C.yellow) +
       guide(300_000, C.red) +
       bars +
-      text(16, 196, `平均 ${dur(avg)}  /  2分超は黄、5分超は赤`, 12, C.dim),
+      text(16, 208, `平均 ${dur(avg)}  /  2分超は黄、5分超は赤`, 12, C.dim),
   )
 }
 
@@ -161,44 +143,43 @@ export const turnsSvg = (durations: number[]) => {
 
 export const toolBarsSvg = (top: [string, number][], total: number, colorOf: (tool: string) => string) => {
   const row = 28
-  const h = 48 + Math.max(1, top.length) * row + 12
+  const h = TOP + Math.max(1, top.length) * row + 8
   if (top.length === 0) {
-    return svg(h + 20, title('ツール別の呼び出し回数') + text(W / 2, 80, 'まだ呼び出しがありません', 13, C.dim, 'text-anchor="middle"'))
+    return frame(h + 20, header('ツール別の呼び出し回数') + text(W / 2, 92, 'まだ呼び出しがありません', 13, C.dim, 'text-anchor="middle"'))
   }
   const max = Math.max(...top.map(([, n]) => n))
   const bx = 124
   const bmax = W - bx - 56
   const rows = top
     .map(([tool, n], i) => {
-      const y = 48 + i * row
+      const y = TOP + i * row
       const w = Math.max(3, (n / max) * bmax)
-      const color = colorOf(tool)
       return (
         text(16, y + 15, cut(shortTool(tool), 12), 12, C.text) +
-        `<rect x="${bx}" y="${y + 2}" width="${w}" height="16" rx="3" fill="${color}">` +
-        `<animate attributeName="width" from="0" to="${w}" dur="0.6s" fill="freeze"/></rect>` +
+        growBar(bx, y + 2, w, 16, colorOf(tool), i * 0.05) +
         text(bx + w + 6, y + 15, String(n), 12, C.dim)
       )
     })
     .join('')
-  return svg(h, title('ツール別の呼び出し回数', `計 ${total}回`) + rows)
+  return frame(h, header('ツール別の呼び出し回数', `計 ${total}回`) + rows)
 }
 
+/** 実行中は 30 秒ごとに描き直すので、流れる縞のほかに動きは足さない */
 export const timelineSvg = (calls: CcDashCall[], now: number, colorOf: (tool: string) => string) => {
   const row = 20
   const list = calls.slice(-30)
-  const h = 48 + Math.max(1, list.length) * row + 16
+  const h = TOP + Math.max(1, list.length) * row + 20
   if (list.length === 0) {
-    return svg(h + 20, title('直近30回の呼び出し') + text(W / 2, 80, 'まだ呼び出しがありません', 13, C.dim, 'text-anchor="middle"'))
+    return frame(h + 20, header('直近30回の呼び出し') + text(W / 2, 92, 'まだ呼び出しがありません', 13, C.dim, 'text-anchor="middle"'))
   }
   const len = (c: CcDashCall) => Math.max(0, (c.end ?? now) - c.start)
   const max = Math.max(...list.map(len), 1)
-  const bmax = 190
+  const bmax = 210
   const running = list.filter(c => c.end === undefined).length
   const errors = list.filter(c => c.isError).length
   const bands = list
     .map((c, i) => {
-      const y = 44 + i * row
+      const y = TOP + i * row
       const w = Math.max(3, (len(c) / max) * bmax)
       const isRunning = c.end === undefined
       const color = c.isError ? C.red : isRunning ? C.blue : colorOf(c.tool)
@@ -213,7 +194,7 @@ export const timelineSvg = (calls: CcDashCall[], now: number, colorOf: (tool: st
     })
     .join('')
   const right = [running ? `実行中 ${running}` : '', errors ? `失敗 ${errors}` : ''].filter(Boolean).join(' / ')
-  return svg(h, title('直近30回の呼び出し', right, errors ? C.red : C.blue) + bands + text(16, h - 10, '上が古く下が新しい。幅は所要時間', 12, C.dim))
+  return frame(h, header('直近30回の呼び出し', right, errors ? C.red : C.blue) + bands + text(16, h - 10, '上が古く下が新しい。幅は所要時間', 12, C.dim))
 }
 
 // ---- 使用量 ----
@@ -222,28 +203,29 @@ export type Gauge = { label: string; pct: number; left: string }
 
 export const gaugeColor = (pct: number) => (pct > 80 ? C.red : pct > 50 ? C.yellow : C.green)
 
+/** 30 秒ごとに読み直すが、source が変わるのは残りの分が変わる時だけ。輪と数字は 1 回だけ伸びる */
 export const gaugesSvg = (gauges: Gauge[], footer: string) => {
-  const h = 196
+  const h = 214
   const col = W / gauges.length
   const r = 38
   const circ = 2 * Math.PI * r
   const rings = gauges
     .map((g, i) => {
       const cx = col * i + col / 2
-      const cy = 88
+      const cy = 132
       const p = Math.min(100, Math.max(0, g.pct))
       const d = (circ * p) / 100
       const color = gaugeColor(p)
       return (
-        text(cx, 30, cut(g.label, 9), 12, C.text, 'text-anchor="middle" font-weight="bold"') +
+        text(cx, 74, cut(g.label, 9), 12, C.text, 'text-anchor="middle" font-weight="bold"') +
         `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.line}" stroke-width="10"/>` +
         `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="${p > 0 ? 'round' : 'butt'}" ` +
         `stroke-dasharray="${d.toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})">` +
         `<animate attributeName="stroke-dasharray" from="0 ${circ.toFixed(1)}" to="${d.toFixed(1)} ${circ.toFixed(1)}" dur="0.9s" fill="freeze"/></circle>` +
-        text(cx, cy + 7, `${Math.round(p)}%`, 20, color, 'text-anchor="middle" font-weight="bold"') +
-        text(cx, 150, g.left, 12, C.dim, 'text-anchor="middle"')
+        countUp(Math.round(p), `x="${cx}" y="${cy + 7}" font-size="20" fill="${color}" text-anchor="middle" font-weight="bold"`, n => `${n}%`) +
+        text(cx, 194, g.left, 12, C.dim, 'text-anchor="middle"')
       )
     })
     .join('')
-  return svg(h, rings + (footer ? text(W / 2, 180, footer, 12, C.dim, 'text-anchor="middle"') : ''))
+  return frame(h, header('使用量', footer, C.green) + rings)
 }

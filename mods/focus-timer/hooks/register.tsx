@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { FocusTimerRun } from '../types'
+import { followTheme, readTheme } from './style'
 import { mmss, ringSvg, todaySvg } from './svg'
 import type { Status } from './svg'
 
@@ -127,8 +128,10 @@ export const register: Register = (on, options) => {
   len.focusMs = minutes(options.focusMinutes, 25) * 60_000
   len.breakMs = minutes(options.breakMinutes, 5) * 60_000
   const { focusMs } = len
+  followTheme(on)
 
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     // /focus は組み込みにあると拒まれる。その時は /focus-timer にし、/focus は組み込みに任せる
     ownsFocus = await $.command
       .register({ name: 'focus', description: 'ポモドーロの集中タイマーをペインに表示' })

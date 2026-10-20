@@ -173,7 +173,8 @@ for (const surface of SURFACES) {
       expect(src).toMatch(/変更はありません/)
       expect(src).toMatch(/上流なし/)
       expect(src).toMatch(/1時間前/)
-      expect(src).not.toMatch(/<animate/)
+      // 差分の棒(高さ 8 の伸びる棒)は無い。見出しの線とコミットの出方の動きはある
+      expect(src).not.toMatch(/height="8" rx="2"[^>]*><animate/)
     } else {
       expect(await ui.find({ type: 'Text', text: 'ブランチ main (上流なし)' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '変更はありません' })).toBeDefined()
@@ -364,4 +365,22 @@ test('/git が拒まれて /gitpane にした時は、/git を横取りしない
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
   expect(await $.command.run({ command: 'git', ...run })).toMatchObject({ text: '組み込みの git' })
   expect(await $.command.run({ command: 'gitpane', ...run })).toMatchObject({ text: 'git のペインを開きました。' })
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockGit(on, { repo: 'dirty', calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'reload' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#ffffff"\/>/)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
 })

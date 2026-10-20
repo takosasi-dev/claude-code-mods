@@ -1,20 +1,15 @@
 // SVG を文字列で組む関数と terminal 用の行。どれも純関数。描画面は <img> なので SMIL だけで動かす
-import type { Game2048, GameStats, Mines } from '../types'
+import type { Fifteen, Game2048, GameStats, Lights, Memory, Mines, Puzzle, PuzzleRecord, Sudoku } from '../types'
+import { SOLVED } from './fifteen'
+import { litCount } from './lights'
+import { pairCount } from './memory'
 import { MINE_COUNT, minesLeft } from './mines'
+import { recordOf } from './stats'
+import { emptyCount } from './sudoku'
+import { C, frame, header, HEADER_H, isLight, panel } from './style'
 
-export const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
+// 色は共通の C (/config の theme で明るい色に替わる)
+export { C }
 
 const FONT = 'font-family="sans-serif"'
 
@@ -35,7 +30,7 @@ export const secs = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(1)}秒`
 /** タイルの地と文字の色 */
 export function tileColor(v: number): { fill: string; ink: string } {
   const table: Record<number, string> = {
-    2: '#21262d',
+    2: isLight() ? '#eaeef2' : '#21262d',
     4: C.line,
     8: C.orange,
     16: C.yellow,
@@ -170,3 +165,49 @@ export function minesSvg(s: Mines, stats: GameStats): string {
   out += text(18, 54, h.record, 12, C.dim)
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72"><rect width="360" height="72" fill="${C.bg}"/>${out}</svg>`
 }
+
+// ---- 押して解くゲーム (15 パズル・ライツアウト・数独・神経衰弱) ----
+
+/** 盤の上の見出しの中身 (terminal でも同じ言葉を使う) */
+export type Head = { left: string; state: string; record: string; color: string }
+
+export function recordLine(r: PuzzleRecord): string {
+  return `勝ち ${r.wins} 回` + (r.bestMoves > 0 ? ` / 最短 ${r.bestMoves} 手` : '') + (r.fastest > 0 ? ` / 最速 ${secs(r.fastest)}` : '')
+}
+
+/** 解いた・まだ動かしていない (遊び方の一言)・遊んでいる の 3 つ */
+export function puzzleHead(g: Puzzle, r: PuzzleRecord, left: string, hint: string): Head {
+  const record = recordLine(r)
+  if (g.status === 'won') return { left, state: `クリア ${secs(g.endedAt - g.startedAt)} / ${g.moves} 手`, record, color: C.green }
+  if (g.moves === 0) return { left, state: hint, record, color: C.dim }
+  return { left, state: `${g.moves} 手`, record, color: C.blue }
+}
+
+export const fifteenHead = (g: Fifteen, s: GameStats) =>
+  puzzleHead(g, recordOf(s, 'fifteen'), `正しい位置 ${g.tiles.filter((v, i) => v !== 0 && v === SOLVED[i]).length} / 15`, '空きの隣を押して 1 から順に並べる')
+
+export const lightsHead = (g: Lights, s: GameStats) => puzzleHead(g, recordOf(s, 'lights'), `点灯 ${litCount(g)} 個`, '押すと十字が切り替わる。全部消す')
+
+export function sudokuHead(g: Sudoku, s: GameStats): Head {
+  const h = puzzleHead(g, recordOf(s, g.size === 4 ? 'sudoku4' : 'sudoku9'), `空き ${emptyCount(g)} マス`, 'マスを選び、下の数字で入れる')
+  // 埋まったのに解けていない = どこかで重なっている
+  return g.status === 'play' && emptyCount(g) === 0 ? { ...h, state: '同じ数字が重なっています', color: C.red } : h
+}
+
+export const memoryHead = (g: Memory, s: GameStats) => puzzleHead(g, recordOf(s, 'memory'), `そろった ${pairCount(g)} / 8 組`, '同じ色の名前を 2 枚そろえる')
+
+/** 見出し帯 + 状態と記録の 2 行。解いた時は枠が光る */
+export function headSvg(title: string, h: Head, isWon: boolean): string {
+  const y = HEADER_H + 6
+  let body = header(title, h.left, h.color === C.dim ? C.blue : h.color)
+  body += panel(8, y, 364, 50)
+  if (isWon) body += `<rect x="8" y="${y}" width="364" height="50" rx="8" fill="${h.color}" opacity="0"><animate attributeName="opacity" values="0;0.35;0" dur="0.9s" repeatCount="2"/></rect>`
+  body += text(20, y + 21, h.state, 14, h.color, h.color === C.dim ? '' : 'font-weight="bold"')
+  body += text(20, y + 40, h.record, 12, C.dim)
+  return frame(y + 58, body)
+}
+
+export const fifteenSvg = (g: Fifteen, s: GameStats) => headSvg('15 パズル', fifteenHead(g, s), g.status === 'won')
+export const lightsSvg = (g: Lights, s: GameStats) => headSvg('ライツアウト', lightsHead(g, s), g.status === 'won')
+export const sudokuSvg = (g: Sudoku, s: GameStats) => headSvg(`数独 ${g.size}x${g.size}`, sudokuHead(g, s), g.status === 'won')
+export const memorySvg = (g: Memory, s: GameStats) => headSvg('神経衰弱', memoryHead(g, s), g.status === 'won')

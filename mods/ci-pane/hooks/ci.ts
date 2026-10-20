@@ -1,19 +1,6 @@
 // gh の出力を読み、ペインの SVG と terminal 用の行を組む。どれも純関数
 import type { CiCheck, CiKind, CiPr, CiProblem, CiRun, CiSnap } from '../types'
-
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-}
-const W = 380
+import { C, HEADER_H, fadeIn, frame, header } from './style'
 
 export const PR_FIELDS = 'number,title,state,isDraft,url,reviewDecision,statusCheckRollup'
 export const RUN_FIELDS = 'databaseId,name,status,conclusion,url,createdAt,event,headSha'
@@ -158,16 +145,17 @@ export function cut(s: string, max: number) {
 }
 
 const esc = (s: string) => clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-const svgDoc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く) */
+const svgDoc = (h: number, body: string, title: string, sub: string, accent: string) =>
+  frame(h + HEADER_H, header(title, sub, accent) + `<g transform="translate(0 ${HEADER_H})">${body}</g>`)
 
-const KIND_COLOR: Record<CiKind, string> = { pass: C.green, fail: C.red, run: C.blue, skip: C.weak }
+// C はテーマで中身が替わるので、呼ぶたびに読む
+const KIND_COLOR = (k: CiKind) => ({ pass: C.green, fail: C.red, run: C.blue, skip: C.dim })[k]
 export const KIND_MARK: Record<CiKind, string> = { pass: '●', fail: '■', run: '○', skip: '─' }
 
 /** 丸 1 つ。走っている物は青い輪が回る (SMIL) */
 function dot(cx: number, cy: number, kind: CiKind) {
-  const color = KIND_COLOR[kind]
+  const color = KIND_COLOR(kind)
   if (kind !== 'run') return `<circle cx="${cx}" cy="${cy}" r="7" fill="${color}"/>`
   return (
     `<circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="${C.line}" stroke-width="2.5"/>` +
@@ -178,10 +166,10 @@ function dot(cx: number, cy: number, kind: CiKind) {
 
 export const stateLabel = (pr: CiPr) =>
   pr.state === 'MERGED' ? 'マージ' : pr.state === 'CLOSED' ? '閉' : pr.isDraft ? '下書き' : '開'
-const stateColor = (pr: CiPr) => (pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' ? C.red : pr.isDraft ? C.weak : C.green)
+const stateColor = (pr: CiPr) => (pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' ? C.red : pr.isDraft ? C.dim : C.green)
 export const reviewLabel = (review: string) =>
   review === 'APPROVED' ? '承認済み' : review === 'CHANGES_REQUESTED' ? '修正の依頼' : review === 'REVIEW_REQUIRED' ? 'レビュー待ち' : 'レビューなし'
-const reviewColor = (review: string) => (review === 'APPROVED' ? C.green : review === 'CHANGES_REQUESTED' ? C.red : review === 'REVIEW_REQUIRED' ? C.yellow : C.weak)
+const reviewColor = (review: string) => (review === 'APPROVED' ? C.green : review === 'CHANGES_REQUESTED' ? C.red : review === 'REVIEW_REQUIRED' ? C.yellow : C.dim)
 
 const ORDER: Record<CiKind, number> = { fail: 0, run: 1, pass: 2, skip: 3 }
 /** 落ちた・走っている物を先に */
@@ -199,12 +187,15 @@ const MAX_CHECK_ROWS = 10
 export function prSvg(snap: CiSnap) {
   if (snap.kind !== 'ok') {
     const text = snap.kind === 'problem' ? PROBLEM_TEXT[snap.problem] : '読み込み中'
-    const color = snap.kind === 'problem' ? (snap.problem === 'error' ? C.red : C.yellow) : C.weak
+    const color = snap.kind === 'problem' ? (snap.problem === 'error' ? C.red : C.yellow) : C.dim
     return svgDoc(
       76,
       `<rect x="8" y="8" width="364" height="60" rx="8" fill="${C.face}" stroke="${C.line}"/><rect x="8" y="8" width="4" height="60" rx="2" fill="${color}"/>` +
         `<text x="24" y="34" font-size="15" font-weight="bold" fill="${color}">${snap.kind === 'problem' ? '読めません' : '読み込み中'}</text>` +
         `<text x="24" y="56" font-size="12" fill="${C.text}">${esc(cut(text, 54))}</text>`,
+      'CI',
+      '',
+      color,
     )
   }
   const branch = snap.branch || '(ブランチなし)'
@@ -213,8 +204,11 @@ export function prSvg(snap: CiSnap) {
     return svgDoc(
       76,
       `<rect x="8" y="8" width="364" height="60" rx="8" fill="${C.face}" stroke="${C.line}"/>` +
-        `<text x="20" y="32" font-size="12" fill="${C.weak}">${esc(cut(branch, 54))}</text>` +
+        `<text x="20" y="32" font-size="12" fill="${C.dim}">${esc(cut(branch, 54))}</text>` +
         `<text x="20" y="54" font-size="14" fill="${C.text}">${esc(cut(snap.prNote || NO_PR, 50))}</text>`,
+      'CI',
+      '',
+      C.dim,
     )
   }
   const color = stateColor(pr)
@@ -230,41 +224,39 @@ export function prSvg(snap: CiSnap) {
   s += `<text x="360" y="32" font-size="12" fill="${reviewColor(pr.review)}" text-anchor="end">${reviewLabel(pr.review)}</text>`
   s += `<text x="20" y="56" font-size="13" fill="${C.text}">${esc(t1)}</text>`
   if (rest !== '') s += `<text x="20" y="74" font-size="13" fill="${C.text}">${esc(cut(rest, 52))}</text>`
-  s += `<text x="20" y="96" font-size="12" fill="${C.weak}">${esc(cut(branch, 54))}</text>`
+  s += `<text x="20" y="96" font-size="12" fill="${C.dim}">${esc(cut(branch, 54))}</text>`
   const n = tally(pr.checks)
   s +=
     `<text x="20" y="120" font-size="12"><tspan fill="${C.green}">通過 ${n.pass}</tspan><tspan dx="10" fill="${C.red}">失敗 ${n.fail}</tspan>` +
-    `<tspan dx="10" fill="${C.blue}">実行中 ${n.run}</tspan><tspan dx="10" fill="${C.weak}">他 ${n.skip}</tspan></text>`
+    `<tspan dx="10" fill="${C.blue}">実行中 ${n.run}</tspan><tspan dx="10" fill="${C.dim}">他 ${n.skip}</tspan></text>`
   const rows = sortChecks(pr.checks).slice(0, MAX_CHECK_ROWS)
-  if (pr.checks.length === 0) s += `<text x="20" y="144" font-size="12" fill="${C.weak}">チェックはありません</text>`
+  if (pr.checks.length === 0) s += `<text x="20" y="144" font-size="12" fill="${C.dim}">チェックはありません</text>`
   rows.forEach((c, i) => {
     const y = 144 + i * 22
-    s += dot(28, y - 4, c.kind)
-    s += `<text x="44" y="${y}" font-size="12" fill="${C.text}">${esc(cut(c.name, 48))}</text>`
+    s += fadeIn(dot(28, y - 4, c.kind) + `<text x="44" y="${y}" font-size="12" fill="${C.text}">${esc(cut(c.name, 48))}</text>`, Number((0.1 + i * 0.05).toFixed(2)))
   })
   const extra = pr.checks.length - rows.length
   const end = 144 + Math.max(1, rows.length) * 22 + (extra > 0 ? 18 : 0)
-  if (extra > 0) s += `<text x="20" y="${end - 14}" font-size="12" fill="${C.weak}">ほか ${extra} 件</text>`
+  if (extra > 0) s += `<text x="20" y="${end - 14}" font-size="12" fill="${C.dim}">ほか ${extra} 件</text>`
   const card = `<rect x="8" y="8" width="364" height="${end - 8}" rx="8" fill="${C.face}" stroke="${C.line}"/><rect x="8" y="8" width="4" height="${end - 8}" rx="2" fill="${color}"/>`
-  return svgDoc(end + 8, card + s)
+  return svgDoc(end + 8, card + s, 'CI', `チェック ${pr.checks.length} 件`, color)
 }
 
 /** 下の SVG: Actions の一覧 (名前・結果・何分前) */
 export function runsSvg(snap: Extract<CiSnap, { kind: 'ok' }>) {
   const rows = snap.runs.slice(0, RUN_LIMIT)
-  const h = 40 + Math.max(1, rows.length) * 40
+  // 「何分前」が入り読み直しのたびに文字列が変わるので、見出しの線のほかに動きは足さない
+  const h = 24 + Math.max(1, rows.length) * 40
   let s = `<rect x="8" y="8" width="364" height="${h - 8}" rx="8" fill="${C.face}" stroke="${C.line}"/>`
-  s += `<text x="20" y="30" font-size="13" font-weight="bold" fill="${C.text}">Actions</text>`
-  s += `<text x="360" y="30" font-size="12" fill="${C.weak}" text-anchor="end">${esc(cut(snap.branch || '全ブランチ', 30))}</text>`
-  if (rows.length === 0) s += `<text x="20" y="58" font-size="12" fill="${C.weak}">${esc(cut(snap.runsNote || '実行はありません', 54))}</text>`
+  if (rows.length === 0) s += `<text x="20" y="34" font-size="12" fill="${C.dim}">${esc(cut(snap.runsNote || '実行はありません', 54))}</text>`
   rows.forEach((r, i) => {
-    const y = 56 + i * 40
-    s += `<circle cx="28" cy="${y}" r="6" fill="${KIND_COLOR[r.kind]}"/>`
+    const y = 32 + i * 40
+    s += `<circle cx="28" cy="${y}" r="6" fill="${KIND_COLOR(r.kind)}"/>`
     s += `<text x="44" y="${y + 4}" font-size="13" fill="${C.text}">${esc(cut(r.name, 34))}</text>`
-    s += `<text x="360" y="${y + 4}" font-size="12" fill="${KIND_COLOR[r.kind]}" text-anchor="end">${esc(r.label)}</text>`
-    s += `<text x="44" y="${y + 22}" font-size="12" fill="${C.weak}">${esc(`${ago(r.createdAt, snap.loadedAt)}${r.event !== '' ? ` / ${r.event}` : ''}`)}</text>`
+    s += `<text x="360" y="${y + 4}" font-size="12" fill="${KIND_COLOR(r.kind)}" text-anchor="end">${esc(r.label)}</text>`
+    s += `<text x="44" y="${y + 22}" font-size="12" fill="${C.dim}">${esc(`${ago(r.createdAt, snap.loadedAt)}${r.event !== '' ? ` / ${r.event}` : ''}`)}</text>`
   })
-  return svgDoc(h + 8, s)
+  return svgDoc(h + 8, s, 'Actions', cut(snap.branch || '全ブランチ', 30), C.blue)
 }
 
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }

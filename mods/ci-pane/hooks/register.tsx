@@ -22,6 +22,7 @@ import {
   runsSvg,
   stateLabel,
 } from './ci'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'ci-pane'
 const TITLE = 'CI'
@@ -113,8 +114,10 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /ci が拒まれたら /ci-pane にする
     const got = await $.command.register({ name: 'ci', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'ci'

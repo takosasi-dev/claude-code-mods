@@ -428,3 +428,20 @@ test('依頼文の制御文字は落として描く (木も SVG も壊さない)
     await ui.unmount()
   }
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  bottom(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  await turn($, clock, 't1', '帯のタイムラインを作って', 60_000, [['Edit']])
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgSource(ui, /^経過/)).toMatch(/fill="#ffffff"/)
+  expect(await svgSource(ui, /^帯のタイムライン/)).toContain('fill="#0969da"/>') // 編集は明るい青
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgSource(ui, /^経過/)).toMatch(/fill="#0d1117"/)
+  expect(await svgSource(ui, /^帯のタイムライン/)).toContain(`fill="${BLUE}"/>`)
+})

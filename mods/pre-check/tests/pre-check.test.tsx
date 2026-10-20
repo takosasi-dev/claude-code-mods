@@ -364,3 +364,16 @@ test('/precheck が拒まれたら /pre-check で開き、/precheck は横取り
   expect(await $.command.run({ command: 'precheck', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: '別の precheck' })
   expect(opened).toEqual(['pre-check'])
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  const { ui } = await open($, on, 'vscode', { repo: DIRTY, calls: [], sizes: { 'big.bin': 3 * 1024 * 1024, 'keep.txt': 100, 'u.txt': 10 } })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#ffffff"\/>/)
+  expect(await source()).toContain('fill="#cf222e"') // 明るい赤(秘密情報が見つかった)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
+})

@@ -133,8 +133,9 @@ for (const surface of SURFACES) {
     if (surface === 'vscode') {
       const svg = await svgOf(ui)
       expect(svg).toContain('>失敗<')
-      expect(svg).toMatch(/>3<\/text>/)
-      expect(svg).toMatch(/>1<\/text>/)
+      // 数は増えて止まる(最後のコマ)
+      expect(svg).toMatch(/>3(<animate[^>]*\/>)?<\/text>/)
+      expect(svg).toMatch(/>1(<animate[^>]*\/>)?<\/text>/)
       expect(svg).toContain('終了コード 1')
       expect(svg).toContain('fill="#f85149"/><circle')
       expect(await ui.find({ key: 'lines' })).toBeUndefined()
@@ -241,6 +242,21 @@ test('/testrun を登録できればそれでペインを開く', async ($, on) 
   const r = await $.command.run({ command: 'testrun', args: '', origin: { kind: 'composer' }, presentation })
   expect(r).toMatchObject({ text: 'テストのペインを開きました。' })
   expect(opened).toEqual(['test-runner:テスト'])
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', SET, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgOf(ui)).toMatch(/<rect width="380" height="\d+" rx="10" fill="#ffffff"\/>/)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui)).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
 })
 
 test('/testrun が拒まれたら /test-runner で開き、/testrun は横取りしない', async ($, on) => {

@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { TestRunnerResult } from '../types'
 import { HISTORY, UNSET_HINT, countResults, fixPrompt, paneLines, paneSvg, splitCommand, statusOf, tailOf } from './runner'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'test-runner'
 const TITLE = 'テスト'
@@ -117,8 +118,10 @@ export const register: Register = (on, options) => {
   cfg.command = cfg.argv.join(' ')
   cfg.timeoutMs = Math.min(MAX_TIMEOUT_SECONDS, Math.max(1, Number(options.timeoutSeconds) || 300)) * 1000
 
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /testrun が拒まれたら (組み込みと被ったら) /test-runner にする
     const got = await $.command.register({ name: 'testrun', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'testrun'

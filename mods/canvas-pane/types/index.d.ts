@@ -3,6 +3,12 @@ export type CanvasKind = 'bar' | 'line' | 'pie' | 'table' | 'markdown' | 'svg'
 /** terminal で描く 1 行 */
 export type CanvasLine = { text: string; color?: string; isDim?: boolean; isBold?: boolean }
 
+/** この mod が組む図の元のデータ。テーマが変わったら描き直すために持つ */
+export type CanvasChart =
+  | { kind: 'bar' | 'line'; labels: string[]; series: { name: string; values: number[] }[] }
+  | { kind: 'pie'; labels: string[]; values: number[] }
+  | { kind: 'table'; columns: string[]; rows: (string | number)[][] }
+
 /** 1 枚。描く物は呼ばれた時に組み終えておく (描画フックは読むだけ) */
 export type CanvasItem = {
   id: number
@@ -12,6 +18,8 @@ export type CanvasItem = {
   kind: CanvasKind
   /** bar / line / pie / table はこの mod が組んだ SVG、svg は Claude が渡した SVG */
   svg?: string
+  /** bar / line / pie / table の元のデータ。描く時はこれから今のテーマの色で組み直す */
+  chart?: CanvasChart
   /** markdown の本文 */
   markdown?: string
   /** Svg の alt (制御文字なし) */

@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DoneChimeSettings } from '../types'
+import { followTheme, readTheme } from './style'
 import { DEFAULTS, SOUNDS, THRESHOLDS, VOLUMES, cleanSettings, isWindowsPath, powershellArgv, shouldChime, summary, waveSvg, wavBase64 } from './wav'
 
 const PANE = 'done-chime'
@@ -62,7 +63,10 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     const started = await next(e)
     const got = await $.command.register({ name: 'chime', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'chime'

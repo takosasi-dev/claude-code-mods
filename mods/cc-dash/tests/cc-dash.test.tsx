@@ -198,8 +198,8 @@ test('使用量: リング型ゲージ、80% 超は赤・50% 超は黄、残り�
   await vs.press({ key: 'tab-usage' })
   const src = await svgSource(vs, 'gauges')
   expect(src).toContain('stroke-dasharray')
-  expect(src).toContain(`fill="${RED}" text-anchor="middle" font-weight="bold">85%<`)
-  expect(src).toContain(`fill="${YELLOW}" text-anchor="middle" font-weight="bold">58%<`)
+  expect(src).toContain(`fill="${RED}" text-anchor="middle" font-weight="bold" opacity="0">85%<`) // 数字は 0 から増えて最後のコマで止まる
+  expect(src).toContain(`fill="${YELLOW}" text-anchor="middle" font-weight="bold" opacity="0">58%<`)
   expect(src).toContain('Fable 週')
   expect(src).toContain('あと2時間14分')
   expect(src).toContain('あと2日11時間')
@@ -363,4 +363,22 @@ test('ツール名とモデル名の制御文字を落とす(SVG と Text)', USA
     else expect(await ui.find({ type: 'Text', text: /^Fable 週/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  bottom(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  await turn($, 't1', 400_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgSource(ui, 'header')).toMatch(/fill="#ffffff"/)
+  expect(await svgSource(ui, 'turns')).toContain('fill="#cf222e" opacity="1"') // 5 分超えの棒は明るい赤
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgSource(ui, 'header')).toMatch(/fill="#0d1117"/)
+  expect(await svgSource(ui, 'turns')).toContain(`fill="${RED}" opacity="1"`)
 })

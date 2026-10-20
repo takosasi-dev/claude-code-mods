@@ -1,18 +1,7 @@
 // テストの出力を読み、ペインの SVG と terminal 用の行を組む。どれも純関数
 import type { TestRunnerMark, TestRunnerResult, TestRunnerRun, TestRunnerStatus } from '../types'
+import { C, HEADER_H, countUp, frame, header } from './style'
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-}
-const W = 380
 const MONO = 'ui-monospace, Consolas, monospace'
 export const HISTORY = 20
 export const TAIL_LINES = 60
@@ -108,7 +97,8 @@ export const clockLabel = (ms: number) => {
 }
 
 const LABEL: Record<TestRunnerStatus, string> = { pass: '通過', fail: '失敗', stopped: '止めました', timeout: '時間切れ' }
-const COLOR: Record<TestRunnerStatus, string> = { pass: C.green, fail: C.red, stopped: C.weak, timeout: C.red }
+/** 結果の色(C は今のテーマの色なので、呼ぶたびに引く) */
+const colorOf = (status: TestRunnerStatus) => ({ pass: C.green, fail: C.red, stopped: C.dim, timeout: C.red })[status]
 const MARK: Record<TestRunnerStatus, string> = { pass: '●', fail: '■', stopped: '○', timeout: '■' }
 
 // 全角は 2、半角は 1 と数えた幅で、頭を残して末尾を … にする
@@ -127,11 +117,16 @@ export function headFit(s: string, max: number) {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-const svgDoc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-  `<defs><radialGradient id="shine" cx="0.35" cy="0.3" r="0.7"><stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/></radialGradient>` +
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く)。信号の光り方の defs も入れる。
+ * 光沢の白(#ffffff)は灯の玉の絵の中身なので、テーマで変えない */
+const svgDoc = (h: number, body: string, accent: string, sub: string) =>
+  frame(
+    h + HEADER_H,
+    `<defs><radialGradient id="shine" cx="0.35" cy="0.3" r="0.7"><stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/></radialGradient>` +
   `<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6"/></filter></defs>` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+      header('テスト', sub, accent) +
+      `<g transform="translate(0 ${HEADER_H})">${body}</g>`,
+  )
 
 type Lamp = 'red' | 'yellow' | 'green' | 'none'
 
@@ -165,12 +160,15 @@ const spinner = (cx: number, cy: number) =>
   `<circle cx="${cx}" cy="${cy}" r="10" fill="none" stroke="${C.yellow}" stroke-width="3" stroke-linecap="round" stroke-dasharray="18 46">` +
   `<animateTransform attributeName="transform" type="rotate" from="0 ${cx} ${cy}" to="360 ${cx} ${cy}" dur="0.9s" repeatCount="indefinite"/></circle>`
 
-function tile(x: number, label: string, value: string, color: string) {
+/** 数のタイル。数が拾えた時は 0 から増えて止まる。拾えなければ ─ */
+function tile(x: number, label: string, value: number | undefined, color: string, delay = 0) {
+  const shown = value === undefined ? '─' : String(value)
+  const attrs = `x="${x + 12}" y="136" font-size="${shown.length > 5 ? 20 : 26}" font-weight="bold" fill="${color}"`
   return (
     `<rect x="${x}" y="86" width="128" height="60" rx="6" fill="${C.bg}" stroke="${C.line}"/>` +
     `<rect x="${x}" y="86" width="3" height="60" rx="1.5" fill="${color}"/>` +
-    `<text x="${x + 12}" y="104" font-size="12" fill="${C.weak}">${label}</text>` +
-    `<text x="${x + 12}" y="136" font-size="${value.length > 5 ? 20 : 26}" font-weight="bold" fill="${color}">${esc(value)}</text>`
+    `<text x="${x + 12}" y="104" font-size="12" fill="${C.dim}">${label}</text>` +
+    (value === undefined ? `<text ${attrs}>${shown}</text>` : countUp(value, attrs, String, delay))
   )
 }
 
@@ -181,46 +179,46 @@ function headCard(run: TestRunnerRun, command: string) {
   if (run.kind === 'running') {
     s += signal('yellow', true)
     s += `<text x="${R}" y="44" font-size="24" font-weight="bold" fill="${C.yellow}">実行中</text>` + spinner(R + 98, 36)
-    s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.weak}">${esc(headFit(run.command, 40))}</text>`
+    s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.dim}">${esc(headFit(run.command, 40))}</text>`
     s += `<text x="${R}" y="104" font-size="13" fill="${C.text}">開始 ${clockLabel(run.startedAt)}</text>`
-    s += `<text x="${R}" y="128" font-size="12" fill="${C.weak}">終わると結果をここに出します</text>`
-    s += `<text x="${R}" y="148" font-size="12" fill="${C.weak}">「止める」で途中で止められます</text>`
+    s += `<text x="${R}" y="128" font-size="12" fill="${C.dim}">終わると結果をここに出します</text>`
+    s += `<text x="${R}" y="148" font-size="12" fill="${C.dim}">「止める」で途中で止められます</text>`
     return s
   }
   if (run.kind === 'error') {
     s += signal('red', false)
     s += `<text x="${R}" y="44" font-size="20" font-weight="bold" fill="${C.red}">起動できません</text>`
-    s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.weak}">${esc(headFit(run.command, 40))}</text>`
+    s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.dim}">${esc(headFit(run.command, 40))}</text>`
     const words = run.message.match(/.{1,36}/g) ?? []
     words.slice(0, 5).forEach((w, i) => (s += `<text x="${R}" y="${96 + i * 18}" font-size="12" fill="${C.text}">${esc(w)}</text>`))
-    s += `<text x="${R}" y="204" font-size="12" fill="${C.weak}">コマンドの綴りを確かめてください</text>`
+    s += `<text x="${R}" y="204" font-size="12" fill="${C.dim}">コマンドの綴りを確かめてください</text>`
     return s
   }
   if (run.kind === 'idle') {
     s += signal('none', false)
     const isUnset = command === ''
-    s += `<text x="${R}" y="44" font-size="24" font-weight="bold" fill="${C.weak}">${isUnset ? '未設定' : '未実行'}</text>`
+    s += `<text x="${R}" y="44" font-size="24" font-weight="bold" fill="${C.dim}">${isUnset ? '未設定' : '未実行'}</text>`
     if (isUnset) {
       ;['/config で test-runner の', 'testCommand に', 'npm test のように', '入れてください'].forEach(
         (w, i) => (s += `<text x="${R}" y="${76 + i * 20}" font-size="13" fill="${C.text}">${w}</text>`),
       )
     } else {
-      s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.weak}">${esc(headFit(command, 40))}</text>`
+      s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.dim}">${esc(headFit(command, 40))}</text>`
       s += `<text x="${R}" y="104" font-size="13" fill="${C.text}">「テストを走らせる」で始めます</text>`
     }
     return s
   }
   const r = run.result
-  const color = COLOR[r.status]
+  const color = colorOf(r.status)
   s += signal(r.status === 'pass' ? 'green' : r.status === 'stopped' ? 'none' : 'red', false)
   s += `<text x="${R}" y="44" font-size="24" font-weight="bold" fill="${color}">${LABEL[r.status]}</text>`
-  s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.weak}">${esc(headFit(r.command, 40))}</text>`
+  s += `<text x="${R}" y="68" font-size="12" font-family="${MONO}" fill="${C.dim}">${esc(headFit(r.command, 40))}</text>`
   const has = r.passed !== undefined || r.failed !== undefined
-  s += tile(R, '通過', has ? String(r.passed ?? 0) : '─', C.green)
-  s += tile(R + 140, '失敗', has ? String(r.failed ?? 0) : '─', r.failed ? C.red : C.weak)
+  s += tile(R, '通過', has ? (r.passed ?? 0) : undefined, C.green)
+  s += tile(R + 140, '失敗', has ? (r.failed ?? 0) : undefined, r.failed ? C.red : C.dim, 0.1)
   s += `<text x="${R}" y="174" font-size="13" fill="${C.text}">所要 ${seconds(r.ms)}</text>`
-  s += `<text x="${R}" y="196" font-size="12" fill="${C.weak}">終了コード ${r.exitCode ?? '─'} / ${clockLabel(r.finishedAt)}</text>`
-  if (!has) s += `<text x="${R}" y="216" font-size="12" fill="${C.weak}">数は出力から拾えませんでした</text>`
+  s += `<text x="${R}" y="196" font-size="12" fill="${C.dim}">終了コード ${r.exitCode ?? '─'} / ${clockLabel(r.finishedAt)}</text>`
+  if (!has) s += `<text x="${R}" y="216" font-size="12" fill="${C.dim}">数は出力から拾えませんでした</text>`
   return s
 }
 
@@ -231,7 +229,7 @@ function historyCard(history: TestRunnerMark[], y0: number) {
   s += `<text x="20" y="${y0 + 24}" font-size="13" font-weight="bold" fill="${C.text}">直近 ${HISTORY} 回</text>`
   s +=
     `<text x="360" y="${y0 + 24}" font-size="12" text-anchor="end">` +
-    `<tspan fill="${C.green}">通過 ${pass}</tspan><tspan dx="8" fill="${C.weak}">/ ${history.length} 回</tspan></text>`
+    `<tspan fill="${C.green}">通過 ${pass}</tspan><tspan dx="8" fill="${C.dim}">/ ${history.length} 回</tspan></text>`
   const step = 340 / HISTORY
   const base = y0 + 88
   const max = Math.max(1, ...history.map(h => h.ms))
@@ -244,7 +242,7 @@ function historyCard(history: TestRunnerMark[], y0: number) {
       s += `<circle cx="${cx}" cy="${base + 18}" r="6" fill="none" stroke="${C.line}" stroke-dasharray="2 2"/>`
       continue
     }
-    const color = COLOR[h.status]
+    const color = colorOf(h.status)
     const bh = Math.max(3, (h.ms / max) * 48)
     const isNewest = i === HISTORY - 1
     const grow = isNewest
@@ -256,14 +254,15 @@ function historyCard(history: TestRunnerMark[], y0: number) {
       : `<circle cx="${cx}" cy="${base + 18}" r="6.5" fill="${color}"/>`
     if (isNewest) s += `<circle cx="${cx}" cy="${base + 18}" r="9.5" fill="none" stroke="${C.text}" stroke-width="1"/>`
   }
-  s += `<text x="20" y="${y0 + 128}" font-size="12" fill="${C.weak}">古い</text>`
-  s += `<text x="360" y="${y0 + 128}" font-size="12" fill="${C.weak}" text-anchor="end">新しい ─ 棒は所要時間</text>`
+  s += `<text x="20" y="${y0 + 128}" font-size="12" fill="${C.dim}">古い</text>`
+  s += `<text x="360" y="${y0 + 128}" font-size="12" fill="${C.dim}" text-anchor="end">新しい ─ 棒は所要時間</text>`
   return s
 }
 
 /** ペインに出す SVG 1 枚 */
 export function paneSvg(run: TestRunnerRun, history: TestRunnerMark[], command: string) {
-  return svgDoc(382, headCard(run, command) + historyCard(history, 236))
+  const accent = run.kind === 'running' ? C.yellow : run.kind === 'error' ? C.red : run.kind === 'idle' ? C.dim : colorOf(run.result.status)
+  return svgDoc(382, headCard(run, command) + historyCard(history, 236), accent, '')
 }
 
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }

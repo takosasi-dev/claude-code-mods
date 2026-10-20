@@ -1,6 +1,6 @@
 {
   "name": "cc-dash",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "/dash でセッションの計器盤(経過・ターン・ツール・使用量)をペインに SVG で表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

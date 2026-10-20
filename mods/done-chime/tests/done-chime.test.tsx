@@ -274,8 +274,25 @@ test('/chime が拒まれたら /done-chime で開き、/chime は横取りし�
 
 test('波形の SVG は viewBox だけで、文字 12 以上', () => {
   const s = waveSvg(DEFAULTS)
-  expect(s).toContain('viewBox="0 0 380 140"')
+  expect(s).toMatch(/viewBox="0 0 380 \d+"/)
   expect(s).not.toMatch(/<svg[^>]* width=/)
   for (const m of s.matchAll(/font-size="(\d+)"/g)) expect(Number(m[1])).toBeGreaterThanOrEqual(12)
   expect(s.length).toBeLessThan(131_072)
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  const { plays, runs } = setup(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await begin($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/fill="#ffffff"/)
+  expect(await source()).toContain('stroke="#0969da"') // 和音の波形は明るい青
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/fill="#0d1117"/)
+  expect(await source()).toContain('stroke="#58a6ff"')
+  expect([plays, runs]).toEqual([[], []]) // 色を替えても鳴らさない
 })

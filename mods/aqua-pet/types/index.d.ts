@@ -17,6 +17,23 @@ export type AquaView = {
   days: number
 }
 
+/** 魚の種類。並びは珍しさの順 (後ろほど珍しい) */
+export type FishKind = 'maru' | 'shima' | 'mizutama' | 'hirenaga' | 'ougi' | 'akari'
+/** 育ちの段階 */
+export type FishStage = '稚魚' | '若魚' | '成魚' | '大物'
+
+/** 水槽の魚 1 匹 ($.store に残す) */
+export type AquaFish = {
+  /** 来た順の番号 (0 から) */
+  id: number
+  kind: FishKind
+  /** 来た時刻 (ms) */
+  bornAt: number
+  /** 来てから数えたターン */
+  turnsSeen: number
+  name?: string
+}
+
 export type AquaTank = {
   // $.store に残す値
   turns: number
@@ -27,12 +44,16 @@ export type AquaTank = {
   /** 水の濁り 0-10 (エラーで増え、掃除で 0) */
   murk: number
   name: string
+  /** 魚。空なら turns から決まる数を描く (古い記録・見本の絵) */
+  fish: AquaFish[]
   // セッションの間だけの値
   isRunning: boolean
   lastActiveAt: number
   upsetUntil: number
   feedUntil: number
   isNaming: boolean
+  /** 魚の一覧を出している */
+  isListing: boolean
   view: AquaView
 }
 

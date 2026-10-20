@@ -2,12 +2,21 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
-import type { RpgHero, RpgSaved } from '../types'
+import type { RpgGachaCard, RpgHero, RpgSaved } from '../types'
 import {
   ACHIEVEMENTS,
   INITIAL,
+  INITIAL_SAVED,
   achievementsSvg,
   fromSaved,
+  gearBonus,
+  gearSvg,
+  mergeSaved,
+  ownedCards,
+  setGear,
+  statsOf,
+  wear,
+  wornOf,
   levelInfo,
   onTool,
   startSession,
@@ -18,6 +27,18 @@ import {
 } from '../hooks/rpg'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
+
+/** turn-gacha の state の形 (save.book と cards) */
+type Gacha = { save: unknown; cards: unknown }
+const CARD = (id: string, rarity: RpgGachaCard['rarity'], slot: RpgGachaCard['slot'], name: string): RpgGachaCard => ({ id, rarity, slot, name })
+const GACHA_CARDS: RpgGachaCard[] = [
+  CARD('x01', 'SSR', 'weapon', '一発で通ったテスト'),
+  CARD('r01', 'R', 'weapon', 'きれいな差分'),
+  CARD('s02', 'SR', 'armor', '競合なしのマージ'),
+  CARD('n02', 'N', 'charm', 'TODO: あとで直す'),
+  CARD('x02', 'SSR', 'charm', 'つかまえた幽霊バグ'),
+]
+const bookOf = (ids: string[]) => ({ book: Object.fromEntries(ids.map(id => [id, { count: 1, firstAt: NOW }])), total: ids.length })
 const MIN = 60_000
 const SURFACES = ['vscode', 'terminal'] as const
 const PANE = {
@@ -35,8 +56,14 @@ const PANE = {
 } as const
 
 /** 下の hook は全部ここで足す (test が $ を呼んだ後は足せない) */
-const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTool?: () => boolean } = {}) => {
+const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTool?: () => boolean; gacha?: () => Gacha } = {}) => {
   const clock = mock.clock(on, { now: NOW })
+  // turn-gacha の state の代わり (無ければ turn-gacha が入っていない)
+  const gacha = opts.gacha
+  if (gacha) {
+    on('state.get', { plugin: 'turn-gacha', key: 'save' }, () => ({ value: { value: gacha().save as never, version: 1 } }))
+    on('state.get', { plugin: 'turn-gacha', key: 'cards' }, () => ({ value: { value: gacha().cards as never, version: 1 } }))
+  }
   const m = new Map<string, unknown>(saved ? [['hero', saved]] : [])
   on('store.get', (_$, e) => ({ value: m.get(e.key) }))
   on('store.set', (_$, e) => {
@@ -138,8 +165,8 @@ for (const surface of SURFACES) {
       expect(svg).toContain('>MP<')
       expect(svg).toContain('>EX<')
       expect(svg).toContain('10/100')
-      expect(svg).toContain('1 / 12')
-      expect((svg.match(/stroke-dasharray="3 2"/g) ?? []).length).toBe(11)
+      expect(svg).toContain(`1 / ${ACHIEVEMENTS.length}`)
+      expect((svg.match(/stroke-dasharray="3 2"/g) ?? []).length).toBe(ACHIEVEMENTS.length - 1)
       expect(svg).toContain('stroke="#ffffff" stroke-width="3"')
       expect(await ui.find({ key: 'lines' })).toBeUndefined()
     } else {
@@ -147,7 +174,7 @@ for (const surface of SURFACES) {
       expect(await textOf(ui, /^勇者 Lv/)).toBe('勇者 Lv 3 駆け出しデバッガー')
       expect(await textOf(ui, /^HP /)).toBe('HP 70/70  MP 35/35')
       expect(await textOf(ui, /^経験値 /)).toBe('経験値 10/100 (つぎまで 90)')
-      expect(await textOf(ui, /^実績 /)).toBe(`実績 1/12 ●${'○'.repeat(11)}`)
+      expect(await textOf(ui, /^実績 /)).toBe(`実績 1/${ACHIEVEMENTS.length} ●${'○'.repeat(ACHIEVEMENTS.length - 1)}`)
     }
   })
 
@@ -381,4 +408,129 @@ test('state が空のまま (/clear の後など) でも、store から読み直
   on('tool.call', () => ({ result: 'ok' }))
   await turn($, () => tool($, 'Read').then(() => {}))
   expect(m.get('hero')).toMatchObject({ xp: 512, turns: 51 })
+})
+
+// ---------------------------------------------------------------- 装備 (turn-gacha のカード)
+
+test('ガチャの state を読む: 形の違う物は捨て、持っているカードだけ。ガチャが無ければ undefined', () => {
+  expect(ownedCards(undefined, undefined)).toBeUndefined()
+  expect(ownedCards(bookOf(['x01']), undefined)).toBeUndefined()
+  expect(ownedCards({ total: 1 }, GACHA_CARDS)).toBeUndefined()
+  const cards = [...GACHA_CARDS, { id: 'zz', rarity: 'UR', slot: 'weapon', name: 'x' }, { id: 'yy', rarity: 'N', slot: 'boots', name: 'y' }, 'x', null]
+  const save = { book: { x01: { count: 2, firstAt: NOW }, r01: { count: 0, firstAt: NOW }, zz: { count: 1 }, yy: { count: 1 }, n02: { count: 1 } } }
+  expect(ownedCards(save, cards)?.map(c => c.id)).toEqual(['x01', 'n02'])
+  // 外から来た名前の制御文字は落とす
+  expect(ownedCards(bookOf(['a']), [{ id: 'a', rarity: 'N', slot: 'charm', name: `ab${String.fromCharCode(7)}c` }])?.[0]?.name).toBe('abc')
+})
+
+test('装備で強さが上がる: 武器は攻撃力、防具は最大 HP、お守りは魔力と最大 MP。持っていない物は外れた扱い', () => {
+  expect(gearBonus({})).toEqual({ attack: 0, hp: 0, magic: 0, mp: 0 })
+  let h = startSession(fromSaved({ xp: 150 }), NOW)
+  const base = statsOf(h)
+  h = setGear(h, 'weapon', GACHA_CARDS[0])
+  h = setGear(h, 'armor', GACHA_CARDS[2])
+  h = setGear(h, 'charm', GACHA_CARDS[3])
+  expect(gearBonus(h.equip)).toEqual({ attack: 7, hp: 20, magic: 1, mp: 3 })
+  const st = statsOf(h)
+  expect([st.attack - base.attack, st.maxHp - base.maxHp, st.magic - base.magic, st.maxMp - base.maxMp]).toEqual([7, 20, 1, 3])
+  // 防具のカードが図鑑から消えた
+  const owned = GACHA_CARDS.filter(c => c.id !== 's02')
+  expect(Object.keys(wornOf(h.equip, owned)).sort()).toEqual(['charm', 'weapon'])
+  expect(statsOf(wear(h, owned)).maxHp).toBe(base.maxHp)
+  // ガチャが無ければ何も着けていない
+  expect(statsOf(wear(h, undefined))).toMatchObject({ attack: base.attack, maxHp: base.maxHp, maxMp: base.maxMp })
+  // 外す
+  expect(setGear(h, 'weapon', undefined).equip.weapon).toBeUndefined()
+  // 絵: 装備の分は色を変えて「装備で +n」
+  const svg = statusSvg(wear(h, GACHA_CARDS))
+  expect(svg).toContain('装備で +7')
+  expect(svg).toContain('#39c5cf')
+  expect(gearSvg(h, GACHA_CARDS)).toContain('攻撃力 +7')
+  expect(gearSvg(h, undefined)).toContain('turn-gacha を入れるとカードを装備できます')
+  expect(gearSvg(INITIAL, [])).toContain('ガチャでカードを引くと装備できます')
+  for (const x of [svg, gearSvg(h, GACHA_CARDS), gearSvg(h, undefined)]) expect(x).not.toMatch(/<svg[^>]* width=/)
+})
+
+test('古い store (装備の無い 0.1 の形) も読める。壊れた装備は捨てる。装備は変えた方が勝つ', () => {
+  const old = fromSaved({ xp: 300, turns: 20, achievements: { 'first-bash': NOW }, day: '2026-10-19', dayTurns: 3 })
+  expect(old).toMatchObject({ xp: 300, turns: 20, equip: {} })
+  const bad = fromSaved({ equip: { weapon: { id: 'x01', rarity: 'SSR', name: 'a' }, armor: 'x', charm: { id: 'n02', rarity: 'Z', name: 'b' }, boots: { id: 'q' } } })
+  expect(bad.equip).toEqual({ weapon: { id: 'x01', rarity: 'SSR', slot: 'weapon', name: 'a' } })
+
+  const w = (id: string) => ({ weapon: GACHA_CARDS.find(c => c.id === id)! })
+  const base = { ...INITIAL_SAVED, equip: w('r01') }
+  // このセッションで変えていなければ、別のセッションが書いた装備を残す
+  expect(mergeSaved({ ...base, equip: w('x01') }, base, { ...base, xp: 5 }).equip.weapon?.id).toBe('x01')
+  // 変えたら、こちらが勝つ
+  expect(mergeSaved({ ...base, equip: w('x01') }, base, { ...base, equip: {} }).equip).toEqual({})
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: turn-gacha が無ければ装備の画面に入れ方を出し、選ぶ欄は出さない`, async ($, on) => {
+    await boot($, on, { xp: 150 })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'gear' })
+    expect((await ui.find({ type: 'Button', key: 'gear' }))?.text).toBe('ステータスに戻る')
+    expect(await ui.find({ key: 'equip:weapon' })).toBeUndefined()
+    if (surface === 'vscode') expect(await svgOf(ui)).toContain('turn-gacha を入れるとカードを装備できます')
+    else expect(await ui.find({ type: 'Text', text: 'turn-gacha を入れるとカードを装備できます' })).toBeDefined()
+    // 実績の画面へ、そこから戻る
+    await ui.press({ key: 'tab' })
+    expect((await ui.find({ type: 'Button', key: 'tab' }))?.text).toBe('ステータスに戻る')
+    await ui.press({ key: 'tab' })
+    expect((await ui.find({ type: 'Button', key: 'gear' }))?.text).toBe('装備')
+  })
+
+  test(`${surface}: ガチャのカードを選んで装備し、store に残り、ステータスが上がり、実績が付く`, async ($, on) => {
+    const { hero, stored } = await boot($, on, { xp: 150 }, { gacha: () => ({ save: bookOf(['x01', 'r01', 's02', 'n02']), cards: GACHA_CARDS }) })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'gear' })
+    const sel = await ui.find({ key: 'equip:weapon' })
+    expect((sel?.props.options as { value: string }[]).map(o => o.value)).toEqual(['', 'x01', 'r01'])
+    expect(sel?.props.value).toBe('')
+    await ui.select({ key: 'equip:weapon', value: 'x01' })
+    expect(stored()?.equip.weapon).toMatchObject({ id: 'x01', rarity: 'SSR' })
+    expect(hero().achievements['gear-first']).toBe(NOW)
+    expect(hero().achievements['gear-ssr']).toBe(NOW)
+    expect((await ui.find({ key: 'equip:weapon' }))?.props.value).toBe('x01')
+    await ui.select({ key: 'equip:armor', value: 's02' })
+    await ui.select({ key: 'equip:charm', value: 'n02' })
+    expect(hero().achievements['gear-full']).toBe(NOW)
+    expect(stored()?.equip.charm?.id).toBe('n02')
+    if (surface === 'terminal') expect(await ui.find({ type: 'Text', text: /^武器: SSR 一発で通ったテスト/ })).toBeDefined()
+    await ui.press({ key: 'gear' })
+    if (surface === 'vscode') expect(await svgOf(ui)).toContain('装備で +7')
+    else expect(await textOf(ui, /^HP /)).toBe('HP 90/90  MP 38/38')
+    // 外す
+    await ui.press({ key: 'gear' })
+    await ui.select({ key: 'equip:weapon', value: '' })
+    expect(stored()?.equip.weapon).toBeUndefined()
+  })
+}
+
+test('ガチャで持っていない装備は外れた扱い (store の装備は残す)。図鑑 20 種で実績', async ($, on) => {
+  let g: Gacha = { save: bookOf(['r01']), cards: GACHA_CARDS }
+  const twenty = Array.from({ length: 20 }, (_, i) => CARD(`c${i}`, 'N', 'charm', `カード${i}`))
+  const { hero, stored } = await boot($, on, { xp: 150, equip: { weapon: GACHA_CARDS[0] } }, { gacha: () => g })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await textOf(ui, /^攻撃力/)).toBe('攻撃力 0  魔力 0  素早さ 0  根性 0')
+  expect(stored()?.equip.weapon?.id).toBe('x01')
+  expect(hero().achievements['gear-first']).toBeUndefined()
+  g = { save: bookOf(twenty.map(c => c.id)), cards: twenty }
+  await turn($)
+  expect(hero().achievements['book-20']).toBe(NOW)
+})
+
+test('/config の theme が light 系なら明るい窓で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await boot($, on, { xp: 150 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgOf(ui)).toContain('fill="#ffffff"/>')
+  expect(await svgOf(ui)).toContain('#dbe5ff')
+  expect(await svgOf(ui)).not.toContain('stop-color="#0b1f5c"')
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui)).toContain('stop-color="#0b1f5c"')
 })

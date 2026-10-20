@@ -1,4 +1,5 @@
 import type { RuleSwitchCustom, RuleSwitchSave } from '../types'
+import { C, HEADER_H, countUp, esc, fadeIn, frame, header } from './style'
 
 /** 決まったルール。id は store に残るので変えない */
 export const BUILTIN: readonly { id: string; text: string }[] = [
@@ -95,25 +96,14 @@ export function sectionText(save: RuleSwitchSave): string | null {
 
 // ── 画面
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  green: '#3fb950',
-  purple: '#bc8cff',
-}
-
-const esc = (s: string) => s.replace(CTRL, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
 /** 文字数で切る (全文はボタンに出る) */
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
 /** SVG に描く行の上限 */
 const MAX_ROWS = 28
 const ROW = 26
-const TOP = 96
+/** ルールの行の始まり (見出し・灯った数・区切り線の下) */
+const TOP = HEADER_H + 64
 
 export function summary(save: RuleSwitchSave) {
   const rules = rulesOf(save)
@@ -126,45 +116,44 @@ export function boardSvg(save: RuleSwitchSave): string {
   const { on, all } = summary(save)
   const shown = rules.slice(0, MAX_ROWS)
   const rest = rules.length - shown.length
-  const h = TOP + shown.length * ROW + (rest > 0 ? 24 : 0) + 16
+  const h = TOP + shown.length * ROW + (rest > 0 ? 24 : 0) + 12
 
+  // 描き直すのは押した時だけなので、行は上から順にふわっと出す
   let rows = ''
   shown.forEach((r, i) => {
     const y = TOP + i * ROW
     const cy = y + 9
     // ランプ: オンは緑に灯り、光の輪がゆっくり脈打つ
-    rows += r.isOn
+    const lamp = r.isOn
       ? `<circle cx="30" cy="${cy}" r="11" fill="${C.green}" opacity="0.25"><animate attributeName="opacity" values="0.12;0.45;0.12" dur="2.4s" begin="${(i % 6) * 0.3}s" repeatCount="indefinite"/></circle>` +
         `<circle cx="30" cy="${cy}" r="6" fill="${C.green}"/>`
       : `<circle cx="30" cy="${cy}" r="6" fill="${C.bg}" stroke="${C.line}" stroke-width="2"/>`
     // スイッチ: オンはつまみが右
-    rows +=
+    const knob =
       `<rect x="48" y="${y}" width="34" height="18" rx="9" fill="${r.isOn ? C.green : C.line}"/>` +
-      `<circle cx="${r.isOn ? 73 : 57}" cy="${cy}" r="7" fill="${r.isOn ? C.text : C.weak}"/>`
-    rows += `<text x="92" y="${y + 14}" font-size="13" fill="${r.isOn ? C.text : C.weak}">${esc(cut(r.text, r.isCustom ? 17 : 20))}</text>`
-    if (r.isCustom) rows += `<text x="366" y="${y + 14}" font-size="12" fill="${C.purple}" text-anchor="end">自作</text>`
+      `<circle cx="${r.isOn ? 73 : 57}" cy="${cy}" r="7" fill="${r.isOn ? C.text : C.dim}"/>`
+    const label =
+      `<text x="92" y="${y + 14}" font-size="13" fill="${r.isOn ? C.text : C.dim}">${esc(cut(r.text, r.isCustom ? 17 : 20))}</text>` +
+      (r.isCustom ? `<text x="${380 - 16}" y="${y + 14}" font-size="12" fill="${C.purple}" text-anchor="end">自作</text>` : '')
+    rows += fadeIn(lamp + knob + label, Math.min(i, 12) * 0.03)
   })
-  if (rest > 0) rows += `<text x="30" y="${TOP + shown.length * ROW + 14}" font-size="12" fill="${C.weak}">ほか ${rest} 個</text>`
+  if (rest > 0) rows += `<text x="30" y="${TOP + shown.length * ROW + 14}" font-size="12" fill="${C.dim}">ほか ${rest} 個</text>`
 
   // 上の計器: 全体のうち灯った数を小さなランプの列で
   const dots = Math.min(all, 20)
   let strip = ''
   for (let i = 0; i < dots; i++) {
     const isLit = i < on
-    strip += `<circle cx="${174 + i * 10}" cy="60" r="3.5" fill="${isLit ? C.green : C.line}"/>`
+    strip += `<circle cx="${178 + i * 10}" cy="${HEADER_H + 30}" r="3.5" fill="${isLit ? C.green : C.line}"/>`
   }
 
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 ${h}" font-family="sans-serif">` +
-    `<rect width="380" height="${h}" rx="12" fill="${C.bg}"/>` +
-    `<rect x="8" y="8" width="364" height="${h - 16}" rx="10" fill="${C.face}" stroke="${C.line}"/>` +
-    `<text x="22" y="34" font-size="12" fill="${C.weak}">ルールスイッチ</text>` +
-    `<text x="22" y="68" font-size="28" font-weight="bold" fill="${on > 0 ? C.green : C.weak}">オン ${on} 個</text>` +
-    `<text x="174" y="42" font-size="12" fill="${C.weak}">全 ${all} 個</text>` +
-    strip +
-    `<line x1="20" y1="82" x2="360" y2="82" stroke="${C.line}"/>` +
-    rows +
-    `</svg>`
+  return frame(
+    h,
+    header('ルールスイッチ', `全 ${all} 個`, on > 0 ? C.green : C.dim) +
+      countUp(on, `x="16" y="${HEADER_H + 40}" font-size="28" font-weight="bold" fill="${on > 0 ? C.green : C.dim}"`, n => `オン ${n} 個`) +
+      strip +
+      `<line x1="16" y1="${TOP - 14}" x2="${380 - 16}" y2="${TOP - 14}" stroke="${C.line}"/>` +
+      rows,
   )
 }
 

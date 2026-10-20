@@ -1,20 +1,7 @@
 // SpecStatus の出力を読み、ペインの SVG と terminal 用の行を組む。どれも純関数
 import type { SpecBoardItem, SpecBoardNext, SpecBoardSnap } from '../types'
+import { C, HEADER_H, countUp, frame, growBar, header } from './style'
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
-const W = 380
 
 /** 呼んでよいサブコマンド。データを書く物 (mark・update・schedule・notify・build・gui・shortcut) は呼ばない */
 export const READ_ONLY = new Set(['list', 'next', 'show'])
@@ -114,23 +101,24 @@ export const clockLabel = (ms: number) => {
 
 const esc = (s: string) => clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-const svgDoc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+// 見出しの右には時刻を入れない(読み直しのたびに source が変わると動きが最初からになる)
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く) */
+const svgDoc = (h: number, body: string, accent = C.purple) =>
+  frame(h + HEADER_H, header('仕様書', 'SpecStatus', accent) + `<g transform="translate(0 ${HEADER_H})">${body}</g>`)
 
 const count = (items: SpecBoardItem[], f: (i: SpecBoardItem) => boolean) => items.filter(f).length
 
-function tile(x: number, label: string, value: string, sub: string, color: string, isPulsing: boolean) {
+function tile(x: number, label: string, value: number, sub: string, color: string, isPulsing: boolean, delay: number) {
   const pulse = isPulsing
     ? `<circle cx="${x + 100}" cy="26" r="4" fill="${color}"><animate attributeName="opacity" values="1;0.2;1" dur="1.6s" repeatCount="indefinite"/></circle>`
     : ''
   return (
     `<rect x="${x}" y="10" width="114" height="84" rx="8" fill="${C.face}" stroke="${C.line}"/>` +
     `<rect x="${x}" y="10" width="4" height="84" rx="2" fill="${color}"/>` +
-    `<text x="${x + 14}" y="30" font-size="12" fill="${C.weak}">${label}</text>` +
+    `<text x="${x + 14}" y="30" font-size="12" fill="${C.dim}">${label}</text>` +
     pulse +
-    `<text x="${x + 14}" y="64" font-size="${value.length > 3 ? 22 : 28}" font-weight="bold" fill="${color}">${esc(value)}</text>` +
-    `<text x="${x + 14}" y="84" font-size="12" fill="${C.weak}">${esc(cut(sub, 15))}</text>`
+    countUp(value, `x="${x + 14}" y="64" font-size="${String(value).length > 3 ? 22 : 28}" font-weight="bold" fill="${color}"`, String, delay) +
+    `<text x="${x + 14}" y="84" font-size="12" fill="${C.dim}">${esc(cut(sub, 15))}</text>`
   )
 }
 
@@ -140,11 +128,11 @@ function okSvg(snap: Extract<SpecBoardSnap, { kind: 'ok' }>) {
   const real = count(snap.waiting, i => i.waiting === '実物待ち')
   const part = count(snap.progress, i => i.state === '一部未実装')
   let s =
-    tile(8, '待ち', String(snap.waiting.length), `確認 ${ask}・実物 ${real}`, C.yellow, ask > 0) +
-    tile(133, '途中', String(snap.progress.length), `着手 ${snap.progress.length - part}・一部 ${part}`, C.blue, false) +
-    tile(258, '次のおすすめ', String(snap.next.length), snap.next[0]?.name ?? 'なし', C.green, false)
+    tile(8, '待ち', snap.waiting.length, `確認 ${ask}・実物 ${real}`, C.yellow, ask > 0, 0) +
+    tile(133, '途中', snap.progress.length, `着手 ${snap.progress.length - part}・一部 ${part}`, C.blue, false, 0.1) +
+    tile(258, '次のおすすめ', snap.next.length, snap.next[0]?.name ?? 'なし', C.green, false, 0.2)
   const rows = snap.next.slice(0, 5)
-  if (rows.length === 0) return svgDoc(104, s)
+  if (rows.length === 0) return svgDoc(104, s, snap.waiting.length > 0 ? C.yellow : C.purple)
   const y0 = 104
   const h = 34 + rows.length * 34
   s += `<rect x="8" y="${y0}" width="364" height="${h}" rx="8" fill="${C.face}" stroke="${C.line}"/>`
@@ -154,14 +142,12 @@ function okSvg(snap: Extract<SpecBoardSnap, { kind: 'ok' }>) {
     const y = y0 + 34 + i * 34
     const bw = Math.max(4, (Math.max(0, r.score) / max) * 250)
     s += `<text x="20" y="${y + 12}" font-size="12" fill="${C.text}">${esc(cut(r.name, 34))}</text>`
-    s += `<text x="360" y="${y + 12}" font-size="12" fill="${C.weak}" text-anchor="end">${esc(cut(r.state, 10))}</text>`
+    s += `<text x="360" y="${y + 12}" font-size="12" fill="${C.dim}" text-anchor="end">${esc(cut(r.state, 10))}</text>`
     s += `<rect x="20" y="${y + 18}" width="250" height="8" rx="4" fill="${C.bg}"/>`
-    s +=
-      `<rect x="20" y="${y + 18}" width="${bw}" height="8" rx="4" fill="${C.green}">` +
-      `<animate attributeName="width" from="0" to="${bw}" dur="0.6s" fill="freeze"/></rect>`
+    s += growBar(20, y + 18, bw, 8, C.green, Number((0.2 + i * 0.08).toFixed(2)))
     s += `<text x="280" y="${y + 26}" font-size="12" fill="${C.green}">${r.score}</text>`
   })
-  return svgDoc(y0 + h + 8, s)
+  return svgDoc(y0 + h + 8, s, snap.waiting.length > 0 ? C.yellow : C.purple)
 }
 
 /** 未設定・失敗・まだ読んでいない時の札 */
@@ -171,7 +157,7 @@ function messageSvg(title: string, color: string, lines: string[]) {
   s += `<rect x="8" y="8" width="4" height="${52 + shown.length * 20}" rx="2" fill="${color}"/>`
   s += `<text x="24" y="38" font-size="18" font-weight="bold" fill="${color}">${esc(title)}</text>`
   shown.forEach((l, i) => (s += `<text x="24" y="${64 + i * 20}" font-size="12" fill="${C.text}">${esc(cut(l, 54))}</text>`))
-  return svgDoc(68 + shown.length * 20, s)
+  return svgDoc(68 + shown.length * 20, s, color)
 }
 
 /** 54 桁ずつに折る */
@@ -197,7 +183,7 @@ export function paneSvg(snap: SpecBoardSnap) {
   if (snap.kind === 'ok') return okSvg(snap)
   if (snap.kind === 'unset') return messageSvg('未設定', C.yellow, wrap(UNSET_HINT.replace(/^未設定。/, '')))
   if (snap.kind === 'error') return messageSvg(`${snap.step} が失敗しました`, C.red, wrap(snap.message))
-  return messageSvg('読み込み中', C.weak, ['SpecStatus を読んでいます'])
+  return messageSvg('読み込み中', C.dim, ['SpecStatus を読んでいます'])
 }
 
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }

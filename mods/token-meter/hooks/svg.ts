@@ -1,32 +1,15 @@
 // SVG を文字列で組む関数。描画面は <img> なので動きは SMIL だけ
+// 描き直すのはターンが終わる時(とリセット)だけなので、数字と最新の棒は開くたびに 1 回だけ動く
 import type { TokenMeterTurn, TokenMeterUsage } from '../types'
+import { C, HEADER_H, W, countUp, esc, frame, header } from './style'
 
-export const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
-
-/** 4 種の名前と色。積み上げは下からこの順 */
-export const SERIES: { key: keyof TokenMeterUsage; label: string; color: string }[] = [
-  { key: 'cacheRead', label: 'キャッシュ読み', color: C.green },
-  { key: 'cacheWrite', label: 'キャッシュ書き', color: C.purple },
-  { key: 'input', label: '入力', color: C.blue },
-  { key: 'output', label: '出力', color: C.orange },
+/** 4 種の名前と色。積み上げは下からこの順。色はテーマに付いていくよう読むたびに C から引く */
+export const SERIES: { key: keyof TokenMeterUsage; label: string; readonly color: string }[] = [
+  { key: 'cacheRead', label: 'キャッシュ読み', get color() { return C.green } },
+  { key: 'cacheWrite', label: 'キャッシュ書き', get color() { return C.purple } },
+  { key: 'input', label: '入力', get color() { return C.blue } },
+  { key: 'output', label: '出力', get color() { return C.orange } },
 ]
-
-const W = 360
-const FONT = 'font-family="sans-serif"'
-
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 /** 1234 → 1.2k、3456789 → 3.5M。1000 未満はそのまま */
 export const short = (n: number) => {
@@ -46,17 +29,11 @@ export const hitRate = (u: TokenMeterUsage) => {
 
 export const rateColor = (r: number) => (r >= 0.7 ? C.green : r >= 0.4 ? C.yellow : C.red)
 
-const svg = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" ${FONT}>` +
-  `<rect x="0.5" y="0.5" width="${W - 1}" height="${h - 1}" rx="12" fill="${C.face}" stroke="${C.line}"/>` +
-  body +
-  `</svg>`
-
 const text = (x: number, y: number, s: string, size: number, fill: string, extra = '') =>
   `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${extra}>${esc(s)}</text>`
 
-const title = (s: string, right = '') =>
-  text(16, 28, s, 14, C.text, 'font-weight="bold"') + (right ? text(W - 16, 28, right, 12, C.dim, 'text-anchor="end"') : '')
+/** 見出しの下から中身を始める y */
+const TOP = HEADER_H + 12
 
 // ---- 合計とリング ----
 
@@ -69,15 +46,15 @@ export const summarySvg = (total: TokenMeterUsage, sub: TokenMeterUsage & { runs
   ]
   const nums = cells
     .map(([label, n, color], i) => {
-      const x = 16 + (i % 2) * 104
-      const y = 56 + Math.floor(i / 2) * 64
-      return text(x, y, label, 12, C.dim) + text(x, y + 30, short(n), 26, color, 'font-weight="bold"')
+      const x = 16 + (i % 2) * 110
+      const y = TOP + 12 + Math.floor(i / 2) * 64
+      return text(x, y, label, 12, C.dim) + countUp(n, `x="${x}" y="${y + 30}" font-size="26" fill="${color}" font-weight="bold"`, short, i * 0.06)
     })
     .join('')
 
   // リング: 上から時計回りに当たり率の分だけ塗る。描くたびに 0 から伸ばす
-  const cx = 288
-  const cy = 98
+  const cx = 300
+  const cy = 110
   const r = 46
   const len = 2 * Math.PI * r
   const rate = hitRate(total)
@@ -93,31 +70,31 @@ export const summarySvg = (total: TokenMeterUsage, sub: TokenMeterUsage & { runs
 
   const subLine =
     sub.runs > 0
-      ? text(16, 196, `サブエージェント ${sub.runs}回  計 ${short(sum(sub))}`, 12, C.dim)
-      : text(16, 196, 'サブエージェントの分は別に数えます', 12, C.dim)
+      ? text(16, 208, `サブエージェント ${sub.runs}回  計 ${short(sum(sub))}`, 12, C.dim)
+      : text(16, 208, 'サブエージェントの分は別に数えます', 12, C.dim)
 
-  return svg(212, title('トークン', 'セッション合計') + nums + ring + `<line x1="16" y1="176" x2="${W - 16}" y2="176" stroke="${C.line}"/>` + subLine)
+  return frame(224, header('トークン', 'セッション合計', C.green) + nums + ring + `<line x1="16" y1="188" x2="${W - 16}" y2="188" stroke="${C.line}"/>` + subLine)
 }
 
 // ---- ターンごとの積み上げ棒 ----
 
 export const barsSvg = (turns: TokenMeterTurn[], heaviest: TokenMeterTurn | null) => {
   const shown = turns.slice(-20)
-  const H = 262
+  const H = 274
   if (shown.length === 0) {
-    return svg(H, title('ターンごと') + text(W / 2, 140, 'まだターンがありません', 13, C.dim, 'text-anchor="middle"'))
+    return frame(H, header('ターンごと') + text(W / 2, 152, 'まだターンがありません', 13, C.dim, 'text-anchor="middle"'))
   }
 
   // 凡例
   let lx = 16
   const legend = SERIES.map(s => {
-    const part = `<rect x="${lx}" y="44" width="12" height="12" rx="2" fill="${s.color}"/>` + text(lx + 16, 55, s.label, 12, C.text)
+    const part = `<rect x="${lx}" y="${TOP}" width="12" height="12" rx="2" fill="${s.color}"/>` + text(lx + 16, TOP + 11, s.label, 12, C.text)
     lx += 16 + s.label.length * 12 + 10
     return part
   }).join('')
 
-  const top = 84
-  const base = 206
+  const top = TOP + 40
+  const base = 218
   const plotH = base - top
   const left = 16
   const slot = (W - 32) / 20
@@ -161,19 +138,19 @@ export const barsSvg = (turns: TokenMeterTurn[], heaviest: TokenMeterTurn | null
     text(left, base + 18, `#${first.n}`, 12, C.dim) + text(W - 16, base + 18, `#${last.n} 最新 ${short(sum(last))}`, 12, C.text, 'text-anchor="end"')
 
   const heavy = heaviest
-    ? text(16, 248, '一番重かったターン', 12, C.dim) +
-      text(W - 16, 248, `#${heaviest.n}  ${short(sum(heaviest))}`, 13, C.yellow, 'text-anchor="end" font-weight="bold"')
+    ? text(16, 260, '一番重かったターン', 12, C.dim) +
+      text(W - 16, 260, `#${heaviest.n}  ${short(sum(heaviest))}`, 13, C.yellow, 'text-anchor="end" font-weight="bold"')
     : ''
 
-  return svg(
+  return frame(
     H,
-    title('ターンごと', `直近 ${shown.length} ターン`) +
+    header('ターンごと', `直近 ${shown.length} ターン`) +
       legend +
       grid +
       bars +
       marker +
       axis +
-      `<line x1="16" y1="228" x2="${W - 16}" y2="228" stroke="${C.line}"/>` +
+      `<line x1="16" y1="240" x2="${W - 16}" y2="240" stroke="${C.line}"/>` +
       heavy,
   )
 }

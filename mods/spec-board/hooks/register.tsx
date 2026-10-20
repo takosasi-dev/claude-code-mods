@@ -23,6 +23,7 @@ import {
   summaryLines,
   tagOf,
 } from './board'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'spec-board'
 const TITLE = '仕様書'
@@ -126,8 +127,10 @@ export const register: Register = (on, options) => {
   cfg.python = isPythonOk(python) ? python : ''
   cfg.script = isAbsolute(script) ? script : ''
 
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /specs が拒まれたら /spec-board にする
     const got = await $.command.register({ name: 'specs', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'specs'

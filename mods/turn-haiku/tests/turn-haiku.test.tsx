@@ -174,6 +174,10 @@ test('短冊の SVG: 縦に 1 字ずつ、右の列から、viewBox だけ、制
   expect(pos('夜').y).toBeGreaterThan(pos('秋').y)
   // 墨がにじむ (ぼかしが引いていく)
   expect(svg).toContain('attributeName="stdDeviation"')
+  // にじみの丸は広がりながら消え、終わった後に字の後ろへ残らない
+  const blooms = [...svg.matchAll(/<animate attributeName="opacity" values="([^"]*)" dur="1\.4s"/g)].map(m => m[1])
+  expect(blooms).toHaveLength([...'秋の夜直したテストの緑かな'].length)
+  for (const v of blooms) expect(v?.split(';').at(-1)).toBe('0')
   // 外から来た字は掃除してエスケープする
   const bad = tanzakuSvg({ id: 'x', at: NOW, text: '<b>&\u0007"' })
   expect(bad).not.toMatch(CTRL)
@@ -376,6 +380,31 @@ for (const surface of SURFACES) {
     }
   })
 }
+
+test('/config の theme が light 系なら明るい壁で描き、切り替えにも付いていく。短冊の紙は同じ色', async ($, on) => {
+  engine(on)
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await start($)
+  await turn($, 't1', { tools: [['Read', '/tmp/demo/a.ts']] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const light = await svgOf(ui)
+  expect(light).toContain('stop-color="#ffffff"')
+  expect(light).toContain('stop-color="#f6eedb"')
+
+  theme = 'dark'
+  await $.config.set({
+    key: 'theme',
+    value: 'dark',
+    previous: 'light',
+    provider: { plugin: 'core', tier: 'core' } as never,
+    origin: { kind: 'composer' },
+  })
+  const dark = await svgOf(ui)
+  expect(dark).toContain('stop-color="#0d1117"')
+  expect(dark).toContain('stop-color="#f6eedb"')
+})
 
 test('/haiku でペインを開く', async ($, on) => {
   const w = engine(on)

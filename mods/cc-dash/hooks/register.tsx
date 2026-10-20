@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { CcDashCall, CcDashTab, CcDashUsage } from '../types'
 import { clean, clock, dur, gaugesSvg, left, overviewSvg, shortTool, TOOL_COLORS, timelineSvg, toolBarsSvg, turnsSvg } from './svg'
 import type { Gauge } from './svg'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'cc-dash'
 const TITLE = '計器盤'
@@ -73,8 +74,10 @@ export const register: Register = (on, options) => {
   const raw = String(options.usageFile ?? '').trim()
   // 絶対パスでなければ未設定と同じ扱い
   const file = isAbsolute(raw) ? raw : ''
+  followTheme(on)
 
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     await $.command.register({ name: 'dash', description: 'セッションの計器盤をペインに表示' }).catch(() => {})
     // リロードでも session.start は来る。最初の 1 回だけ時刻を入れる
     const now = await $.clock.now()

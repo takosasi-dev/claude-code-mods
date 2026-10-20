@@ -9,14 +9,18 @@ import {
   MAX_MURK,
   UPSET_MS,
   drawTank,
-  fishCount,
+  fishLine,
+  fishListSvg,
+  fishOf,
   fromSaved,
   fullnessAt,
   sameView,
+  stepFish,
   toSaved,
   viewAt,
 } from './tank'
 import type { Saved } from './tank'
+import { C, clean, followTheme, readTheme } from './style'
 
 const PANE = 'aqua-pet'
 const TITLE = '水槽'
@@ -89,8 +93,11 @@ const feed = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'aquarium', description: '水槽のペインを開く' }).catch(() => {})
+    await readTheme($)
     isWarned = false
     // リロード時は実行中などの一時的な値を残し、育ち具合だけ store から戻す
     await change($, t => t)
@@ -113,9 +120,15 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
-    // 中断したターンは育ちに数えない
+    // 中断したターンは育ちに数えない。数えたターンでは魚が 1 つ育ち、節目なら新しい魚が来る
+    // (t は書く直前に読み直した store の値なので、別のセッションが足した魚も消さない)
     if (!e.agentId)
-      await change($, (t, now) => ({ ...t, isRunning: false, lastActiveAt: now, turns: t.turns + (e.isAborted ? 0 : 1) }))
+      await change($, (t, now) => {
+        const done = { ...t, isRunning: false, lastActiveAt: now }
+        if (e.isAborted) return done
+        const turns = t.turns + 1
+        return { ...done, turns, fish: stepFish(fishOf(t), turns, t.bornAt, now) }
+      })
     return next(e)
   })
 
@@ -136,13 +149,15 @@ export const register: Register = on => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const v = t.view
-    const n = fishCount(t.turns)
+    const fish = fishOf(t)
+    const n = fish.length
 
     const buttons = (
       <Box flexDirection="row" flexWrap="wrap" gap={1}>
         <Button key="feed" label="えさをやる" variant="primary" onPress={() => void feed($)} />
         <Button key="rename" label="名前" onPress={() => void update($, tank, x => ({ ...x, isNaming: !x.isNaming }))} />
         <Button key="clean" label="掃除" onPress={() => void change($, x => ({ ...x, murk: 0 }))} />
+        <Button key="list" label={t.isListing ? '水槽' : '一覧'} onPress={() => void update($, tank, x => ({ ...x, isListing: !x.isListing }))} />
       </Box>
     )
     const naming =
@@ -162,6 +177,23 @@ export const register: Register = on => {
       </Text>
     )
 
+    // 一覧の行 (terminal)
+    const listRows = t.isListing ? (
+      <Box key="fish-list" flexDirection="column">
+        {fish.map(f => {
+          const l = fishLine(f)
+          return (
+            <Box key={`f${f.id}`} flexDirection="column">
+              <Text>
+                {clean(l.title)} <Text color={l.stage === '大物' ? C.yellow : l.stage === '成魚' ? C.green : undefined}>{l.stage}</Text>
+              </Text>
+              <Text dimColor>{`  ${l.came}`}</Text>
+            </Box>
+          )
+        })}
+      </Box>
+    ) : null
+
     // terminal の部品表にも Svg の名前があるので surface でも分ける
     if (e.surface === 'terminal' || !('Svg' in ui)) {
       const mood = v.isUpset ? ' / びっくり' : t.isRunning ? ' / 作業中' : v.isIdle ? ' / おやすみ' : ''
@@ -169,6 +201,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           <Text>{`魚 ${n} 匹 / 満腹度 ${v.fullness}%${mood}`}</Text>
           {info}
+          {listRows}
           {buttons}
           {naming}
         </Box>
@@ -178,7 +211,11 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" gap={1}>
-        <Svg source={drawTank(t)} alt={`水槽: 魚 ${n} 匹、満腹度 ${v.fullness}%`} />
+        {t.isListing ? (
+          <Svg key="list-svg" source={fishListSvg(fish)} alt={`魚の一覧: ${n} 匹`} />
+        ) : (
+          <Svg key="tank-svg" source={drawTank(t)} alt={`水槽: 魚 ${n} 匹、満腹度 ${v.fullness}%`} />
+        )}
         {info}
         {buttons}
         {naming}

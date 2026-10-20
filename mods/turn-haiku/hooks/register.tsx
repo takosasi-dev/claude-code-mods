@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { HaikuPoem, HaikuTurn } from '../types'
 import { askFor, clean, cleanAnswer, digestOf, failText, fileOf, mergePoems, poemsOf, shouldCompose, stamp, tanzakuSvg } from './haiku'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'turn-haiku'
 const TITLE = 'ターンの俳句'
@@ -90,8 +91,11 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /haiku が拒まれたら (組み込みや別の mod と被ったら) /turn-haiku にする
     const got = await $.command.register({ name: 'haiku', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'haiku'

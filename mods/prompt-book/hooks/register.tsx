@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptFilled, Register, Timer } from 'claude-code'
 
 import type { PromptBookDraft, PromptBookItem, PromptBookSort } from '../types'
+import { followTheme, readTheme } from './style'
 import { SORTS, arrange, chartSvg, fromSaved, isSort, newId, parseTags, seeds, short, summaryLines, tagCounts, titleOf } from './book'
 
 const PANE = 'prompt-book'
@@ -143,7 +144,10 @@ const openPane = async ($: $) => {
 let ownsMain = false
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     // /prompts が拒まれたら (組み込みと被ったら) /prompt-book にする
     const got = await $.command.register({ name: 'prompts', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'prompts'
@@ -185,12 +189,12 @@ export const register: Register = on => {
             {lines.map((l, i) => (
               <Text bold={i === 0}>{l}</Text>
             ))}
-            {isFlashing && <Text color="#3fb950">保存しました</Text>}
+            {isFlashing && <Text color="success">保存しました</Text>}
           </Box>
         )}
         {notice !== '' && (
           <Box key="notice">
-            <Text color="#d29922">{notice}</Text>
+            <Text color="warning">{notice}</Text>
           </Box>
         )}
         <Box flexDirection="column">

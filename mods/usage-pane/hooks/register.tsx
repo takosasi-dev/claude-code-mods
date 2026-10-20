@@ -1,6 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { UsagePaneData } from '../types/index'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'usage-pane'
 const usageKey = { plugin: 'usage-pane', key: 'usage' } as const
@@ -38,11 +39,13 @@ async function refresh($: EngineInterface, file: string) {
 }
 
 export const register: Register = (on, options) => {
+  followTheme(on)
   const raw = String(options.usageFile ?? '').trim()
   // 絶対パスでなければ未設定と同じ扱い
   const file = isAbsolute(raw) ? raw : ''
 
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     // 組み込みの /usage とぶつけないよう別名にする
     await $.command.register({ name: 'usage-pane', description: '使用量をペインに表示' }).catch(() => {})
     await refresh($, file)

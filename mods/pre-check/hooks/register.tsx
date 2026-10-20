@@ -17,6 +17,7 @@ import {
   tailOf,
   verdictOf,
 } from './check'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'pre-check'
 const TITLE = 'コミット前'
@@ -172,8 +173,10 @@ export const register: Register = (on, options) => {
   cfg.command = cfg.argv.join(' ')
   cfg.timeoutMs = Math.min(MAX_TIMEOUT_SECONDS, Math.max(1, Number(options.timeoutSeconds) || 300)) * 1000
 
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /precheck が拒まれたら /pre-check にする
     const got = await $.command.register({ name: 'precheck', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'precheck'

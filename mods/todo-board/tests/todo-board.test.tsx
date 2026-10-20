@@ -125,7 +125,7 @@ for (const surface of SURFACES) {
     if (surface === 'vscode') {
       const src = String((await ui.find({ type: 'Svg' }))?.props.source)
       expect(src).toMatch(/TODO ボード/)
-      expect(src).toMatch(/>6<\/text>/)
+      expect(src).toMatch(/>6(<animate[^>]*\/>)?<\/text>/) // 数字は増えて止まる(最後のコマ)
       expect(src).toMatch(/fill="#f85149">FIXME</)
       expect(src).toMatch(/fill="#58a6ff">TODO</)
       expect(src).toMatch(/fill="#f78166">HACK</)
@@ -403,4 +403,24 @@ test('/todos が拒まれて /todo-board にした時は、/todos を横取り�
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
   expect(await $.command.run({ command: 'todos', ...run })).toMatchObject({ text: '組み込みの todos' })
   expect(await $.command.run({ command: 'todo-board', ...run })).toMatchObject({ text: 'TODO のペインを開きました。' })
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockGit(on, { repo: 'many', calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'reload' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#ffffff"\/>/)
+  expect(await source()).toContain('fill="#cf222e">FIXME<') // 明るい赤
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
 })

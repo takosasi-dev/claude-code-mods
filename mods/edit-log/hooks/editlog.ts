@@ -1,20 +1,7 @@
 // 記録の集計と、SVG・terminal 用の行を組む。どれも純関数
 import type { EditLogEntry } from '../types'
+import { C, HEADER_H, countUp, fadeIn, frame, header } from './style'
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
-const W = 380
 const MONO = 'ui-monospace, Consolas, monospace'
 /** 横棒に出すファイルの数 */
 export const TOP_FILES = 8
@@ -23,14 +10,9 @@ export const TOP_EVENTS = 15
 /** 詳細の変更履歴に出す回数 */
 export const TOP_HISTORY = 30
 
-/** ツールの種類ごとの色。知らないツールは弱い色 */
-export const TOOL_COLOR: Record<string, string> = {
-  Edit: C.blue,
-  Write: C.green,
-  MultiEdit: C.purple,
-  NotebookEdit: C.orange,
-}
-const toolColor = (tool: string) => TOOL_COLOR[tool] ?? C.weak
+/** ツールの種類ごとの色。知らないツールは弱い色(C は今のテーマの色なので、呼ぶたびに引く) */
+const toolColor = (tool: string) =>
+  ({ Edit: C.blue, Write: C.green, MultiEdit: C.purple, NotebookEdit: C.orange })[tool] ?? C.dim
 
 /** 行数。末尾の改行 1 つは数えない */
 export const countLines = (s: unknown) => (typeof s !== 'string' || s === '' ? 0 : s.replace(/\r?\n$/, '').split('\n').length)
@@ -140,15 +122,16 @@ const esc = (s: string) => plain(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
 const base = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
 const linesText = (e: { tool: string; lines: number }) => (e.tool === 'Write' ? `${e.lines}行` : `約${e.lines}行`)
 
-const svgDoc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く) */
+const svgDoc = (h: number, body: string, title: string, sub = '') =>
+  frame(h + HEADER_H, header(title, sub, C.blue) + `<g transform="translate(0 ${HEADER_H})">${body}</g>`)
 
-const tile = (x: number, y: number, label: string, value: string, color: string) =>
+/** 数のタイル。数字は 0 から増えて止まる(unit は数字の後ろに付ける) */
+const tile = (x: number, y: number, label: string, value: number, unit: string, color: string, delay = 0) =>
   `<rect x="${x}" y="${y}" width="110" height="54" rx="6" fill="${C.bg}" stroke="${C.line}"/>` +
   `<rect x="${x}" y="${y}" width="3" height="54" rx="1.5" fill="${color}"/>` +
-  `<text x="${x + 12}" y="${y + 17}" font-size="12" fill="${C.weak}">${label}</text>` +
-  `<text x="${x + 12}" y="${y + 45}" font-size="24" font-weight="bold" fill="${color}">${value}</text>`
+  `<text x="${x + 12}" y="${y + 17}" font-size="12" fill="${C.dim}">${label}</text>` +
+  countUp(value, `x="${x + 12}" y="${y + 45}" font-size="24" font-weight="bold" fill="${color}"`, n => `${n}${unit}`, delay)
 
 const grow = (from: number, to: number, attr: string) =>
   `<animate attributeName="${attr}" from="${from}" to="${to}" dur="0.6s" calcMode="spline" keySplines="0.2 0.8 0.2 1" keyTimes="0;1" fill="freeze"/>`
@@ -163,7 +146,7 @@ function legend(y: number) {
     ['失敗', C.red],
   ]
   let x = 14
-  let s = `<g font-size="12" fill="${C.weak}">`
+  let s = `<g font-size="12" fill="${C.dim}">`
   for (const [label, color] of items) {
     s += `<circle cx="${x + 4}" cy="${y - 4}" r="4" fill="${color}"/><text x="${x + 12}" y="${y}">${label}</text>`
     x += 12 + units(label) * 7 + 12
@@ -186,7 +169,7 @@ function eventRow(e: EditLogEntry, y: number, isNewest: boolean, withFile: boole
   if (e.isError)
     s += `<path d="M17 ${y + 5} L23 ${y + 11} M23 ${y + 5} L17 ${y + 11}" stroke="${C.bg}" stroke-width="2" stroke-linecap="round"/>`
   s +=
-    `<text x="34" y="${y + 12}" font-size="12" font-family="${MONO}" fill="${C.weak}">${clockLabel(e.at)}</text>` +
+    `<text x="34" y="${y + 12}" font-size="12" font-family="${MONO}" fill="${C.dim}">${clockLabel(e.at)}</text>` +
     `<text x="102" y="${y + 12}" font-size="12" font-weight="bold" fill="${color}">${esc(e.tool)}</text>`
   if (e.isSub)
     s +=
@@ -194,7 +177,7 @@ function eventRow(e: EditLogEntry, y: number, isNewest: boolean, withFile: boole
       `<text x="${127 + units(e.tool) * 7}" y="${y + 12}" font-size="12" fill="${C.purple}" text-anchor="middle">サブ</text>`
   s += e.isError
     ? `<text x="368" y="${y + 12}" font-size="12" fill="${C.red}" text-anchor="end">失敗</text>`
-    : `<text x="368" y="${y + 12}" font-size="12" fill="${C.weak}" text-anchor="end">${linesText(e)}</text>`
+    : `<text x="368" y="${y + 12}" font-size="12" fill="${C.dim}" text-anchor="end">${linesText(e)}</text>`
   if (withFile) s += `<text x="34" y="${y + 29}" font-size="13" fill="${C.text}">${esc(tailFit(e.label, 46))}</text>`
   return s
 }
@@ -206,7 +189,8 @@ function messageSvg(title: string, hint: string) {
       `<g stroke="${C.blue}" stroke-width="2" fill="none" stroke-linecap="round">` +
       `<rect x="22" y="24" width="20" height="26" rx="3"/><line x1="27" y1="32" x2="37" y2="32"/><line x1="27" y1="38" x2="37" y2="38"/><line x1="27" y1="44" x2="33" y2="44"/></g>` +
       `<text x="54" y="42" font-size="15" font-weight="bold" fill="${C.text}">${esc(title)}</text>` +
-      `<text x="20" y="72" font-size="12" fill="${C.weak}">${esc(hint)}</text>`,
+      `<text x="20" y="72" font-size="12" fill="${C.dim}">${esc(hint)}</text>`,
+    '編集の記録',
   )
 }
 
@@ -217,9 +201,9 @@ export function overviewSvg(entries: readonly EditLogEntry[]) {
   let s = `<rect x="8" y="8" width="364" height="104" rx="8" fill="${C.face}" stroke="${C.line}"/>`
   s += `<text x="18" y="32" font-size="15" font-weight="bold" fill="${C.text}">このセッションの変更</text>`
   if (t.subs > 0) s += `<text x="364" y="32" font-size="12" fill="${C.purple}" text-anchor="end">うちサブ ${t.subs} 回</text>`
-  s += tile(16, 46, '触ったファイル', `${t.files}本`, C.blue)
-  s += tile(135, 46, '変更', `${t.changes}回`, C.green)
-  s += tile(254, 46, '失敗', `${t.fails}回`, t.fails > 0 ? C.red : C.weak)
+  s += tile(16, 46, '触ったファイル', t.files, '本', C.blue)
+  s += tile(135, 46, '変更', t.changes, '回', C.green, 0.1)
+  s += tile(254, 46, '失敗', t.fails, '回', t.fails > 0 ? C.red : C.dim, 0.2)
 
   // ── ファイルごとの回数
   const stats = fileStats(entries)
@@ -227,7 +211,7 @@ export function overviewSvg(entries: readonly EditLogEntry[]) {
   const max = Math.max(1, ...top.map(f => f.count))
   let y = 140
   s += `<text x="12" y="${y}" font-size="13" font-weight="bold" fill="${C.text}">ファイルごとの回数</text>`
-  s += `<text x="368" y="${y}" font-size="12" fill="${C.weak}" text-anchor="end">${top.length} / ${stats.length}</text>`
+  s += `<text x="368" y="${y}" font-size="12" fill="${C.dim}" text-anchor="end">${top.length} / ${stats.length}</text>`
   y += 12
   for (const f of top) {
     const wAll = Math.max(4, (f.count / max) * 348)
@@ -244,7 +228,7 @@ export function overviewSvg(entries: readonly EditLogEntry[]) {
     y += 34
   }
   if (stats.length > TOP_FILES) {
-    s += `<text x="16" y="${y + 6}" font-size="12" fill="${C.weak}">ほか ${stats.length - TOP_FILES} 本</text>`
+    s += `<text x="16" y="${y + 6}" font-size="12" fill="${C.dim}">ほか ${stats.length - TOP_FILES} 本</text>`
     y += 16
   }
 
@@ -257,14 +241,14 @@ export function overviewSvg(entries: readonly EditLogEntry[]) {
   const recent = entries.slice(-TOP_EVENTS).reverse()
   if (recent.length > 1) s += `<line x1="20" y1="${y + 8}" x2="20" y2="${y + 8 + (recent.length - 1) * 40}" stroke="${C.line}" stroke-width="2"/>`
   recent.forEach((e, i) => {
-    s += eventRow(e, y, i === 0, true)
+    s += fadeIn(eventRow(e, y, i === 0, true), Number((0.3 + Math.min(i, 8) * 0.05).toFixed(2)))
     y += 40
   })
   if (entries.length > TOP_EVENTS) {
-    s += `<text x="34" y="${y + 12}" font-size="12" fill="${C.weak}">ほか ${entries.length - TOP_EVENTS} 回 (古い物)</text>`
+    s += `<text x="34" y="${y + 12}" font-size="12" fill="${C.dim}">ほか ${entries.length - TOP_EVENTS} 回 (古い物)</text>`
     y += 20
   }
-  return svgDoc(y + 8, s)
+  return svgDoc(y + 8, s, '編集の記録', `${entries.length} 回`)
 }
 
 /** 詳細の SVG: そのファイルの合計と変更履歴 */
@@ -274,10 +258,10 @@ export function detailSvg(label: string, entries: readonly EditLogEntry[]) {
   const lines = mine.filter(e => !e.isError).reduce((n, e) => n + e.lines, 0)
   let s = `<rect x="8" y="8" width="364" height="126" rx="8" fill="${C.face}" stroke="${C.line}"/>`
   s += `<text x="18" y="34" font-size="17" font-weight="bold" fill="${C.text}">${esc(tailFit(base(label), 40))}</text>`
-  s += `<text x="18" y="54" font-size="12" fill="${C.weak}">${esc(tailFit(label, 52))}</text>`
-  s += tile(16, 70, '変更', `${mine.length}回`, C.green)
-  s += tile(135, 70, '失敗', `${fails}回`, fails > 0 ? C.red : C.weak)
-  s += tile(254, 70, '行のめやす', `${lines}`, C.blue)
+  s += `<text x="18" y="54" font-size="12" fill="${C.dim}">${esc(tailFit(label, 52))}</text>`
+  s += tile(16, 70, '変更', mine.length, '回', C.green)
+  s += tile(135, 70, '失敗', fails, '回', fails > 0 ? C.red : C.dim, 0.1)
+  s += tile(254, 70, '行のめやす', lines, '', C.blue, 0.2)
   let y = 162
   s += `<text x="12" y="${y}" font-size="13" font-weight="bold" fill="${C.text}">このファイルの変更履歴</text>`
   y += 14
@@ -288,10 +272,10 @@ export function detailSvg(label: string, entries: readonly EditLogEntry[]) {
     y += 24
   })
   if (mine.length > TOP_HISTORY) {
-    s += `<text x="34" y="${y + 4}" font-size="12" fill="${C.weak}">ほか ${mine.length - TOP_HISTORY} 回 (古い物)</text>`
+    s += `<text x="34" y="${y + 4}" font-size="12" fill="${C.dim}">ほか ${mine.length - TOP_HISTORY} 回 (古い物)</text>`
     y += 16
   }
-  return svgDoc(y + 8, s)
+  return svgDoc(y + 8, s, 'ファイルの変更', `${mine.length} 回`)
 }
 
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }

@@ -144,7 +144,7 @@ for (const surface of SURFACES) {
       const src = String(svg?.props.source)
       expect(src).toMatch(/>3本</)
       expect(src).toMatch(/>4回</)
-      expect(src).toMatch(/fill="#f85149">1回</)
+      expect(src).toMatch(/fill="#f85149"[^>]*>1回</)
       expect(src).toMatch(/うちサブ 1 回/)
       expect(src).toMatch(/>サブ</)
       expect(src).toMatch(/src\/app\.ts/)
@@ -351,6 +351,22 @@ test('/edits が拒まれて /edit-log にした時は、/edits を横取りし�
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
   expect(await $.command.run({ command: 'edits', ...run })).toMatchObject({ text: '組み込みの edits' })
   expect(await $.command.run({ command: 'edit-log', ...run })).toMatchObject({ text: '変更ログを開きました。' })
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  bottom(on, { repo: 'repo', diff: '', calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#ffffff"\/>/)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
 })
 
 test('親フォルダ: 根は区切りを残し、相対パスは空', () => {

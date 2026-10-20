@@ -1,22 +1,9 @@
 // 待ち受けているポートの一覧を読み、ペインの SVG と行を組む。どれも純関数
 import type { PortWatchRow } from '../types'
-
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  orange: '#f78166',
-}
-const W = 380
+import { C, HEADER_H, countUp, frame, header } from './style'
 
 /** 制御文字を落とす。エンジンは制御文字を含む Text・alt を描かない */
 export const plain = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-const esc = (s: string) => plain(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 export const cut = (s: string, n: number) => ([...s].length > n ? `${[...s].slice(0, n - 1).join('')}…` : s)
 
 /** cwd が `X:\` か `\\server\` の形なら Windows */
@@ -104,34 +91,38 @@ export const countsOf = (rows: PortWatchRow[], baseline: string[] | null): Count
   dev: rows.filter(canStop).length,
 })
 
-function tile(x: number, label: string, value: number, color: string) {
+const TILE_Y = HEADER_H + 8
+
+function tile(x: number, label: string, value: number, color: string, delay: number) {
+  const y = TILE_Y
   return (
-    `<rect x="${x}" y="44" width="116" height="66" rx="6" fill="${C.bg}" stroke="${C.line}"/>` +
-    `<rect x="${x}" y="44" width="3" height="66" rx="1.5" fill="${color}"/>` +
-    `<text x="${x + 12}" y="64" font-size="12" fill="${C.weak}">${label}</text>` +
-    `<text x="${x + 12}" y="98" font-size="28" font-weight="bold" fill="${value > 0 ? color : C.weak}">${value}</text>`
+    `<rect x="${x}" y="${y}" width="116" height="66" rx="6" fill="${C.face}" stroke="${C.line}"/>` +
+    `<rect x="${x}" y="${y}" width="3" height="66" rx="1.5" fill="${color}"/>` +
+    `<text x="${x + 12}" y="${y + 20}" font-size="12" fill="${C.dim}">${label}</text>` +
+    countUp(value, `x="${x + 12}" y="${y + 54}" font-size="28" font-weight="bold" fill="${value > 0 ? color : C.dim}"`, String, delay)
   )
 }
 
-/** 上のタイル。見張りの印はゆっくり脈打つ (数が変わらなければ source も変わらない) */
+/**
+ * 上のタイル。見張りの印はゆっくり脈打つ。時刻を含めないので、数が変わらなければ source も変わらず、
+ * 数が増える動きも数が変わった時だけ走る
+ */
 export function tilesSvg(c: Counts, isError: boolean) {
+  // 見出しの右の「5 秒ごと」の左に置く
+  const cx = 296
   const pulse = isError
-    ? `<circle cx="24" cy="24" r="6" fill="${C.orange}"/>`
-    : `<circle cx="24" cy="24" r="6" fill="${C.green}"/>` +
-      `<circle cx="24" cy="24" r="6" fill="none" stroke="${C.green}" stroke-width="2">` +
-      `<animate attributeName="r" values="6;14" dur="2.5s" repeatCount="indefinite"/>` +
+    ? `<circle cx="${cx}" cy="23" r="5" fill="${C.orange}"/>`
+    : `<circle cx="${cx}" cy="23" r="5" fill="${C.green}"/>` +
+      `<circle cx="${cx}" cy="23" r="5" fill="none" stroke="${C.green}" stroke-width="2">` +
+      `<animate attributeName="r" values="5;12" dur="2.5s" repeatCount="indefinite"/>` +
       `<animate attributeName="opacity" values="0.8;0" dur="2.5s" repeatCount="indefinite"/></circle>`
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 120" font-family="sans-serif">` +
-    `<rect width="${W}" height="120" fill="${C.bg}"/>` +
-    `<rect x="4" y="4" width="372" height="112" rx="8" fill="${C.face}" stroke="${C.line}"/>` +
-    pulse +
-    `<text x="42" y="29" font-size="13" font-weight="bold" fill="${C.text}">${isError ? esc('一覧を読めません') : esc('待ち受けているポート')}</text>` +
-    `<text x="366" y="29" font-size="12" fill="${C.weak}" text-anchor="end">5 秒ごと</text>` +
-    tile(12, '待ち受け', c.all, C.blue) +
-    tile(132, '今回増えた', c.added, C.yellow) +
-    tile(252, '開発用', c.dev, C.green) +
-    `</svg>`
+  return frame(
+    TILE_Y + 66 + 10,
+    header(isError ? '一覧を読めません' : '待ち受けているポート', '5 秒ごと', isError ? C.orange : C.green) +
+      pulse +
+      tile(12, '待ち受け', c.all, C.blue, 0.1) +
+      tile(132, '今回増えた', c.added, C.yellow, 0.2) +
+      tile(252, '開発用', c.dev, C.green, 0.3),
   )
 }
 

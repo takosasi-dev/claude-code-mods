@@ -1,8 +1,10 @@
 import type { On, Register } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { byCategory, categoryOf, clean, headerSvg, isGui, launchers, noteMod } from '../hooks/hub'
+import { applyFilter, asPins, asRecent, byCategory, categoryOf, clean, headerSvg, isGui, KNOWN_MODS, launchers, noteMod, pushRecent, sortRecent, splitPins } from '../hooks/hub'
+import { bandSvg, categoryColor, hasIcon, iconStrip, modIcon } from '../hooks/icons'
+import { DARK, LIGHT, setTheme } from '../hooks/style'
 
 const SURFACES = ['vscode', 'terminal'] as const
 const PANE = {
@@ -170,6 +172,29 @@ test('/mod を持てなかった時は /mod を横取りしない', async ($, on
   expect((await $.command.run({ command: 'mod-hub', ...RUN })).text).toBe('mod の一覧を開きました。')
 })
 
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', PLUGINS, async ($, on) => {
+  on('command.list', () => ({ value: COMMANDS.map(c => ({ ...c })) }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  let theme = 'light-daltonized'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await start($, on)
+  await $.command.run({ command: 'mod', ...RUN })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/fill="#ffffff"/)
+
+  theme = 'dark'
+  await $.config.set({
+    key: 'theme',
+    value: 'dark',
+    previous: 'light-daltonized',
+    provider: { plugin: 'core', tier: 'core' } as never,
+    origin: { kind: 'composer' },
+  })
+  expect(await source()).toMatch(/fill="#0d1117"/)
+})
+
 test('カテゴリーの順に分け、表に無い mod は「その他」', () => {
   const mods = ['wait-games', 'zz-other', 'git-pane', 'cc-dash', 'aqua-pet'].map(name => ({ name, version: '', isGui: true }))
   const cmds = mods.map(m => ({ name: m.name, description: '', plugin: m.name }))
@@ -204,4 +229,200 @@ test('並びのボタンで名前順とカテゴリー別を切り替え、次�
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   const again = await $.ui.mount({ ...PANE, surface: 'vscode' })
   expect(await again.find({ type: 'Text', text: /並び: 名前順/ })).toBeDefined()
+})
+
+// 起動ボタンの試しの一覧 (pane-mod / band-mod の 2 本)
+const sample = () =>
+  launchers(
+    [
+      { name: 'pane-mod', version: '', isGui: true },
+      { name: 'band-mod', version: '', isGui: true },
+    ],
+    COMMANDS.map(c => ({ name: c.name, description: c.description, plugin: 'plugin' in c ? c.plugin : '' })),
+  )
+
+test('検索は名前・コマンド名・説明の部分一致で、大文字小文字を見ない', () => {
+  const list = sample()
+  expect(applyFilter(list, '').map(l => l.name)).toEqual(['band-mod', 'pane-mod'])
+  expect(applyFilter(list, '  BAND ').map(l => l.name)).toEqual(['band-mod'])
+  expect(applyFilter(list, 'PANE-OPEN').map(l => l.name)).toEqual(['pane-mod'])
+  expect(applyFilter(list, '帯の表示').map(l => l.name)).toEqual(['band-mod'])
+  expect(applyFilter(list, 'zzz')).toEqual([])
+})
+
+test('最近開いた順・固定の分け方・記録の上限と形の確かめ', () => {
+  const list = launchers(
+    ['a', 'b', 'c', 'd'].map(name => ({ name, version: '', isGui: true })),
+    ['a', 'b', 'c', 'd'].map(name => ({ name, description: '', plugin: name })),
+  )
+  // 開いた物は新しい順、開いたことの無い物は後ろに名前順
+  expect(sortRecent(list, [{ name: 'c', at: 5 }, { name: 'a', at: 9 }]).map(l => l.name)).toEqual(['a', 'c', 'b', 'd'])
+  const { pinned, rest } = splitPins(list, ['c', 'zz'])
+  expect(pinned.map(l => l.name)).toEqual(['c'])
+  expect(rest.map(l => l.name)).toEqual(['a', 'b', 'd'])
+
+  let recent = Array.from({ length: 25 }, (_, i) => ({ name: `m${i}`, at: i }))
+  recent = pushRecent(recent, 'm3', 100)
+  expect(recent).toHaveLength(20)
+  expect(recent[0]).toEqual({ name: 'm3', at: 100 })
+  expect(recent.filter(r => r.name === 'm3')).toHaveLength(1)
+
+  expect(asPins(['a', 'b'])).toEqual(['a', 'b'])
+  expect(asPins(['a', 1])).toBeUndefined()
+  expect(asPins('a')).toBeUndefined()
+  expect(asRecent([{ name: 'a', at: 1 }])).toEqual([{ name: 'a', at: 1 }])
+  expect(asRecent([{ name: 'a' }])).toBeUndefined()
+  expect(asRecent([null])).toBeUndefined()
+})
+
+test('表に載っている mod 全部に専用のアイコンがあり、文字を使わない', () => {
+  for (const name of ['session-timeline', 'file-map', 'usage-history']) expect(categoryOf(name)).toBe('状況')
+  expect(categoryOf('toast-inbox')).toBe('道具')
+  const generic = modIcon('zz-unknown')
+  for (const name of KNOWN_MODS) {
+    expect(hasIcon(name)).toBe(true)
+    const svg = modIcon(name)
+    expect(svg).not.toBe(generic)
+    expect(svg).not.toMatch(/<text/)
+    expect(svg).not.toMatch(/<svg[^>]*\swidth=/)
+  }
+  // 知らない mod はカテゴリーの色の汎用アイコン
+  expect(generic).toMatch(new RegExp(`fill="${DARK.dim}"`))
+  expect(bandSvg('開発', 3)).toMatch(/開発/)
+  expect(bandSvg('開発', 3)).toMatch(/3 本/)
+  const strip = iconStrip(['git-pane', 'aqua-pet', 'file-map'])
+  expect(strip.match(/<svg /g)).toHaveLength(4)
+  expect(strip).toMatch(/^<svg xmlns=[^>]*viewBox="0 0 380 60"/)
+})
+
+test('明るいテーマではアイコンと帯も明るい色で描く', () => {
+  setTheme(true)
+  try {
+    const svg = modIcon('git-pane')
+    expect(svg).toMatch(new RegExp(`fill="${LIGHT.face}"`))
+    expect(svg).toMatch(new RegExp(LIGHT.blue))
+    expect(svg).not.toMatch(new RegExp(DARK.blue))
+    expect(bandSvg('固定', 1)).toMatch(new RegExp(LIGHT.orange))
+    expect(categoryColor('遊び')).toBe(LIGHT.purple)
+  } finally {
+    setTheme(false)
+  }
+  expect(modIcon('git-pane')).toMatch(new RegExp(DARK.blue))
+})
+
+// store を持たせて /mod を開く
+const openWithStore = async ($: Engine, on: On) => {
+  on('command.list', () => ({ value: COMMANDS.map(c => ({ ...c })) }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', { command: 'pane-open' }, () => ({ text: 'opened' }))
+  on('command.run', { command: 'band' }, () => ({ text: 'opened' }))
+  const saved: Record<string, unknown> = {}
+  on('store.get', (_$, e) => ({ value: saved[e.key] }))
+  on('store.set', (_$, e) => {
+    saved[e.key] = e.value
+    return { value: undefined }
+  })
+  await start($, on)
+  await $.command.run({ command: 'mod', ...RUN })
+  return saved
+}
+
+for (const surface of SURFACES) {
+  test(`${surface}: 検索欄で絞り込み、空に戻すと全部出る`, PLUGINS, async ($, on) => {
+    await openWithStore($, on)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ key: 'filter' }))?.props.placeholder).toBe('名前や説明で絞る')
+    await ui.input({ key: 'filter', text: 'BAND', kind: 'change' })
+    expect(await cardKeys(ui)).toEqual(['card:band-mod'])
+    await ui.input({ key: 'filter', text: '試しのペイン', kind: 'change' })
+    expect(await cardKeys(ui)).toEqual(['card:pane-mod'])
+    await ui.input({ key: 'filter', text: 'zzz', kind: 'change' })
+    expect(await cardKeys(ui)).toEqual([])
+    expect(await ui.find({ type: 'Text', text: '一致する mod がありません' })).toBeDefined()
+    await ui.input({ key: 'filter', text: '', kind: 'change' })
+    expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
+  })
+}
+
+test('vscode ではカードにアイコン、段に色の帯を描く(terminal は描かない)', PLUGINS, async ($, on) => {
+  await openWithStore($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const svgs = await ui.findAll({ type: 'Svg' })
+  const icon = svgs.find(s => s.props.alt === 'pane-mod のアイコン')
+  expect(icon?.props.width).toBe(28)
+  expect(String(icon?.props.source)).toBe(modIcon('pane-mod'))
+  expect(svgs.some(s => s.props.alt === 'その他 2 本')).toBe(true)
+  await ui.unmount()
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await term.find({ type: 'Svg' })).toBeUndefined()
+  expect(await term.find({ type: 'Text', text: 'その他 (2)' })).toBeDefined()
+})
+
+test('固定した mod は一番上の「固定」の段に移り、store は読み直して足す・抜く', PLUGINS, async ($, on) => {
+  const saved = await openWithStore($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await ui.find({ key: 'group:固定' })).toBeUndefined()
+
+  await ui.press({ key: 'pin:pane-mod' })
+  expect(saved.pins).toEqual(['pane-mod'])
+  expect(await ui.find({ key: 'group:固定' })).toBeDefined()
+  // 固定の段が先、他の段からは外れる (同じカードは 1 枚)
+  expect(await cardKeys(ui)).toEqual(['card:pane-mod', 'card:band-mod'])
+  expect(await ui.find({ type: 'Text', text: '外す' })).toBeDefined()
+
+  // 別のセッションが足した分を消さない
+  saved.pins = ['pane-mod', 'other-mod']
+  await ui.press({ key: 'pin:band-mod' })
+  expect(saved.pins).toEqual(['pane-mod', 'other-mod', 'band-mod'])
+  await ui.press({ key: 'pin:pane-mod' })
+  expect(saved.pins).toEqual(['other-mod', 'band-mod'])
+  expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
+  await ui.unmount()
+
+  // 次のセッションも固定は残る
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await again.find({ type: 'Text', text: '固定 (1)' })).toBeDefined()
+})
+
+test('並びは 3 つを順に回し、最近開いた順は起動ボタンの記録で並ぶ', PLUGINS, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000 })
+  const saved = await openWithStore($, on)
+  saved.recent = [{ name: 'gone-mod', at: 1 }]
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'sort' })
+  await ui.press({ key: 'sort' })
+  expect(await ui.find({ type: 'Text', text: /並び: 最近開いた順/ })).toBeDefined()
+  expect(saved.sort).toBe('recent')
+  // 開いたことが無ければ名前順
+  expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
+
+  await ui.press({ key: 'run:pane-mod:pane-open' })
+  expect(await cardKeys(ui)).toEqual(['card:pane-mod', 'card:band-mod'])
+  await clock.advance(60_000)
+  await ui.press({ key: 'run:band-mod:band' })
+  expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
+  await clock.advance(60_000)
+  await ui.press({ key: 'run:pane-mod:pane-open' })
+  expect(await cardKeys(ui)).toEqual(['card:pane-mod', 'card:band-mod'])
+  // 記録は読み直した物の先頭に足す
+  expect((saved.recent as { name: string }[]).map(r => r.name)).toEqual(['pane-mod', 'band-mod', 'gone-mod'])
+
+  await ui.press({ key: 'sort' })
+  expect(await ui.find({ type: 'Text', text: /並び: カテゴリー別/ })).toBeDefined()
+  await ui.unmount()
+
+  // 次のセッションは残した並びと記録で始まる
+  saved.sort = 'recent'
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const again = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await again.find({ type: 'Text', text: /並び: 最近開いた順/ })).toBeDefined()
+  expect(await cardKeys(again)).toEqual(['card:pane-mod', 'card:band-mod'])
+})
+
+test('Input の無い画面 (mobile) では検索欄を出さず、全部並べる', PLUGINS, async ($, on) => {
+  await openWithStore($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  expect(await ui.find({ key: 'filter' })).toBeUndefined()
+  expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
 })

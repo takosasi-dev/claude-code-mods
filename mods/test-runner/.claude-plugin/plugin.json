@@ -1,6 +1,6 @@
 {
   "name": "test-runner",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "/testrun でテストをボタン 1 つで走らせ、結果を信号と直近 20 回の履歴でペインに SVG で表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

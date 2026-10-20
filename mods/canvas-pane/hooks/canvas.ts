@@ -1,5 +1,6 @@
 // 入力の確かめと、図の SVG・terminal の行を組む純関数。描画面は <img> なので動きは SMIL だけ
-import type { CanvasItem, CanvasKind, CanvasLine } from '../types'
+import type { CanvasChart, CanvasItem, CanvasKind, CanvasLine } from '../types'
+import { C, W, countUp, frame, isLight } from './style'
 
 export const TOOL_NAME = 'show'
 /** 残す枚数 */
@@ -31,22 +32,11 @@ export const KIND_NAME: Record<CanvasKind, string> = {
   svg: '図',
 }
 
-export const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
-/** 系列の色 (円グラフはこの後に明るい版を足して 10 色) */
-const SERIES: readonly string[] = [C.blue, C.green, C.purple, C.orange, C.yellow, C.red]
-const PIE = [...SERIES, '#79c0ff', '#56d364', '#d2a8ff', '#ffa198']
+// 系列の色。赤も使う (棒や線は失敗の印ではないので)。テーマに付いていくよう、呼ぶたびに C から読む
+const seriesColor = (j: number) => [C.blue, C.green, C.purple, C.orange, C.yellow, C.red][j % 6]!
+// 円グラフは 10 色まで。7 色目からは系列の色の淡い/濃い版 (地の明るさで選ぶ。絵の中身として決めた色)
+const pieColor = (i: number) =>
+  i < 6 ? seriesColor(i) : (isLight() ? ['#0550ae', '#116329', '#6639ba', '#a40e26'] : ['#79c0ff', '#56d364', '#d2a8ff', '#ffa198'])[(i - 6) % 4]!
 
 // ---- 文字 ----
 
@@ -196,8 +186,8 @@ export function parseShow(input: Record<string, unknown>): Parsed {
       if (vals.some(v => v < 0)) return { error: 'pie の values に負の数は使えません' }
       if (vals.reduce((a, b) => a + b, 0) <= 0) return { error: 'pie の values の合計が 0 です' }
     }
-    const svg = k === 'bar' ? barSvg(labels, series) : k === 'line' ? lineSvg(labels, series) : pieSvg(labels, series[0]!.values)
-    return done({ title, kind: k, svg, alt: chartAlt(title, k, labels, series), lines: chartLines(k, labels, series) })
+    const chart: CanvasChart = k === 'pie' ? { kind: k, labels, values: series[0]!.values } : { kind: k, labels, series }
+    return done({ title, kind: k, svg: drawChart(chart), chart, alt: chartAlt(title, k, labels, series), lines: chartLines(k, labels, series) })
   }
 
   if (k === 'table') {
@@ -230,7 +220,8 @@ export function parseShow(input: Record<string, unknown>): Parsed {
       while (row.length < columns.length) row.push('')
       rows.push(row)
     }
-    return done({ title, kind: k, svg: tableSvg(columns, rows), alt: tableAlt(title, columns, rows), lines: tableLines(columns, rows) })
+    const chart: CanvasChart = { kind: k, columns, rows }
+    return done({ title, kind: k, svg: drawChart(chart), chart, alt: tableAlt(title, columns, rows), lines: tableLines(columns, rows) })
   }
 
   if (k === 'markdown') {
@@ -260,15 +251,11 @@ const done = (item: Omit<CanvasItem, 'id' | 'at'>): Parsed =>
 
 // ---- SVG の部品 ----
 
-const W = 380
-const FONT = 'font-family="sans-serif"'
 type Cell = string | number
 
-const frame = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" ${FONT}>` +
-  `<rect x="0.5" y="0.5" width="${W - 1}" height="${h - 1}" rx="12" fill="${C.face}" stroke="${C.line}"/>` +
-  body +
-  `</svg>`
+/** 元のデータから、今のテーマの色で組む (描くたびに呼ぶ。テーマを切り替えると色が付いていく) */
+export const drawChart = (c: CanvasChart) =>
+  c.kind === 'table' ? tableSvg(c.columns, c.rows) : c.kind === 'pie' ? pieSvg(c.labels, c.values) : c.kind === 'bar' ? barSvg(c.labels, c.series) : lineSvg(c.labels, c.series)
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 
@@ -304,7 +291,7 @@ function legend(series: Series[], y: number): { svg: string; h: number } {
       row++
     }
     const yy = y + row * 20
-    out += `<rect x="${x}" y="${yy - 9}" width="11" height="11" rx="3" fill="${SERIES[i % SERIES.length]}"/>` + text(x + 16, yy, name, 12, C.text)
+    out += `<rect x="${x}" y="${yy - 9}" width="11" height="11" rx="3" fill="${seriesColor(i)}"/>` + text(x + 16, yy, name, 12, C.text)
     x += w
   }
   return { svg: out, h: (row + 1) * 20 }
@@ -348,7 +335,7 @@ export function barSvg(labels: string[], series: Series[]): string {
       const x = Math.min(sx(v), zero)
       const w = Math.max(Math.abs(sx(v) - zero), v === 0 ? 0 : 1)
       const delay = Math.min(0.6, n++ * 0.025)
-      const color = SERIES[j % SERIES.length]!
+      const color = seriesColor(j)
       // 負の数は 0 から左へ伸びる (x も動かす)
       out +=
         `<rect x="${r1(x)}" y="${r1(y)}" width="${r1(w)}" height="${r1(bar - 1)}" rx="2" fill="${color}">` +
@@ -407,7 +394,7 @@ export function lineSvg(labels: string[], series: Series[]): string {
   }
   const showAll = series.length === 1 && n <= 12
   for (const [j, s] of series.entries()) {
-    const color = SERIES[j % SERIES.length]!
+    const color = seriesColor(j)
     if (n > 1)
       out +=
         `<path d="M${pts(s).join('L')}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="0">` +
@@ -440,7 +427,7 @@ export function pieSvg(labels: string[], values: number[]): string {
   for (const [i, v] of values.entries()) {
     const pct = (v / total) * 100
     if (pct <= 0) continue
-    const color = PIE[i % PIE.length]
+    const color = pieColor(i)
     const len = Math.max(0.01, pct > 1.5 ? pct - 0.6 : pct)
     const delay = (start / 100) * 0.8
     out +=
@@ -453,7 +440,7 @@ export function pieSvg(labels: string[], values: number[]): string {
     }
     start += pct
   }
-  out += text(cx, cy + 2, fmt(total), 18, C.text, 'text-anchor="middle" font-weight="bold"')
+  out += countUp(total, `x="${cx}" y="${cy + 2}" font-size="18" fill="${C.text}" text-anchor="middle" font-weight="bold"`, fmt, 0.2)
   out += text(cx, cy + 20, '合計', 12, C.dim, 'text-anchor="middle"')
 
   // 凡例: 色・項目名・数・割合
@@ -462,7 +449,7 @@ export function pieSvg(labels: string[], values: number[]): string {
     const v = values[i]!
     out +=
       `<g opacity="1">${fadeIn(0.3 + i * 0.06)}` +
-      `<rect x="20" y="${y - 10}" width="12" height="12" rx="3" fill="${PIE[i % PIE.length]}"/>` +
+      `<rect x="20" y="${y - 10}" width="12" height="12" rx="3" fill="${pieColor(i)}"/>` +
       text(40, y, fit(l, 200, 12), 12, C.text) +
       text(W - 72, y, fmt(v), 12, C.text, 'text-anchor="end"') +
       text(W - 20, y, `${((v / total) * 100).toFixed(1)}%`, 12, C.dim, 'text-anchor="end"') +
@@ -492,14 +479,14 @@ export function tableSvg(columns: string[], rows: Cell[][]): string {
   const headH = 28
   const rowH = 24
   const top = 14
-  let out = `<rect x="16" y="${top}" width="${room}" height="${headH}" rx="6" fill="${C.bg}"/>`
+  let out = `<rect x="16" y="${top}" width="${room}" height="${headH}" rx="6" fill="${C.face}" stroke="${C.line}"/>`
   for (const [j, c] of columns.entries()) {
     const x = numeric[j] ? xs[j]! + widths[j]! - pad : xs[j]! + pad
     out += text(x, top + 18, fit(c, widths[j]! - pad * 2, 12), 12, C.blue, `font-weight="bold"${numeric[j] ? ' text-anchor="end"' : ''}`)
   }
   for (const [i, r] of rows.entries()) {
     const y = top + headH + i * rowH
-    let row = i % 2 === 1 ? `<rect x="16" y="${y}" width="${room}" height="${rowH}" fill="${C.bg}" opacity=".45"/>` : ''
+    let row = i % 2 === 1 ? `<rect x="16" y="${y}" width="${room}" height="${rowH}" fill="${C.face}"/>` : ''
     for (const [j, c] of r.entries()) {
       const x = numeric[j] ? xs[j]! + widths[j]! - pad : xs[j]! + pad
       row += text(x, y + 16, fit(cellText(c), widths[j]! - pad * 2, 12), 12, C.text, numeric[j] ? 'text-anchor="end"' : '')
@@ -533,7 +520,7 @@ function chartLines(kind: CanvasKind, labels: string[], series: Series[]): Canva
     const vals = series[0]!.values
     const total = vals.reduce((a, b) => a + b, 0)
     for (const [i, l] of labels.entries())
-      out.push({ text: `● ${l} ${fmt(vals[i]!)} (${((vals[i]! / total) * 100).toFixed(1)}%)`, color: PIE[i % PIE.length] })
+      out.push({ text: `● ${l} ${fmt(vals[i]!)} (${((vals[i]! / total) * 100).toFixed(1)}%)`, color: pieColor(i) })
     out.push({ text: `合計 ${fmt(total)}`, isBold: true })
     return out
   }

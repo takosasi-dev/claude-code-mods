@@ -14,6 +14,7 @@ import {
   obsidianUrl,
   toProject,
 } from './board'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'project-board'
 const TITLE = 'プロジェクト'
@@ -100,7 +101,9 @@ export const register: Register = (on, options) => {
   const vaultRoot = folderOption(options.vaultRoot)
   const vaultName = String(options.vaultName ?? '').trim()
 
+  followTheme(on)
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     await $.command.register({ name: 'projects', description: '引き継ぎメモのプロジェクト一覧を開く' }).catch(() => {})
     // 一度も開いていないセッションでは vault を読まない
     $.clock.every(RELOAD_MS, () => {

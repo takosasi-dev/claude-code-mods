@@ -2,8 +2,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { addDraw, bookSvg, CARDS, cardOf, cardSvg, EMPTY, fromSaved, manualLeft, pull, rates, statsSvg, wrap } from '../hooks/gacha'
-import type { GachaSave } from '../types'
+import { addDraw, BOOK_GOALS, bookLines, bookSvg, CARDS, cardOf, cardSvg, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, rates, statsSvg, wrap } from '../hooks/gacha'
+import { setTheme } from '../hooks/style'
+import type { GachaCard, GachaSave } from '../types'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const DAY = 86_400_000
@@ -295,4 +296,72 @@ test('store が読めない形なら書かずに知らせる', async ($, on) => 
   await ui.press({ key: 'pull' })
   expect(raw()).toBe('broken')
   expect(await ui.find({ type: 'Text', text: /記録を読めなかった/ })).toBeDefined()
+})
+
+test('どのカードにも装備の枠がある。どの枠にも N から SSR まである', () => {
+  for (const slot of ['weapon', 'armor', 'charm'] as const) {
+    const rs = new Set(CARDS.filter(c => c.slot === slot).map(c => c.rarity))
+    expect([...rs].sort()).toEqual(['N', 'R', 'SR', 'SSR'])
+  }
+  expect(CARDS.every(c => ['weapon', 'armor', 'charm'].includes(c.slot))).toBe(true)
+  // 他の mod に見せる表は一言を含まない
+  expect(PUBLIC_CARDS[0]).toEqual({ id: 'n01', rarity: 'N', slot: 'weapon', name: '消し忘れた console.log' })
+  expect(PUBLIC_CARDS.some(c => 'line' in c)).toBe(false)
+})
+
+test('他の mod が読めるよう、セッションの始まりに state の cards と save を置く', async ($, on) => {
+  const written: Record<string, unknown> = {}
+  on('state.set', async (_$, e, next) => {
+    const r = await next(e)
+    if (e.plugin === 'turn-gacha' && r.value?.isSet) written[e.key] = e.value
+    return r
+  })
+  await boot($, on, { book: { x01: { count: 2, firstAt: NOW } }, total: 2, manualDay: '', manualUsed: 0, history: [] })
+  expect(written.cards as GachaCard[]).toHaveLength(40)
+  expect((written.cards as GachaCard[]).find(c => c.id === 'x01')).toEqual({ id: 'x01', rarity: 'SSR', slot: 'weapon', name: '一発で通ったテスト' })
+  expect((written.save as GachaSave).book).toEqual({ x01: { count: 2, firstAt: NOW } })
+  await turn($)
+  expect((written.save as GachaSave).total).toBe(3)
+})
+
+test('図鑑の実績: 集まり具合で数え、図鑑の画面に出す。初めて達成した時は一言', async ($, on) => {
+  expect(BOOK_GOALS.length).toBeGreaterThanOrEqual(4)
+  expect(goalsMet(EMPTY)).toEqual([])
+  let s = EMPTY
+  for (const c of CARDS.filter(x => x.rarity === 'N')) s = addDraw(s, c, NOW, { isClean: false, isManual: false })
+  expect(goalsMet(s).map(g => g.id)).toEqual(['first', 'n-all'])
+  s = addDraw(s, CARDS[39]!, NOW, { isClean: false, isManual: false })
+  for (const c of CARDS.filter(x => x.rarity === 'R').slice(0, 3)) s = addDraw(s, c, NOW, { isClean: false, isManual: false })
+  expect(goalsMet(s).map(g => g.id)).toEqual(['first', 'ssr-first', 'n-all', 'half'])
+  let full = EMPTY
+  for (const c of CARDS) full = addDraw(full, c, NOW, { isClean: false, isManual: false })
+  expect(goalsMet(full)).toHaveLength(BOOK_GOALS.length)
+  const book = bookSvg(s)
+  expect(book).toContain('種、実績 4 / 6')
+  expect(book).toContain('N コンプ')
+  expect(book).toContain('SR を 8 種そろえる')
+  expect(bookLines(s)[0]).toEqual({ text: '実績 はじめの一枚 達成', color: 'yellow' })
+
+  await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await turn($)
+  expect(await ui.find({ type: 'Text', text: '図鑑の実績「はじめの一枚」を達成' })).toBeDefined()
+  await turn($)
+  // 同じ実績は 2 度言わない(2 枚目で SSR を引けば「虹色の出会い」は出てよいので、名前で見る)
+  expect(await ui.find({ type: 'Text', text: '図鑑の実績「はじめの一枚」を達成' })).toBeUndefined()
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/fill="#ffffff"/)
+  expect(await source()).not.toMatch(/#0d1117/)
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await source()).toMatch(/fill="#0d1117"/)
+  setTheme(false)
 })

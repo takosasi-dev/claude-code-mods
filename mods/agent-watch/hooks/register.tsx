@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ListedAgent } from './watch'
+import { followTheme, readTheme } from './style'
 import {
   applyList,
   clean,
@@ -61,7 +62,9 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     const started = await next(e)
     // /agents は組み込みと被りやすい。拒まれたら /agent-watch にする
     const got = await $.command.register({ name: 'agents', description: DESCRIPTION }).catch(() => undefined)

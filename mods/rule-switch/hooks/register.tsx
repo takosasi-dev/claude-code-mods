@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { RuleSwitchSave } from '../types'
+import { followTheme, readTheme } from './style'
 import { boardLines, boardSvg, clean, fromSaved, isKnown, MAX_CUSTOM, rulesOf, SECTION_ID, sectionText, summary, withAdded, withRemoved, withToggle } from './rules'
 
 const PANE = 'rule-switch'
@@ -106,8 +107,11 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /rules が拒まれたら (組み込みと被ったら) /rule-switch にする
     const got = await $.command.register({ name: 'rules', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'rules'
@@ -183,7 +187,7 @@ export const register: Register = on => {
             ))}
           {Input && <Input key="new" label="足す" placeholder="例: 関数には日本語のコメントを書く" value="" submitLabel="足す" onSubmit={value => void add($, value)} />}
         </Box>
-        {note !== '' && <Text color="#d29922">{note}</Text>}
+        {note !== '' && <Text color="warning">{note}</Text>}
         <Text dimColor>{HINT}</Text>
       </Box>
     )

@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { PortWatchList, PortWatchRow } from '../types'
 import { canStop, countsOf, cut, isWindowsCwd, mergeRows, parseLsof, parseNetstat, parseTasklist, plain, rowKey, stopArgv, summaryOf, tilesSvg } from './ports'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'port-watch'
 const TITLE = 'ポート'
@@ -101,8 +102,10 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /ports が拒まれたら /port-watch にする
     const got = await $.command.register({ name: 'ports', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'ports'

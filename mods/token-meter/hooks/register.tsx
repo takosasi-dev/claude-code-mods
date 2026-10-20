@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { TokenMeterTurn, TokenMeterUsage } from '../types'
 import { barsSvg, hitRate, short, sum, summarySvg } from './svg'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'token-meter'
 const TITLE = 'トークン'
@@ -42,7 +43,9 @@ const open = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
+    await readTheme($)
     // /tokens が組み込みにあると拒まれる。その時は /token-meter にし、/tokens は組み込みに任せる
     ownsTokens = await $.command
       .register({ name: 'tokens', description: 'ターンごとのトークン数とキャッシュの当たり率をペインに表示' })

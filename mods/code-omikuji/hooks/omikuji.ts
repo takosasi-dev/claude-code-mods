@@ -1,5 +1,6 @@
 // 運勢を決める乱数・言葉・SVG と terminal 用の行。どれも純関数
 import type { OmikujiDay, OmikujiRank, OmikujiResult } from '../types'
+import { C, HEADER_H, countUp, fadeIn, frame, header } from './style'
 
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }
 
@@ -263,12 +264,8 @@ export function kanji(n: number): string {
 }
 const kanjiDate = (date: string) => `${kanji(Number(date.slice(5, 7)))}月${kanji(Number(date.slice(8, 10)))}日`
 
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
+// 紙と筒は絵の中身なので、テーマによらず同じ色 (和紙・墨・朱・木)
+const PAPER = {
   washi: '#f3ead6',
   fiber: '#e0d2b4',
   sumi: '#2b2118',
@@ -276,16 +273,12 @@ const C = {
   wood: '#8a5530',
   woodDark: '#5e3519',
 }
-export const RANK_COLOR: Record<OmikujiRank, string> = {
-  大吉: '#e83929',
-  中吉: '#f78166',
-  小吉: '#d29922',
-  吉: '#3fb950',
-  末吉: '#58a6ff',
-  凶: '#bc8cff',
-  大凶: '#8b949e',
-}
-const W = 380
+/** 運勢の色 (今のテーマの色を呼ぶたびに読む。SVG と terminal の Text の両方で使う) */
+export const rankColor = (rank: OmikujiRank) =>
+  ({ 大吉: C.red, 中吉: C.orange, 小吉: C.yellow, 吉: C.green, 末吉: C.blue, 凶: C.purple, 大凶: C.dim })[rank]
+
+/** 見出しの動きを抜く。紙だけの絵は描き直しのたびに動かさない */
+const still = (s: string) => s.replace(/<animate\b[^>]*\/>/g, '')
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const wide = (ch: string) => /[⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch)
@@ -338,19 +331,19 @@ function paper(f: OmikujiResult, isPlay: boolean): { svg: string; bottom: number
   let body = ''
   let y = 226
   for (const line of wrap(f.words, 40)) {
-    body += `<text x="190" y="${y}" font-size="14" font-weight="bold" fill="${C.sumi}" text-anchor="middle">${esc(line)}</text>`
+    body += `<text x="190" y="${y}" font-size="14" font-weight="bold" fill="${PAPER.sumi}" text-anchor="middle">${esc(line)}</text>`
     y += 20
   }
   y += 6
-  body += `<line x1="52" y1="${y}" x2="328" y2="${y}" stroke="${C.shu}" stroke-width="0.8" stroke-dasharray="3 3"/>`
+  body += `<line x1="52" y1="${y}" x2="328" y2="${y}" stroke="${PAPER.shu}" stroke-width="0.8" stroke-dasharray="3 3"/>`
   y += 24
   for (const [key, label] of ITEMS) {
     const value = key === 'commit' ? commitText(f) : String(f[key])
     body +=
-      `<rect x="46" y="${y - 13}" width="74" height="18" rx="2" fill="none" stroke="${C.shu}" stroke-width="0.8"/>` +
-      `<text x="83" y="${y}" font-size="12" font-weight="bold" fill="${C.shu}" text-anchor="middle">${label}</text>`
+      `<rect x="46" y="${y - 13}" width="74" height="18" rx="2" fill="none" stroke="${PAPER.shu}" stroke-width="0.8"/>` +
+      `<text x="83" y="${y}" font-size="12" font-weight="bold" fill="${PAPER.shu}" text-anchor="middle">${label}</text>`
     for (const line of wrap(value, 30)) {
-      body += `<text x="130" y="${y}" font-size="13" fill="${C.sumi}">${esc(line)}</text>`
+      body += `<text x="130" y="${y}" font-size="13" fill="${PAPER.sumi}">${esc(line)}</text>`
       y += 19
     }
     y += 9
@@ -363,31 +356,31 @@ function paper(f: OmikujiResult, isPlay: boolean): { svg: string; bottom: number
   for (let i = 0; i < 26; i++) {
     const x = 34 + r() * 300
     const fy = 22 + r() * (bottom - 40)
-    fibers += `<path d="M${x.toFixed(1)} ${fy.toFixed(1)} q ${(4 + r() * 8).toFixed(1)} ${(r() * 4 - 2).toFixed(1)} ${(10 + r() * 14).toFixed(1)} ${(r() * 6 - 3).toFixed(1)}" stroke="${C.fiber}" stroke-width="0.8" fill="none"/>`
+    fibers += `<path d="M${x.toFixed(1)} ${fy.toFixed(1)} q ${(4 + r() * 8).toFixed(1)} ${(r() * 4 - 2).toFixed(1)} ${(10 + r() * 14).toFixed(1)} ${(r() * 6 - 3).toFixed(1)}" stroke="${PAPER.fiber}" stroke-width="0.8" fill="none"/>`
   }
 
   const rankChars = [...f.rank]
   const rankSize = rankChars.length === 1 ? 72 : 58
   const rankTop = rankChars.length === 1 ? 140 : 102
   let s =
-    `<rect x="24" y="12" width="332" height="${bottom - 12}" rx="3" fill="${C.washi}"/>` +
+    `<rect x="24" y="12" width="332" height="${bottom - 12}" rx="3" fill="${PAPER.washi}"/>` +
     fibers +
-    `<rect x="32" y="20" width="316" height="${bottom - 28}" fill="none" stroke="${C.shu}" stroke-width="1.6"/>` +
-    `<rect x="36" y="24" width="308" height="${bottom - 36}" fill="none" stroke="${C.shu}" stroke-width="0.6"/>` +
+    `<rect x="32" y="20" width="316" height="${bottom - 28}" fill="none" stroke="${PAPER.shu}" stroke-width="1.6"/>` +
+    `<rect x="36" y="24" width="308" height="${bottom - 36}" fill="none" stroke="${PAPER.shu}" stroke-width="0.6"/>` +
     // 右の列: 題と番号
-    vertical('コード運勢', 316, 56, 22, `font-size="17" font-weight="bold" fill="${C.sumi}"`) +
-    vertical(`第${kanji(f.number)}番`, 288, 56, 17, `font-size="13" fill="${C.sumi}"`) +
+    vertical('コード運勢', 316, 56, 22, `font-size="17" font-weight="bold" fill="${PAPER.sumi}"`) +
+    vertical(`第${kanji(f.number)}番`, 288, 56, 17, `font-size="13" fill="${PAPER.sumi}"`) +
     // 左の列: 日付
-    vertical(kanjiDate(f.date), 64, 56, 16, `font-size="13" fill="${C.sumi}"`) +
+    vertical(kanjiDate(f.date), 64, 56, 16, `font-size="13" fill="${PAPER.sumi}"`) +
     // 真ん中: 朱の運勢と丸い印
-    `<circle cx="190" cy="${rankTop + (rankChars.length - 1) * (rankSize / 2) - rankSize * 0.35}" r="${rankChars.length === 1 ? 54 : 70}" fill="none" stroke="${C.shu}" stroke-width="1" opacity="0.35"/>` +
-    vertical(f.rank, 190, rankTop, rankSize + 2, `font-size="${rankSize}" font-weight="bold" fill="${C.shu}"`) +
-    `<line x1="52" y1="200" x2="328" y2="200" stroke="${C.shu}" stroke-width="1.2"/>` +
+    `<circle cx="190" cy="${rankTop + (rankChars.length - 1) * (rankSize / 2) - rankSize * 0.35}" r="${rankChars.length === 1 ? 54 : 70}" fill="none" stroke="${PAPER.shu}" stroke-width="1" opacity="0.35"/>` +
+    vertical(f.rank, 190, rankTop, rankSize + 2, `font-size="${rankSize}" font-weight="bold" fill="${PAPER.shu}"`) +
+    `<line x1="52" y1="200" x2="328" y2="200" stroke="${PAPER.shu}" stroke-width="1.2"/>` +
     body
   if (isPlay)
     s +=
-      `<g transform="rotate(-12 96 168)"><rect x="58" y="152" width="78" height="30" rx="4" fill="none" stroke="${C.shu}" stroke-width="2" opacity="0.8"/>` +
-      `<text x="97" y="173" font-size="15" font-weight="bold" fill="${C.shu}" text-anchor="middle" opacity="0.8">遊び</text></g>`
+      `<g transform="rotate(-12 96 168)"><rect x="58" y="152" width="78" height="30" rx="4" fill="none" stroke="${PAPER.shu}" stroke-width="2" opacity="0.8"/>` +
+      `<text x="97" y="173" font-size="15" font-weight="bold" fill="${PAPER.shu}" text-anchor="middle" opacity="0.8">遊び</text></g>`
   return { svg: s, bottom }
 }
 
@@ -399,25 +392,24 @@ function shaker(f: OmikujiResult) {
     `<g><animate attributeName="opacity" from="1" to="0" begin="2.5s" dur="0.4s" fill="freeze"/>` +
     `<ellipse cx="190" cy="372" rx="70" ry="9" fill="#000" opacity="0.35"/>` +
     `<g><animateTransform attributeName="transform" type="rotate" values="${swing}" dur="1.5s" fill="freeze"/>` +
-    `<path d="M148 210 L232 210 L226 360 L154 360 Z" fill="${C.wood}" stroke="${C.woodDark}" stroke-width="2"/>` +
-    `<ellipse cx="190" cy="210" rx="42" ry="9" fill="${C.woodDark}"/>` +
+    `<path d="M148 210 L232 210 L226 360 L154 360 Z" fill="${PAPER.wood}" stroke="${PAPER.woodDark}" stroke-width="2"/>` +
+    `<ellipse cx="190" cy="210" rx="42" ry="9" fill="${PAPER.woodDark}"/>` +
     `<ellipse cx="190" cy="210" rx="9" ry="3.5" fill="#1a0f08"/>` +
     // 棒は穴より上だけ見せる (筒の中に隠しておき、振り終わったら押し上げる)
     `<clipPath id="ok-hole"><rect x="150" y="0" width="80" height="211"/></clipPath>` +
     `<g clip-path="url(#ok-hole)"><g><animateTransform attributeName="transform" type="translate" from="0 0" to="0 -84" begin="1.5s" dur="0.6s" calcMode="spline" keySplines="0.2 0.8 0.2 1" keyTimes="0;1" fill="freeze"/>` +
     `<rect x="185" y="214" width="10" height="90" rx="2" fill="#e9dbb4" stroke="#b49a64" stroke-width="0.8"/>` +
-    `<rect x="185" y="214" width="10" height="12" rx="2" fill="${C.shu}"/></g></g>` +
-    `<rect x="151" y="232" width="78" height="7" fill="${C.woodDark}" opacity="0.7"/>` +
-    `<rect x="154" y="334" width="72" height="7" fill="${C.woodDark}" opacity="0.7"/>` +
-    `<rect x="174" y="248" width="32" height="80" fill="${C.washi}"/>` +
-    vertical('御神籤', 190, 270, 24, `font-size="19" font-weight="bold" fill="${C.shu}"`) +
+    `<rect x="185" y="214" width="10" height="12" rx="2" fill="${PAPER.shu}"/></g></g>` +
+    `<rect x="151" y="232" width="78" height="7" fill="${PAPER.woodDark}" opacity="0.7"/>` +
+    `<rect x="154" y="334" width="72" height="7" fill="${PAPER.woodDark}" opacity="0.7"/>` +
+    `<rect x="174" y="248" width="32" height="80" fill="${PAPER.washi}"/>` +
+    vertical('御神籤', 190, 270, 24, `font-size="19" font-weight="bold" fill="${PAPER.shu}"`) +
     `</g>` +
     // 振っている間の音
     `<g font-size="16" font-weight="bold" fill="${C.text}" opacity="0"><animate attributeName="opacity" values="0;1;0;1;0;1;0" dur="1.5s" fill="freeze"/>` +
     `<text x="96" y="250" text-anchor="middle">シャカ</text><text x="284" y="300" text-anchor="middle">シャカ</text></g>` +
-    // 棒の番号
-    `<g opacity="0"><animate attributeName="opacity" from="0" to="1" begin="2.0s" dur="0.3s" fill="freeze"/>` +
-    `<text x="214" y="130" font-size="16" font-weight="bold" fill="${C.text}">第${kanji(f.number)}番</text></g>` +
+    // 棒の番号。棒が上がる間に数が回って止まる
+    countUp(f.number, `x="214" y="130" font-size="16" font-weight="bold" fill="${C.text}"`, n => `第${kanji(n)}番`, 1.6) +
     `</g>`
   )
 }
@@ -431,20 +423,20 @@ function week(today: string, history: readonly OmikujiDay[], y: number) {
     const cx = 40 + i * 50
     const rank = by.get(date)
     const isToday = date === today
-    s += `<text x="${cx}" y="${y + 12}" font-size="12" fill="${isToday ? C.text : C.weak}" text-anchor="middle">${md(date)}</text>`
+    s += `<text x="${cx}" y="${y + 12}" font-size="12" fill="${isToday ? C.text : C.dim}" text-anchor="middle">${md(date)}</text>`
     if (isToday) s += `<circle cx="${cx}" cy="${y + 34}" r="16" fill="none" stroke="${C.text}" stroke-width="1"/>`
     s += rank
-      ? `<circle cx="${cx}" cy="${y + 34}" r="12" fill="${RANK_COLOR[rank]}"/>` +
-        `<text x="${cx}" y="${y + 66}" font-size="12" font-weight="bold" fill="${RANK_COLOR[rank]}" text-anchor="middle">${rank}</text>`
+      ? `<circle cx="${cx}" cy="${y + 34}" r="12" fill="${rankColor(rank)}"/>` +
+        `<text x="${cx}" y="${y + 66}" font-size="12" font-weight="bold" fill="${rankColor(rank)}" text-anchor="middle">${rank}</text>`
       : `<circle cx="${cx}" cy="${y + 34}" r="11" fill="none" stroke="${C.line}" stroke-width="2" stroke-dasharray="3 3"/>` +
-        `<text x="${cx}" y="${y + 66}" font-size="12" fill="${C.weak}" text-anchor="middle">─</text>`
+        `<text x="${cx}" y="${y + 66}" font-size="12" fill="${C.dim}" text-anchor="middle">─</text>`
   })
   return { svg: s, bottom: y + 74 }
 }
 
 /**
  * ペインに出す SVG 1 枚。isShake なら筒を振るアニメから紙が開くまで、
- * そうでなければ開いた紙だけ
+ * そうでなければ開いた紙だけ (紙だけの絵は振り終わりに差し替わるので、何も動かさない)
  */
 export function paneSvg(shown: OmikujiResult, today: string, history: readonly OmikujiDay[], opts: { isShake: boolean; isPlay: boolean }) {
   const p = paper(shown, opts.isPlay)
@@ -454,15 +446,15 @@ export function paneSvg(shown: OmikujiResult, today: string, history: readonly O
       `<g transform="translate(0 12)"><g><animateTransform attributeName="transform" type="scale" from="1 0.04" to="1 1" begin="2.6s" dur="0.7s" calcMode="spline" keySplines="0.2 0.8 0.2 1" keyTimes="0;1" fill="freeze"/>` +
       `<g transform="translate(0 -12)">${p.svg}</g></g></g></g>`
     : p.svg
-  const w = week(today, history, p.bottom + 28)
-  const h = w.bottom + 8
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
-    `<rect width="${W}" height="${h}" fill="${C.bg}"/>` +
-    paperSvg +
-    (opts.isShake ? shaker(shown) : '') +
-    w.svg +
-    `</svg>`
+  const w = week(today, history, HEADER_H + p.bottom + 28)
+  const head = header('コード運勢', opts.isPlay ? '遊びの一回' : `${md(shown.date)} の本番`, C.red)
+  return frame(
+    w.bottom + 8,
+    (opts.isShake ? head : still(head)) +
+    // 紙と筒は y=0 から描いてあるので、見出しの下へ下ろす
+    `<g transform="translate(0 ${HEADER_H})">${paperSvg}${opts.isShake ? shaker(shown) : ''}</g>` +
+    // 今日の丸は紙が開いてから出す (振っている間に運勢が見えないように)
+    (opts.isShake ? fadeIn(w.svg, 3.0) : w.svg),
   )
 }
 
@@ -470,7 +462,7 @@ export function paneSvg(shown: OmikujiResult, today: string, history: readonly O
 export function paneLines(shown: OmikujiResult, today: OmikujiResult, history: readonly OmikujiDay[], isPlay: boolean): Line[] {
   const lines: Line[] = [
     { text: `${md(shown.date)} のコード運勢  第${shown.number}番`, isBold: true },
-    { text: shown.rank, color: RANK_COLOR[shown.rank], isBold: true },
+    { text: shown.rank, color: rankColor(shown.rank), isBold: true },
     { text: shown.words },
   ]
   if (isPlay) lines.push({ text: `遊びの一回です(本番は${today.rank})`, color: 'yellow' })

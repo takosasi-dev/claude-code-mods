@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GachaSave } from '../types'
-import { addDraw, bookLines, bookSvg, cardLines, cardSvg, EMPTY, fromSaved, manualLeft, pull, statsLines, statsSvg } from './gacha'
+import { addDraw, bookLines, bookSvg, cardLines, cardSvg, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, statsLines, statsSvg } from './gacha'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'turn-gacha'
 const TITLE = 'ガチャ'
@@ -13,6 +14,8 @@ const SAVE = atom({ plugin: 'turn-gacha', key: 'save' } as const, EMPTY as Gacha
 const VIEW = atom({ plugin: 'turn-gacha', key: 'view' } as const, 'card' as 'card' | 'book')
 const NOTE = atom({ plugin: 'turn-gacha', key: 'note' } as const, '')
 const ERRORS = atom({ plugin: 'turn-gacha', key: 'turnErrors' } as const, 0)
+/** 他の mod (dev-rpg) が読むカードの表 */
+const CARDS_REF = { plugin: 'turn-gacha', key: 'cards' } as const
 
 type $ = EngineInterface
 
@@ -67,7 +70,11 @@ const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
     )
     await update($, SAVE, () => next)
     await update($, VIEW, () => 'card')
-    await update($, NOTE, () => (isSaved ? '' : '引いたカードを保存できませんでした'))
+    // 図鑑の実績はその場で数える (保存はしない)
+    const before = new Set(goalsMet(saved).map(g => g.id))
+    const gained = goalsMet(next).filter(g => !before.has(g.id))
+    const note = gained.length > 0 ? `図鑑の実績「${gained.map(g => g.name).join('」「')}」を達成` : ''
+    await update($, NOTE, () => (isSaved ? note : '引いたカードを保存できませんでした'))
     if (card.rarity === 'SR' || card.rarity === 'SSR') $.ui.toast(`${card.rarity}!${card.name}`)
   })
 
@@ -78,8 +85,12 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
+    await $.state.set(CARDS_REF, PUBLIC_CARDS).catch(() => {})
     // /gacha が拒まれたら (組み込みと被ったら) /turn-gacha にする
     const got = await $.command.register({ name: 'gacha', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'gacha'

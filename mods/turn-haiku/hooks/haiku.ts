@@ -1,6 +1,7 @@
 import type { ModelCompleteResult } from 'claude-code'
 
 import type { HaikuPoem, HaikuTurn } from '../types'
+import { C } from './style'
 
 /** 残す句の数 */
 export const KEEP = 50
@@ -201,7 +202,8 @@ export function tanzakuSvg(poem: HaikuPoem | undefined): string {
         : `<animate attributeName="opacity" values="0;1" dur=".7s" begin="${begin}s" fill="freeze"/>`
       const bloom = isEmpty
         ? ''
-        : `<circle cx="${x}" cy="${f1(cy - 8)}" r="0" fill="${ink}" opacity="0"><animate attributeName="r" values="2;13" dur="1.4s" begin="${begin}s" fill="freeze"/><animate attributeName="opacity" values="0;.22;.06" dur="1.4s" begin="${begin}s" fill="freeze"/></circle>`
+        : // にじみは広がりながら消える (終わりの値は 0。残すと字の後ろに薄い丸が残る)
+          `<circle cx="${x}" cy="${f1(cy - 8)}" r="0" fill="${ink}" opacity="0"><animate attributeName="r" values="2;13" dur="1.4s" begin="${begin}s" fill="freeze"/><animate attributeName="opacity" values="0;.22;0" dur="1.4s" begin="${begin}s" fill="freeze"/></circle>`
       const at = CORNER.has(ch)
         ? `x="${f1(x + 9)}" y="${f1(cy - 12)}"`
         : ROTATE.has(ch)
@@ -222,7 +224,8 @@ export function tanzakuSvg(poem: HaikuPoem | undefined): string {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="sans-serif">` +
     `<defs>` +
-    `<linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#161b22"/><stop offset="1" stop-color="#0d1117"/></linearGradient>` +
+    // 壁・紐・穴は地なので今のテーマの色。短冊 (紙・墨・金箔・朱の印) は絵の中身なので同じ色
+    `<linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C.face}"/><stop offset="1" stop-color="${C.bg}"/></linearGradient>` +
     `<linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6eedb"/><stop offset="1" stop-color="#e6d6b2"/></linearGradient>` +
     `<filter id="ink" x="-20%" y="-5%" width="140%" height="110%"><feGaussianBlur stdDeviation="${isEmpty ? 0 : 2.4}">` +
     (isEmpty ? '' : `<animate attributeName="stdDeviation" values="2.4;.7;.3" dur="${total}s" fill="freeze"/>`) +
@@ -230,14 +233,14 @@ export function tanzakuSvg(poem: HaikuPoem | undefined): string {
     `</defs>` +
     `<rect width="${W}" height="${H}" rx="14" fill="url(#wall)"/>` +
     // 紐
-    `<path d="M${W / 2} 6 L${W / 2} ${top + 14}" stroke="#d29922" stroke-width="2"/>` +
-    `<circle cx="${W / 2}" cy="6" r="3" fill="#d29922"/>` +
+    `<path d="M${W / 2} 6 L${W / 2} ${top + 14}" stroke="${C.yellow}" stroke-width="2"/>` +
+    `<circle cx="${W / 2}" cy="6" r="3" fill="${C.yellow}"/>` +
     // 短冊 (影と紙)
     `<rect x="${f1(px + 4)}" y="${top + 5}" width="${pw}" height="${ph}" rx="4" fill="#000000" opacity=".35"/>` +
     `<rect x="${px}" y="${top}" width="${pw}" height="${ph}" rx="4" fill="url(#paper)" stroke="#c9b48a" stroke-width="1"/>` +
     `<rect x="${f1(px + 5)}" y="${top + 5}" width="${pw - 10}" height="${ph - 10}" rx="2" fill="none" stroke="#c9a43e" stroke-width=".8" opacity=".5"/>` +
     flecks +
-    `<circle cx="${W / 2}" cy="${top + 14}" r="3.5" fill="#0d1117" opacity=".7"/>` +
+    `<circle cx="${W / 2}" cy="${top + 14}" r="3.5" fill="${C.bg}" opacity=".7"/>` +
     `<g font-family="serif" fill="${ink}" filter="url(#ink)">${chars}</g>` +
     seal +
     `</svg>`

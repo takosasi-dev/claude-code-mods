@@ -1,5 +1,6 @@
 // 読み込み結果を表示用データにする純関数と、SVG を組む関数。fs も $ も触らない
 import type { ProjectBoardProject, ProjectBoardSort } from '../types'
+import { C, HEADER_H, fadeIn, frame, growBar, header } from './style'
 
 const DAY = 86_400_000
 
@@ -76,7 +77,8 @@ export const ageLabel = (mtimeMs: number, now: number) => {
   return h > 0 ? `${h}時間前` : '1時間以内'
 }
 
-export const freshColor = (days: number) => (days <= 3 ? '#3fb950' : days <= 14 ? '#d29922' : '#6e7681')
+/** 鮮度の色。古い物は弱い色(呼ぶたびに今のテーマの色を引く) */
+export const freshColor = (days: number) => (days <= 3 ? C.green : days <= 14 ? C.yellow : C.dim)
 
 export const dateLabel = (ms: number) => {
   const d = new Date(ms)
@@ -130,48 +132,47 @@ const wrap = (s: string, units: number, rows: number) => {
   return kept
 }
 
-const SVG_HEAD = (h: number) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 ${h}" font-family="sans-serif">` +
-  `<rect width="360" height="${h}" rx="10" fill="#0d1117"/>`
-
 // 鮮度のグラフに並べる上限。Svg の source は 131072 字までなので、多いと残りは「ほか N 件」にまとめる
 export const FRESH_ROWS = 100
 
 // 一覧の上の「鮮度」横棒グラフ
 export const freshnessSvg = (all: readonly ProjectBoardProject[], now: number) => {
   const ROW = 22
-  const TOP = 46
+  const TOP = HEADER_H + 30
   const list = all.slice(0, FRESH_ROWS)
   const rest = all.length - list.length
   const h = TOP + Math.max(1, list.length) * ROW + (rest > 0 ? ROW : 0) + 12
   const days = list.map(p => ageDays(p.mtimeMs, now))
   const max = Math.max(14, ...days)
   const X = 118
-  const W = 190
+  const W = 206
   const legend = [
-    ['#3fb950', '3日以内'],
-    ['#d29922', '14日以内'],
-    ['#6e7681', 'それ以上'],
+    [freshColor(0), '3日以内'],
+    [freshColor(14), '14日以内'],
+    [freshColor(15), 'それ以上'],
   ] as const
-  let out = SVG_HEAD(h)
-  out += `<text x="14" y="24" fill="#c9d1d9" font-size="15" font-weight="bold">鮮度</text>`
-  out += `<text x="56" y="24" fill="#8b949e" font-size="12">最終更新からの日数</text>`
+  let out = header('鮮度', '最終更新からの日数', C.green)
   legend.forEach(([c, t], i) => {
     const lx = 14 + i * 84
-    out += `<rect x="${lx}" y="32" width="10" height="6" rx="2" fill="${c}"/>`
-    out += `<text x="${lx + 14}" y="39" fill="#8b949e" font-size="12">${t}</text>`
+    out += `<rect x="${lx}" y="${HEADER_H + 10}" width="10" height="6" rx="2" fill="${c}"/>`
+    out += `<text x="${lx + 14}" y="${HEADER_H + 17}" fill="${C.dim}" font-size="12">${t}</text>`
   })
   list.forEach((p, i) => {
     const y = TOP + i * ROW
     const d = days[i] ?? 0
     const w = Math.max(3, Math.round((d / max) * W))
-    out += `<text x="14" y="${y + 15}" fill="#c9d1d9" font-size="12">${esc(fit(p.name, 8.5))}</text>`
-    out += `<rect x="${X}" y="${y + 5}" width="${W}" height="12" rx="3" fill="#161b22"/>`
-    out += `<rect x="${X}" y="${y + 5}" width="${w}" height="12" rx="3" fill="${freshColor(d)}"/>`
-    out += `<text x="${X + w + 6}" y="${y + 15}" fill="#8b949e" font-size="12">${d}日</text>`
+    // 動きは上の 20 本だけ(多いと source が重くなる)
+    const delay = i < 20 ? Number((0.1 + i * 0.04).toFixed(2)) : -1
+    out += `<text x="14" y="${y + 15}" fill="${C.text}" font-size="12">${esc(fit(p.name, 8.5))}</text>`
+    out += `<rect x="${X}" y="${y + 5}" width="${W}" height="12" rx="3" fill="${C.face}"/>`
+    out +=
+      delay < 0
+        ? `<rect x="${X}" y="${y + 5}" width="${w}" height="12" rx="3" fill="${freshColor(d)}"/>`
+        : growBar(X, y + 5, w, 12, freshColor(d), delay)
+    out += `<text x="${X + w + 6}" y="${y + 15}" fill="${C.dim}" font-size="12">${d}日</text>`
   })
-  if (rest > 0) out += `<text x="14" y="${TOP + list.length * ROW + 15}" fill="#8b949e" font-size="12">ほか ${rest} 件</text>`
-  return `${out}</svg>`
+  if (rest > 0) out += `<text x="14" y="${TOP + list.length * ROW + 15}" fill="${C.dim}" font-size="12">ほか ${rest} 件</text>`
+  return frame(h, out)
 }
 
 // 詳細画面のカード: 名前・更新日・抜き出した行
@@ -181,24 +182,23 @@ export const cardSvg = (p: ProjectBoardProject, now: number) => {
   // 先頭の見出しが名前と違えば名前の下に弱い文字で出す
   const sub = p.title !== '' && p.title !== p.name ? p.title : ''
   const o = sub ? 18 : 0
-  const h = 96 + o + Math.max(18, body)
+  const top = HEADER_H + 8
+  const h = top + 42 + o + Math.max(28, body)
   const d = ageDays(p.mtimeMs, now)
-  let out = SVG_HEAD(h)
-  out += `<rect x="6" y="6" width="348" height="${h - 12}" rx="8" fill="#161b22" stroke="#30363d"/>`
-  out += `<rect x="6" y="6" width="5" height="${h - 12}" rx="2" fill="${freshColor(d)}"/>`
-  out += `<text x="22" y="34" fill="#c9d1d9" font-size="16" font-weight="bold">${esc(fit(p.name, 20))}</text>`
-  if (sub) out += `<text x="22" y="54" fill="#8b949e" font-size="12">${esc(fit(sub, 26))}</text>`
-  out += `<text x="22" y="${56 + o}" fill="#8b949e" font-size="12">更新 ${dateLabel(p.mtimeMs)}(${ageLabel(p.mtimeMs, now)})</text>`
-  out += `<line x1="22" y1="${68 + o}" x2="338" y2="${68 + o}" stroke="#30363d"/>`
-  let y = 90 + o
-  if (rows.length === 0) out += `<text x="22" y="${y}" fill="#8b949e" font-size="12">状態の行は見つかりませんでした</text>`
-  for (const r of rows) {
-    out += `<circle cx="26" cy="${y - 4}" r="3" fill="#58a6ff"/>`
+  let out = header(fit(p.name, 20), ageLabel(p.mtimeMs, now), freshColor(d))
+  if (sub) out += `<text x="14" y="${top + 16}" fill="${C.dim}" font-size="12">${esc(fit(sub, 28))}</text>`
+  out += `<text x="14" y="${top + 18 + o}" fill="${C.dim}" font-size="12">更新 ${dateLabel(p.mtimeMs)}</text>`
+  out += `<line x1="14" y1="${top + 30 + o}" x2="366" y2="${top + 30 + o}" stroke="${C.line}"/>`
+  let y = top + 52 + o
+  if (rows.length === 0) out += `<text x="14" y="${y}" fill="${C.dim}" font-size="12">状態の行は見つかりませんでした</text>`
+  rows.forEach((r, i) => {
+    let s = `<circle cx="18" cy="${y - 4}" r="3" fill="${C.blue}"/>`
     for (const t of r) {
-      out += `<text x="36" y="${y}" fill="#c9d1d9" font-size="13">${esc(t)}</text>`
+      s += `<text x="28" y="${y}" fill="${C.text}" font-size="13">${esc(t)}</text>`
       y += 18
     }
+    out += fadeIn(s, Number((0.15 + i * 0.08).toFixed(2)))
     y += 8
-  }
-  return `${out}</svg>`
+  })
+  return frame(h, out)
 }

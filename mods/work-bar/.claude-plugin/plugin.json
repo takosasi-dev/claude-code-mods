@@ -1,6 +1,6 @@
 {
   "name": "work-bar",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "入力欄の上に作業バー(経過時間・実行中のツール・前のターンの要約・定型プロンプトのボタン)を出す",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

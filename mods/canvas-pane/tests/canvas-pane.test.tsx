@@ -300,3 +300,20 @@ test('C2: /canvas が取れなかった時は /canvas-pane にし、元の /canv
   expect(await $.command.run({ command: 'canvas-pane', ...run })).toMatchObject({ text: 'キャンバスのペインを開きました。' })
   expect(world.opened).toEqual(['canvas-pane'])
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await boot($, on)
+  await show($, BAR)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const source = async () => String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(await source()).toMatch(/fill="#ffffff"/)
+  expect(await source()).toContain('fill="#0969da">') // 棒は明るい青
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  // 描いた後でテーマを替えても、元のデータから今の色で組み直す
+  expect(await source()).toMatch(/fill="#0d1117"/)
+  expect(await source()).toContain('fill="#58a6ff">')
+})

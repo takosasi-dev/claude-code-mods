@@ -108,6 +108,9 @@ test('乱数: 同じ日なら同じ結果、日が違えばばらける、遊び
   const paper = paneSvg(f, TODAY, [], { isShake: false, isPlay: false })
   expect(shake).toMatch(/animateTransform attributeName="transform" type="rotate"/)
   expect(shake).toMatch(/御/)
+  // 棒の番号は数が回って止まり、今日の丸は紙が開いてから出る
+  expect(shake).toMatch(new RegExp(`opacity="0">第${kanji(f.number)}番<animate attributeName="opacity" from="0" to="1"`))
+  expect(shake).toMatch(/<g opacity="1"><animate attributeName="opacity" from="0" to="1" begin="3s"[^>]*\/><text x="12"[^>]*>この 7 日</)
   expect(paper).not.toMatch(/<animate/)
   expect(paper).toMatch(/#d9381e/)
   expect(paper).toMatch(/#f3ead6/)
@@ -214,7 +217,7 @@ for (const surface of SURFACES) {
       expect(src).toMatch(/この 7 日/)
       expect(src).toMatch(/>10\/14</)
       expect(src).not.toMatch(/>10\/13</)
-      expect(src).toMatch(/fill="#e83929" text-anchor="middle">大吉</)
+      expect(src).toMatch(/fill="#f85149" text-anchor="middle">大吉</)
       expect(src).toMatch(/fill="#bc8cff" text-anchor="middle">凶</)
     } else expect(await ui.find({ type: 'Text', text: /^この 7 日: 10\/14 ─ \/ 10\/15 大吉 \/ 10\/16 ─ \/ 10\/17 ─ \/ 10\/18 凶 / })).toBeDefined()
 
@@ -332,4 +335,28 @@ test('store の運勢に項目が足りない・数がおかしい時も作り�
   expect(isResult(f)).toBe(true)
   for (const bad of [{ ...f, number: 0 }, { ...f, number: 1.5 }, { ...f, number: 101 }, { ...f, words: 3 }, { ...f, rank: '超吉' }, { ...f, date: 20261020 }, null, 'x'])
     expect(isResult(bad)).toBe(false)
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  const { open } = await boot($, on)
+  await open()
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const src = await svgOf(ui)
+  expect(src).toMatch(/fill="#ffffff"/)
+  // 紙は絵の中身なので、明るいテーマでも和紙と朱のまま
+  expect(src).toMatch(/#f3ead6/)
+  expect(src).toMatch(/#d9381e/)
+
+  theme = 'dark'
+  await $.config.set({
+    key: 'theme',
+    value: 'dark',
+    previous: 'light',
+    provider: { plugin: 'core', tier: 'core' } as never,
+    origin: { kind: 'composer' },
+  })
+  expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
 })

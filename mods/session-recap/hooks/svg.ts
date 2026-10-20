@@ -1,30 +1,18 @@
 // SVG を文字列で組む関数と、表示用の小さな整形。描画面は <img> なので動きは SMIL だけ
+// 合計とタイムラインは 1 分ごと・ツールを呼ぶたびに描き直すので、動きは足さない (mod-guide 2 節)
 import type { RecapTurn } from '../types'
-
-export const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  dim: '#8b949e',
-  blue: '#58a6ff',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-  purple: '#bc8cff',
-  orange: '#f78166',
-}
+import { C, HEADER_H, W, esc, frame, header } from './style'
 
 export type KindId = 'edit' | 'run' | 'look' | 'agent' | 'other' | 'none'
 
-/** ツールの種類。赤はエラー専用なので使わない */
-export const KINDS: { id: KindId; label: string; color: string; tools: string[] }[] = [
-  { id: 'edit', label: '編集', color: C.blue, tools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] },
-  { id: 'run', label: '実行', color: C.orange, tools: ['Bash', 'PowerShell', 'Monitor', 'TaskStop', 'Skill'] },
-  { id: 'look', label: '調べ', color: C.purple, tools: ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'LSP', 'ToolSearch'] },
-  { id: 'agent', label: 'エージェント', color: C.green, tools: ['Agent', 'Task', 'SendMessage'] },
-  { id: 'other', label: 'その他', color: C.yellow, tools: [] },
-  { id: 'none', label: '会話のみ', color: C.dim, tools: [] },
+/** ツールの種類。赤はエラー専用なので使わない。色はテーマに付いていくよう読むたびに C から引く */
+export const KINDS: { id: KindId; label: string; readonly color: string; tools: string[] }[] = [
+  { id: 'edit', label: '編集', get color() { return C.blue }, tools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] },
+  { id: 'run', label: '実行', get color() { return C.orange }, tools: ['Bash', 'PowerShell', 'Monitor', 'TaskStop', 'Skill'] },
+  { id: 'look', label: '調べ', get color() { return C.purple }, tools: ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'LSP', 'ToolSearch'] },
+  { id: 'agent', label: 'エージェント', get color() { return C.green }, tools: ['Agent', 'Task', 'SendMessage'] },
+  { id: 'other', label: 'その他', get color() { return C.yellow }, tools: [] },
+  { id: 'none', label: '会話のみ', get color() { return C.dim }, tools: [] },
 ]
 
 const kindOfTool = (tool: string): KindId => KINDS.find(k => k.tools.includes(tool))?.id ?? 'other'
@@ -46,8 +34,7 @@ export const colorOf = (k: KindId) => KINDS.find(x => x.id === k)?.color ?? C.di
 /** 制御文字 (タブ・改行・復帰を除く)。描く木や SVG に入ると拒まれてペインが閉じる */
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
 
-export const esc = (s: string) =>
-  s.replace(CONTROL, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+export { esc }
 
 /** 先頭 n 字 (サロゲートペアを割らない)。切ったら「…」 */
 export const head = (s: string, n: number) => {
@@ -75,14 +62,8 @@ export const clock = (ms: number) => {
   return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`
 }
 
-const W = 360
-const FONT = 'font-family="sans-serif"'
-
-const svg = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" ${FONT}>` +
-  `<rect x="0.5" y="0.5" width="${W - 1}" height="${h - 1}" rx="12" fill="${C.face}" stroke="${C.line}"/>` +
-  body +
-  `</svg>`
+/** 見出しの下から中身を始める y */
+const TOP = HEADER_H + 12
 
 const text = (x: number, y: number, s: string, size: number, fill: string, extra = '') =>
   `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${extra}>${esc(s)}</text>`
@@ -93,10 +74,10 @@ export type Totals = { elapsedMs: number; turns: number; tools: number; errors: 
 
 export const totalsSvg = (t: Totals) => {
   const cell = (i: number, label: string, value: string, fill: string = C.text) => {
-    const x = 16 + (i % 2) * 172
-    const y = 48 + Math.floor(i / 2) * 54
+    const x = 16 + (i % 2) * 180
+    const y = TOP + Math.floor(i / 2) * 54
     return (
-      `<rect x="${x}" y="${y}" width="156" height="44" rx="8" fill="${C.bg}" stroke="${C.line}"/>` +
+      `<rect x="${x}" y="${y}" width="168" height="44" rx="8" fill="${C.face}" stroke="${C.line}"/>` +
       text(x + 10, y + 17, label, 12, C.dim) +
       text(x + 10, y + 36, value, 16, fill, 'font-weight="bold"')
     )
@@ -107,15 +88,15 @@ export const totalsSvg = (t: Totals) => {
       text(W - 16, 28, '実行中', 12, C.green, 'text-anchor="end"')
     : text(W - 16, 28, '待機中', 12, C.dim, 'text-anchor="end"')
   const longest = t.longest?.end !== undefined ? dur(t.longest.end - t.longest.start) : '─'
-  return svg(
-    t.longest ? 176 : 160,
-    text(16, 28, 'ふりかえり', 14, C.text, 'font-weight="bold"') +
+  return frame(
+    t.longest ? 186 : 168,
+    header('ふりかえり', '', t.isRunning ? C.green : C.blue) +
       status +
       cell(0, '経過', clock(t.elapsedMs)) +
       cell(1, 'ターン', `${t.turns}`) +
       cell(2, 'ツール', `${t.tools}回`) +
       cell(3, 'エラー', `${t.errors}`, t.errors > 0 ? C.red : C.text) +
-      (t.longest ? text(16, 164, `最長 ${longest}  ${head(t.longest.label, 18)}`, 12, C.dim) : ''),
+      (t.longest ? text(16, 174, `最長 ${longest}  ${head(t.longest.label, 18)}`, 12, C.dim) : ''),
   )
 }
 
@@ -134,7 +115,7 @@ export const laneStep = (spanMs: number) =>
 export const timelineSvg = (turns: RecapTurn[], now: number, selected: string | null) => {
   const first = turns[0]
   if (!first) {
-    return svg(64, text(16, 28, 'タイムライン', 14, C.text, 'font-weight="bold"') + text(16, 50, 'まだターンがありません', 12, C.dim))
+    return frame(80, header('タイムライン') + text(16, 68, 'まだターンがありません', 12, C.dim))
   }
   const endOf = (t: RecapTurn) => t.end ?? now
   const last = Math.max(...turns.map(endOf))
@@ -154,14 +135,14 @@ export const timelineSvg = (turns: RecapTurn[], now: number, selected: string | 
     }
     return out
   }
-  const trackY = (lane: number) => 44 + lane * LANE_H
+  const trackY = (lane: number) => TOP + 6 + lane * LANE_H
 
-  let body = text(16, 28, 'タイムライン', 14, C.text, 'font-weight="bold"') + text(W - 16, 28, `1行 = ${dur(step)}`, 12, C.dim, 'text-anchor="end"')
+  let body = header('タイムライン', `1行 = ${dur(step)}`)
   for (let i = 0; i < lanes; i++) {
     const y = trackY(i)
     body +=
       text(16, y + 12, hm(t0 + i * step), 12, C.dim) +
-      `<rect x="${X0}" y="${y}" width="${X1 - X0}" height="16" rx="3" fill="${C.bg}"/>`
+      `<rect x="${X0}" y="${y}" width="${X1 - X0}" height="16" rx="3" fill="${C.face}"/>`
   }
   // 待ち時間: 最初のターンから最後までを薄い破線で引き、その上に帯を重ねる
   for (const p of pieces(t0, last)) {
@@ -180,7 +161,7 @@ export const timelineSvg = (turns: RecapTurn[], now: number, selected: string | 
     }
     const tail = ps[ps.length - 1]
     if (tail && (t.errors > 0 || t.reason === 'error')) {
-      body += `<circle cx="${(tail.x + tail.w).toFixed(1)}" cy="${trackY(tail.lane) - 1}" r="4" fill="${C.red}" stroke="${C.face}" stroke-width="1"/>`
+      body += `<circle cx="${(tail.x + tail.w).toFixed(1)}" cy="${trackY(tail.lane) - 1}" r="4" fill="${C.red}" stroke="${C.bg}" stroke-width="1"/>`
     }
   }
 
@@ -199,19 +180,19 @@ export const timelineSvg = (turns: RecapTurn[], now: number, selected: string | 
   item(1, `<rect x="0" y="1" width="11" height="11" rx="2" fill="${C.dim}"/>`, '会話のみ')
   item(1, `<line x1="0" y1="7" x2="11" y2="7" stroke="${C.dim}" stroke-dasharray="2 3"/>`, '待ち')
   item(1, `<circle cx="5.5" cy="6.5" r="4" fill="${C.red}"/>`, 'エラー')
-  return svg(ly + 22 + 22, body + legend)
+  return frame(ly + 22 + 22, body + legend)
 }
 
 // ---- 要約中 ----
 
 export const busySvg = () =>
-  svg(
-    48,
-    text(16, 30, '要約中', 14, C.text, 'font-weight="bold"') +
+  frame(
+    HEADER_H,
+    header('要約中') +
       [0, 1, 2]
         .map(
           i =>
-            `<circle cx="${76 + i * 12}" cy="25" r="3.5" fill="${C.blue}">` +
+            `<circle cx="${80 + i * 12}" cy="22" r="3.5" fill="${C.blue}">` +
             `<animate attributeName="opacity" values="0.2;1;0.2" dur="1.2s" begin="${(i * 0.3).toFixed(1)}s" repeatCount="indefinite"/></circle>`,
         )
         .join(''),

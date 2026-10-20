@@ -93,7 +93,7 @@ test('SVG: viewBox だけ、上限内、灯ったランプは脈打つ、制御�
   const off = boardSvg(EMPTY)
   expect(off).not.toMatch(/<svg[^>]* width=/)
   expect(off).toContain('オン 0 個')
-  expect(off).not.toContain('<animate')
+  expect(off).not.toContain('repeatCount="indefinite"') // 灯ったランプが無ければ脈打たない (1 回きりの出る動きはある)
   const many = { on: { ja: true as const }, custom: Array.from({ length: 40 }, (_, i) => ({ id: `c${i}`, text: `<長い>${'約'.repeat(MAX_TEXT)}` })) }
   const svg = boardSvg(many)
   expect(svg).toContain('オン 1 個')
@@ -317,4 +317,19 @@ test('C2: /rules が拒まれたら /rule-switch で開き、元の /rules は�
   expect(await $.command.run({ command: 'rule-switch', ...run })).toMatchObject({ text: 'ルールスイッチを開きました。' })
   expect(await $.command.run({ command: 'rules', ...run })).toMatchObject({ text: '組み込みの rules' })
   expect(opened).toEqual(['rule-switch'])
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'rule-ja' })
+  expect(await svgOf(ui)).toMatch(/fill="#ffffff"/)
+  expect(await svgOf(ui)).toContain('fill="#1a7f37"/>') // 灯ったランプは明るい緑
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
+  expect(await svgOf(ui)).toContain('fill="#3fb950"/>')
 })

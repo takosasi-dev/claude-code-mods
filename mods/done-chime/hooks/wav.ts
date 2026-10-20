@@ -1,6 +1,6 @@
 import type { DoneChimeSettings, DoneChimeSound, DoneChimeVolume } from '../types'
+import { C, HEADER_H, fadeIn, frame, header } from './style'
 
-const FONT = 'font-family="sans-serif"'
 export const RATE = 8000
 
 export const SOUNDS: { value: DoneChimeSound; label: string }[] = [
@@ -107,14 +107,18 @@ export const summary = (s: DoneChimeSettings) =>
     ? `オン: ${s.threshold} 秒以上かかったターンの終わりに「${labelOf(SOUNDS, s.sound)}」を音量 ${labelOf(VOLUMES, s.volume)} で鳴らします`
     : 'オフ: 鳴らしません'
 
-const COLOR: Record<DoneChimeSound, string> = { chord: '#58a6ff', bell: '#d29922', pon: '#3fb950' }
+// 音ごとの色。テーマに付いていくよう、呼ぶたびに C から読む
+const colorOf = (sound: DoneChimeSound) => ({ chord: C.blue, bell: C.yellow, pon: C.green })[sound]
 
-/** 波形の絵。縦線で各列の最小と最大を描き、再生位置の線が流れる */
+/**
+ * 波形の絵。縦線で各列の最小と最大を描き、再生位置の線が流れる。
+ * 設定を変えた時だけ描き直すので、波形は 1 回だけふわっと出す
+ */
 export const waveSvg = (s: DoneChimeSettings) => {
   const pcm = samples(s.sound, s.volume)
   const cols = 180
   const per = Math.ceil(pcm.length / cols)
-  const mid = 70
+  const mid = HEADER_H + 62
   let d = ''
   for (let c = 0; c < cols; c++) {
     const part = pcm.slice(c * per, (c + 1) * per)
@@ -122,14 +126,17 @@ export const waveSvg = (s: DoneChimeSettings) => {
     const x = (20 + c * 1.9).toFixed(1)
     d += `M${x} ${(mid - Math.max(...part) * 50).toFixed(1)}V${(mid - Math.min(...part) * 50 + 0.5).toFixed(1)}`
   }
-  const c = s.isOn ? COLOR[s.sound] : '#8b949e'
+  const c = s.isOn ? colorOf(s.sound) : C.dim
   const sec = LENGTH[s.sound]
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 140">
-<rect x="0.5" y="0.5" width="379" height="139" rx="8" fill="#161b22" stroke="#30363d"/>
-<line x1="20" y1="${mid}" x2="362" y2="${mid}" stroke="#30363d"/>
-<path d="${d}" stroke="${c}" stroke-width="1.4" fill="none"/>
-<line y1="20" y2="120" x1="20" x2="20" stroke="#c9d1d9" stroke-opacity="0.6"><animate attributeName="x1" values="20;362;362" keyTimes="0;0.5;1" dur="${(sec * 2 + 1).toFixed(1)}s" repeatCount="indefinite"/><animate attributeName="x2" values="20;362;362" keyTimes="0;0.5;1" dur="${(sec * 2 + 1).toFixed(1)}s" repeatCount="indefinite"/></line>
-<text x="20" y="134" font-size="12" fill="#8b949e" ${FONT}>${labelOf(SOUNDS, s.sound)} / ${sec} 秒 / 音量 ${labelOf(VOLUMES, s.volume)}</text>
-<text x="360" y="134" text-anchor="end" font-size="12" fill="${s.isOn ? '#3fb950' : '#8b949e'}" ${FONT}>${s.isOn ? `オン ${s.threshold} 秒以上` : 'オフ'}</text>
-</svg>`
+  const dur = `${(sec * 2 + 1).toFixed(1)}s`
+  return frame(
+    196,
+    header('終わりの音', s.isOn ? `オン ${s.threshold} 秒以上` : 'オフ', c) +
+      `<line x1="20" y1="${mid}" x2="360" y2="${mid}" stroke="${C.line}"/>` +
+      fadeIn(`<path d="${d}" stroke="${c}" stroke-width="1.4" fill="none"/>`) +
+      `<line y1="${mid - 52}" y2="${mid + 52}" x1="20" x2="20" stroke="${C.text}" stroke-opacity="0.6">` +
+      `<animate attributeName="x1" values="20;360;360" keyTimes="0;0.5;1" dur="${dur}" repeatCount="indefinite"/>` +
+      `<animate attributeName="x2" values="20;360;360" keyTimes="0;0.5;1" dur="${dur}" repeatCount="indefinite"/></line>` +
+      `<text x="20" y="182" font-size="12" fill="${C.dim}">${labelOf(SOUNDS, s.sound)} / ${sec} 秒 / 音量 ${labelOf(VOLUMES, s.volume)}</text>`,
+  )
 }

@@ -2,8 +2,27 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
-import type { AquaTank } from '../types'
-import { FEED_MS, INITIAL, UPSET_MS, drawTank, fishCount, periodAt, seasonAt, slotAt, viewAt, waterAt } from '../hooks/tank'
+import type { AquaFish, AquaTank, FishKind } from '../types'
+import {
+  FEED_MS,
+  INITIAL,
+  KINDS,
+  UPSET_MS,
+  dayOf,
+  drawTank,
+  fishCount,
+  fishListSvg,
+  fromSaved,
+  kindFor,
+  migrateFish,
+  periodAt,
+  seasonAt,
+  slotAt,
+  stageOf,
+  stepFish,
+  viewAt,
+  waterAt,
+} from '../hooks/tank'
 
 // 2026-10-20 12:00 JST (昼)
 const NOW = Date.parse('2026-10-20T03:00:00Z')
@@ -30,12 +49,17 @@ const fakeStore = (on: On, init: Record<string, unknown> = {}) => {
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
   })
-  return { saved: () => m.get('tank') as Partial<AquaTank> | undefined }
+  return { saved: () => m.get('tank') as Partial<AquaTank> | undefined, put: (v: unknown) => m.set('tank', v) }
 }
 
 /** 下の hook は全部ここで足す (test が $ を呼んだ後は足せない) */
-const boot = async ($: Engine, on: On, saved?: Partial<AquaTank>, opts: { failTool?: () => boolean; now?: number } = {}) => {
+const boot = async ($: Engine, on: On, saved?: Partial<AquaTank>, opts: { failTool?: () => boolean; now?: number; theme?: () => string } = {}) => {
   const clock = mock.clock(on, { now: opts.now ?? NOW })
+  const theme = opts.theme
+  if (theme) {
+    on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme(), provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+    on('config.set', (_$, e) => ({ value: e.value }))
+  }
   const store = fakeStore(on, saved ? { tank: saved } : {})
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -399,4 +423,148 @@ test('時計が進んで夜になり、日付が変わって季節も変わる',
   expect(await svgOf(ui)).toContain('id="petals"')
   const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await infoOf(term)).toContain('春の夜')
+})
+
+// ---- 0.3.0 魚が 1 匹ずつ育つ ----
+
+const aFish = (id: number, kind: FishKind, turnsSeen: number, bornAt = NOW): AquaFish => ({ id, kind, bornAt, turnsSeen })
+
+test('段階は来てからのターンで 稚魚 → 若魚 → 成魚 → 大物', () => {
+  expect([0, 4, 5, 19, 20, 59, 60, 999].map(stageOf)).toEqual(['稚魚', '稚魚', '若魚', '若魚', '成魚', '成魚', '大物', '大物'])
+})
+
+test('種類: 最初はまる魚、節目が進むほど珍しい種類まで来る (同じ水槽なら同じ魚)', () => {
+  const seen = (i: number) => new Set(Array.from({ length: 300 }, (_, k) => kindFor(i, NOW + k * 86_400_000)))
+  expect([...seen(0)]).toEqual(['maru'])
+  // 2 匹目は先頭の 3 種だけ、8 匹目は 6 種すべて
+  expect([...seen(1)].every(k => KINDS.indexOf(k) <= 2)).toBe(true)
+  expect(seen(1).size).toBe(3)
+  expect(seen(7).size).toBe(6)
+  // 一番珍しいあかり魚は 5 匹目より前には来ない
+  for (const i of [1, 2, 3]) expect(seen(i).has('akari')).toBe(false)
+  expect(kindFor(5, NOW)).toBe(kindFor(5, NOW))
+})
+
+test('古い記録 (魚の欄が無い) は今の数の魚に移し、来てからのターンは節目から数える', () => {
+  expect(migrateFish(25, NOW).map(f => f.turnsSeen)).toEqual([25, 20, 10, 0])
+  const saved = fromSaved({ turns: 25, bornAt: NOW, fullness: 70, fedAt: NOW, murk: 0, name: '' }, NOW)
+  expect(saved.fish.map(f => f.id)).toEqual([0, 1, 2, 3])
+  expect(saved.fish.map(f => stageOf(f.turnsSeen))).toEqual(['成魚', '成魚', '若魚', '稚魚'])
+  expect(saved.fish.length).toBe(fishCount(25))
+  // 壊れた魚は落とし、全部壊れていれば作り直す。名前の制御文字は落とす
+  const mixed = fromSaved(
+    { turns: 30, bornAt: NOW, fish: [aFish(0, 'ougi', 3), { id: 'x', kind: 'maru' }, { id: 2, kind: 'unknown' }, null, { ...aFish(4, 'shima', 1), name: 'ぶち\x07丸' }] },
+    NOW,
+  )
+  expect(mixed.fish.map(f => [f.id, f.kind])).toEqual([
+    [0, 'ougi'],
+    [4, 'shima'],
+  ])
+  expect(mixed.fish[1]?.name).toBe('ぶち丸')
+  expect(fromSaved({ turns: 30, bornAt: NOW, fish: [null] }, NOW).fish).toHaveLength(fishCount(30))
+  expect(fromSaved({ turns: 30, bornAt: NOW, fish: Array.from({ length: 12 }, (_, i) => aFish(i, 'maru', 0)) }, NOW).fish).toHaveLength(8)
+})
+
+test('1 ターンでみんな 1 つ育ち、節目で新しい魚が来る (最大 8 匹)', () => {
+  const three = stepFish(migrateFish(14, NOW), 15, NOW, NOW + 5)
+  expect(three.map(f => f.turnsSeen)).toEqual([15, 10, 0])
+  expect(three[2]).toMatchObject({ id: 2, bornAt: NOW + 5, kind: kindFor(2, NOW) })
+  expect(stepFish(three, 16, NOW, NOW)).toHaveLength(3)
+  expect(stepFish(migrateFish(500, NOW), 501, NOW, NOW)).toHaveLength(8)
+})
+
+test('ターンを重ねると store の魚が育ち、節目で 1 匹増えて残る', async ($, on) => {
+  const { store, tank } = await boot($, on, { turns: 4, bornAt: NOW })
+  // 魚の欄の無い古い記録は、開いた時に移して書く
+  expect(store.saved()?.fish).toEqual([{ id: 0, kind: 'maru', bornAt: NOW, turnsSeen: 4 }])
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(store.saved()?.fish?.map(f => [f.id, f.turnsSeen])).toEqual([
+    [0, 5],
+    [1, 0],
+  ])
+  expect((await tank()).fish).toHaveLength(2)
+  // 中断したターンでは育たない
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2', reason: 'aborted' })
+  expect(store.saved()?.fish?.map(f => f.turnsSeen)).toEqual([5, 0])
+})
+
+test('別のセッションが足した魚を、こちらのターンで消さず、二重にも来させない', async ($, on) => {
+  const { store } = await boot($, on, { turns: 14, bornAt: NOW, fish: migrateFish(14, NOW) })
+  // 別の窓で 15 ターン目が終わり、3 匹目が来た
+  store.put({ ...store.saved(), turns: 15, fish: stepFish(migrateFish(14, NOW), 15, NOW, NOW + 1) })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const fish = store.saved()?.fish ?? []
+  expect(store.saved()?.turns).toBe(16)
+  expect(fish.map(f => [f.id, f.turnsSeen])).toEqual([
+    [0, 16],
+    [1, 11],
+    [2, 1],
+  ])
+  expect(fish[2]?.bornAt).toBe(NOW + 1)
+})
+
+test('大きさは段階で決まり、種類ごとに形が違う', () => {
+  const at = (fish: AquaFish[]) => drawTank({ ...INITIAL, fish, view: viewAt({ ...INITIAL, fedAt: NOW, bornAt: NOW }, NOW) })
+  const svg = at([aFish(0, 'maru', 0), aFish(1, 'maru', 5), aFish(2, 'maru', 20), aFish(3, 'maru', 60)])
+  for (const sc of ['0.55', '0.8', '1.1', '1.5']) expect(svg).toContain(`transform="scale(${sc})"`)
+  expect(count(svg, 'animateMotion')).toBe(4)
+  // 一匹ずつ描いて、6 種とも違う絵。あかり魚だけ提灯が光る
+  const one = KINDS.map(k => at([aFish(0, k, 30)]))
+  expect(new Set(one).size).toBe(6)
+  one.forEach((s, i) => expect(s.includes('class="lure"')).toBe(KINDS[i] === 'akari'))
+  // 魚が配列で渡されれば turns の数ではなく配列の数
+  expect(count(at([aFish(0, 'shima', 1)]), 'animateMotion')).toBe(1)
+  // 0.2.x の state (fish が無い) が残ったまま描かれても、turns の数で描く
+  expect(count(drawTank({ ...INITIAL, turns: 25, fish: undefined as never }), 'animateMotion')).toBe(4)
+})
+
+test('魚の一覧の SVG: 種類・段階・来た日を並べ、幅を付けない', () => {
+  const day = Date.parse('2026-10-18T15:30:00Z') // JST 10/19 0:30
+  expect(dayOf(day)).toBe('10月19日')
+  const svg = fishListSvg([aFish(0, 'ougi', 70, day), { ...aFish(1, 'akari', 2, NOW), name: '<ぴか>' }])
+  expect(svg).toMatch(/魚の一覧[\s\S]*2 匹/)
+  expect(svg).toMatch(/おうぎ尾[\s\S]*大物[\s\S]*10月19日に来た \/ 70ターン/)
+  expect(svg).toContain('あかり魚 &lt;ぴか&gt;')
+  expect(svg).toContain('稚魚')
+  expect(svg).not.toMatch(/<svg[^>]*\swidth=/)
+  expect(fishListSvg(migrateFish(500, NOW)).length).toBeLessThan(131_072)
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 一覧ボタンで魚の一覧に切り替わり、もう一度で水槽に戻る`, async ($, on) => {
+    await boot($, on, { turns: 25, bornAt: NOW, fullness: 70, fedAt: NOW })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ key: 'list' }))?.props.label).toBe('一覧')
+    await ui.press({ key: 'list' })
+    expect((await ui.find({ key: 'list' }))?.props.label).toBe('水槽')
+    if (surface === 'vscode') {
+      const svg = await svgOf(ui)
+      expect(svg).toMatch(/魚の一覧[\s\S]*4 匹/)
+      expect(svg).toMatch(/まる魚[\s\S]*成魚[\s\S]*10月20日に来た \/ 25ターン/)
+      expect(svg).not.toContain('animateMotion')
+    } else {
+      expect(await ui.find({ type: 'Text', text: /^まる魚/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '成魚' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '  10月20日に来た / 0ターン' })).toBeDefined()
+      expect(await summaryOf(ui)).toBe('魚 4 匹 / 満腹度 70%')
+    }
+    await ui.press({ key: 'list' })
+    if (surface === 'vscode') expect(count(await svgOf(ui), 'animateMotion')).toBe(4)
+    else expect(await ui.find({ type: 'Text', text: /来た/ })).toBeUndefined()
+  })
+}
+
+test('/config の theme が light 系なら枠と HUD を明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  await boot($, on, { turns: 5 }, { theme: () => theme })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgOf(ui)).toContain('rx="14" fill="#ffffff"')
+  expect(await svgOf(ui)).toContain('fill="#f6f8fa" opacity=".88"')
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui)).toContain('rx="14" fill="#0d1117"')
+  expect(await svgOf(ui)).not.toContain('rx="14" fill="#ffffff"')
 })

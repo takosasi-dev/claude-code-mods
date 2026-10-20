@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CanvasBoard } from '../types'
-import { DESCRIPTION as TOOL_DESCRIPTION, INPUT_SCHEMA, KEEP, KIND_NAME, TOOL_NAME, parseShow } from './canvas'
+import { DESCRIPTION as TOOL_DESCRIPTION, INPUT_SCHEMA, KEEP, KIND_NAME, TOOL_NAME, drawChart, parseShow } from './canvas'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'canvas-pane'
 const TITLE = 'キャンバス'
@@ -40,8 +41,11 @@ const remove = ($: $) =>
   })
 
 export const register: Register = on => {
+  followTheme(on)
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     await $.tool
       .register({ name: TOOL_NAME, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA })
       .catch((err: unknown) => $.ui.log(`canvas-pane: ツールを登録できませんでした (${err instanceof Error ? err.message : String(err)})`))
@@ -95,8 +99,8 @@ export const register: Register = on => {
     const isLast = board.pos === n - 1
     let body
     if (item.kind === 'markdown') body = <Markdown key={`md-${item.id}`} text={item.markdown ?? ''} />
-    // source が変われば伸びるアニメは頭から出る
-    else if (Svg && item.svg !== undefined) body = <Svg source={item.svg} alt={item.alt} />
+    // source が変われば伸びるアニメは頭から出る。この mod が組む図は今のテーマの色で組み直す
+    else if (Svg && item.svg !== undefined) body = <Svg source={item.chart ? drawChart(item.chart) : item.svg} alt={item.alt} />
     else
       body = (
         <Box key={`lines-${item.id}`} flexDirection="column">

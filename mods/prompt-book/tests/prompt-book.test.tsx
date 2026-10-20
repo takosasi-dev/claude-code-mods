@@ -102,7 +102,7 @@ test('並び替え・絞り込み・上位・タグの件数', () => {
   expect(svg.startsWith('<svg')).toBe(true)
   expect(svg).toContain('font-family="sans-serif"')
   expect(svg).not.toMatch(/<svg[^>]*\swidth=/)
-  expect((svg.match(/attributeName="width"/g) ?? []).length).toBe(3)
+  expect((svg.match(/attributeName="width"/g) ?? []).length).toBe(4) // 上位 3 件の棒と、見出しの下の線
   expect(svg).toContain('>x 2<')
   expect(svg).not.toContain('保存しました')
   expect(chartSvg(items, '', true)).toContain('保存しました')
@@ -387,4 +387,19 @@ test('タグのチップは 30 個まで、残りは「ほか N」', () => {
   const svg = chartSvg(many, '', false)
   expect((svg.match(/>tag\d\d 1</g) ?? []).length).toBe(30)
   expect(svg).toContain('ほか 10')
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.select({ key: 'tag', value: '要約' })
+  expect(await svgOf(ui)).toMatch(/fill="#ffffff"/)
+  expect(await svgOf(ui)).toContain('fill="#0969da" stroke="#0969da"') // 選んだタグのチップは明るい青
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
+  expect(await svgOf(ui)).toContain('fill="#58a6ff" stroke="#58a6ff"')
 })

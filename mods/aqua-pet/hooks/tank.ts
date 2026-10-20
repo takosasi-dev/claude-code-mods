@@ -1,4 +1,5 @@
-import type { AquaPeriod, AquaSeason, AquaTank, AquaView } from '../types'
+import type { AquaFish, AquaPeriod, AquaSeason, AquaTank, AquaView, FishKind, FishStage } from '../types'
+import { C, clean, esc, frame, header, panel } from './style'
 
 export const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -15,6 +16,87 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 
 /** 0〜4 ターンで 1 匹、以後 10 ターンごとに 1 匹、最大 8 匹 */
 export const fishCount = (turns: number) => (turns < 5 ? 1 : Math.min(8, 2 + Math.floor((turns - 5) / 10)))
+
+// ---------------------------------------------------------------- 魚 1 匹ずつ
+
+export const MAX_FISH = 8
+/** i 番目 (0 から) の魚が来る累計ターン。fishCount の逆 */
+export const arrivalTurn = (i: number) => (i <= 0 ? 0 : 5 + (i - 1) * 10)
+
+/** 種類。後ろほど珍しい */
+export const KINDS: readonly FishKind[] = ['maru', 'shima', 'mizutama', 'hirenaga', 'ougi', 'akari']
+export const KIND_NAME: Record<FishKind, string> = {
+  maru: 'まる魚',
+  shima: 'しま魚',
+  mizutama: '水玉魚',
+  hirenaga: 'ひれなが',
+  ougi: 'おうぎ尾',
+  akari: 'あかり魚',
+}
+
+/** 来てからのターンで決まる段階 */
+export const stageOf = (turnsSeen: number): FishStage => (turnsSeen < 5 ? '稚魚' : turnsSeen < 20 ? '若魚' : turnsSeen < 60 ? '成魚' : '大物')
+const STAGE_SCALE: Record<FishStage, number> = { 稚魚: 0.55, 若魚: 0.8, 成魚: 1.1, 大物: 1.5 }
+
+/**
+ * i 番目に来る魚の種類。最初はまる魚、以後は節目が進むほど珍しい種類まで出る
+ * (i 番目は先頭から i + 2 種、後ろほど出やすい)。
+ * 水槽の生まれた時刻を種にするので、どのセッションが節目を越えても同じ魚が来る
+ */
+export const kindFor = (i: number, tankBornAt: number): FishKind => {
+  if (i <= 0) return 'maru'
+  const pool = KINDS.slice(0, Math.min(KINDS.length, i + 2))
+  const total = pool.reduce((a, _, k) => a + k + 1, 0)
+  let x = rng(Math.floor(tankBornAt / 1000) ^ Math.imul(i, 2654435761))() * total
+  for (let k = 0; k < pool.length; k++) {
+    x -= k + 1
+    if (x < 0) return pool[k]!
+  }
+  return pool[pool.length - 1]!
+}
+
+/** 古い記録 (魚の欄が無い) から、今の数だけ魚を作る。来てからのターンは節目から数える */
+export const migrateFish = (turns: number, tankBornAt: number): AquaFish[] =>
+  Array.from({ length: fishCount(turns) }, (_, i) => ({ id: i, kind: kindFor(i, tankBornAt), bornAt: tankBornAt, turnsSeen: Math.max(0, turns - arrivalTurn(i)) }))
+
+/**
+ * 描く・並べる魚。空 (記録を読めなかった・見本の絵) なら turns から作る。
+ * 0.2.x の state が残ったまま描かれた時 (リロード直後) は fish が無いので、それも空と同じに扱う
+ */
+export const fishOf = (t: Pick<AquaTank, 'fish' | 'turns' | 'bornAt'>) => (t.fish && t.fish.length > 0 ? t.fish : migrateFish(t.turns, t.bornAt))
+
+/** 1 ターン終わった: みんな 1 つ育ち、節目を越えた分だけ新しい魚が来る。turns は足した後の累計 */
+export const stepFish = (fish: readonly AquaFish[], turns: number, tankBornAt: number, now: number): AquaFish[] => {
+  const out = fish.map(f => ({ ...f, turnsSeen: f.turnsSeen + 1 }))
+  while (out.length < fishCount(turns)) {
+    const id = out.reduce((m, f) => Math.max(m, f.id + 1), 0)
+    out.push({ id, kind: kindFor(id, tankBornAt), bornAt: now, turnsSeen: 0 })
+  }
+  return out
+}
+
+/** store の魚の欄。配列でない・中身が全部壊れていれば turns から作り直す */
+const fishFrom = (raw: unknown, turns: number, tankBornAt: number): AquaFish[] => {
+  // ponytail: 0.2.x と 0.3.0 のセッションが同時に開いていると、0.2.x 側の書き込みで fish 欄が落ちる。
+  // その時はここで turns から作り直す (来た日が水槽の生まれた日に戻る)。0.2.x 側は直せないので、全部のセッションが 0.3.0 になれば起きない
+  if (!Array.isArray(raw)) return migrateFish(turns, tankBornAt)
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  const out = raw.flatMap((x): AquaFish[] => {
+    const o = typeof x === 'object' && x !== null ? (x as Record<string, unknown>) : {}
+    if (!ok(o.id) || !KINDS.includes(o.kind as FishKind)) return []
+    const name = typeof o.name === 'string' ? clean(o.name).slice(0, 12) : ''
+    return [
+      {
+        id: Math.max(0, Math.floor(o.id)),
+        kind: o.kind as FishKind,
+        bornAt: ok(o.bornAt) ? o.bornAt : tankBornAt,
+        turnsSeen: ok(o.turnsSeen) ? Math.max(0, Math.floor(o.turnsSeen)) : 0,
+        ...(name ? { name } : {}),
+      },
+    ]
+  })
+  return out.length > 0 ? out.slice(0, MAX_FISH) : migrateFish(turns, tankBornAt)
+}
 
 export const fullnessAt = (t: AquaTank, now: number) =>
   clamp(t.fullness - (Math.max(0, now - t.fedAt) / HOUR) * HUNGER_PER_HOUR, 0, 100)
@@ -66,12 +148,14 @@ export const INITIAL: AquaTank = {
   lastActiveAt: 0,
   upsetUntil: 0,
   feedUntil: 0,
+  fish: [],
   isNaming: false,
+  isListing: false,
   view: { period: '昼', season: '春', slot: 48, fullness: 70, isIdle: false, isUpset: false, isFeeding: false, days: 1 },
 }
 
 /** $.store に残す分 */
-export type Saved = Pick<AquaTank, 'turns' | 'bornAt' | 'fullness' | 'fedAt' | 'murk' | 'name'>
+export type Saved = Pick<AquaTank, 'turns' | 'bornAt' | 'fullness' | 'fedAt' | 'murk' | 'name' | 'fish'>
 export const toSaved = (t: AquaTank): Saved => ({
   turns: t.turns,
   bornAt: t.bornAt,
@@ -79,19 +163,23 @@ export const toSaved = (t: AquaTank): Saved => ({
   fedAt: t.fedAt,
   murk: t.murk,
   name: t.name,
+  fish: t.fish,
 })
 
 /** store の中身は信用しない: 数と文字だけ拾う */
 export const fromSaved = (raw: unknown, now: number): Saved => {
   const o = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
   const num = (k: string, d: number) => (typeof o[k] === 'number' && Number.isFinite(o[k]) ? (o[k] as number) : d)
+  const turns = Math.max(0, Math.floor(num('turns', 0)))
+  const bornAt = num('bornAt', now) || now
   return {
-    turns: Math.max(0, Math.floor(num('turns', 0))),
-    bornAt: num('bornAt', now) || now,
+    turns,
+    bornAt,
     fullness: clamp(num('fullness', 70), 0, 100),
     fedAt: num('fedAt', now) || now,
     murk: clamp(Math.floor(num('murk', 0)), 0, MAX_MURK),
     name: typeof o.name === 'string' ? o.name.slice(0, 12) : '',
+    fish: fishFrom(o.fish, turns, bornAt),
   }
 }
 
@@ -327,10 +415,61 @@ const snow = () => {
 
 type Mood = { isRunning: boolean; isUpset: boolean; isIdle: boolean; isHungry: boolean; isNight: boolean }
 
-const fish = (i: number, m: Mood) => {
+/** 種類ごとの尾びれ・背びれ・模様 (左上 0,0 で右を向いた形) */
+const SHAPE: Record<FishKind, { tail: string; dorsal: string; extra: (body: string) => string }> = {
+  maru: { tail: 'M-10 0 L-21 -8 Q-17 0 -21 8 Z', dorsal: 'M3 -8 Q-3 -15 -8 -7 Z', extra: () => '' },
+  shima: {
+    tail: 'M-10 0 L-21 -8 Q-17 0 -21 8 Z',
+    dorsal: 'M5 -8 Q-1 -16 -8 -7 Z',
+    extra: b => ['M8 -8 Q6 0 8 8', 'M2 -10 Q0 0 2 10', 'M-4 -9 Q-6 0 -4 9'].map(d => `<path d="${d}" stroke="${mix(b, '#0d1117', 0.55)}" stroke-width="2.4" fill="none" opacity=".7"/>`).join(''),
+  },
+  mizutama: {
+    tail: 'M-10 0 L-20 -9 Q-15 0 -20 9 Z',
+    dorsal: 'M3 -8 Q-3 -14 -8 -7 Z',
+    extra: () => [[3, -5], [-3, 2], [7, 3], [-1, 7], [-7, -3], [-6, 5]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.5" fill="#ffffff" opacity=".75"/>`).join(''),
+  },
+  hirenaga: {
+    tail: 'M-10 0 C-20 -6 -28 -16 -34 -14 Q-26 0 -34 14 C-28 16 -20 6 -10 0 Z',
+    dorsal: 'M8 -8 Q-2 -24 -12 -6 Z',
+    extra: b => `<path d="M2 7 Q-4 18 -10 16 L-6 6 Z" fill="${mix(b, '#ffffff', 0.2)}" opacity=".8"/>`,
+  },
+  ougi: {
+    tail: 'M-10 0 C-20 -18 -30 -14 -30 0 C-30 14 -20 18 -10 0 Z',
+    dorsal: 'M4 -8 Q-2 -17 -9 -7 Z',
+    extra: b => ['M-12 0 L-28 -10', 'M-12 0 L-30 0', 'M-12 0 L-28 10'].map(d => `<path d="${d}" stroke="${mix(b, '#ffffff', 0.4)}" stroke-width=".8" opacity=".7"/>`).join(''),
+  },
+  akari: {
+    tail: 'M-10 0 L-20 -7 Q-16 0 -20 7 Z',
+    dorsal: 'M2 -8 Q-3 -13 -8 -7 Z',
+    extra: () =>
+      `<path d="M11 -8 Q16 -20 24 -17" stroke="#8b949e" stroke-width="1.2" fill="none"/>` +
+      `<circle class="lure" cx="24" cy="-17" r="5" fill="#fff3a0" opacity=".35"><animate attributeName="opacity" values=".15;.55;.15" dur="2.2s" repeatCount="indefinite"/></circle>` +
+      `<circle cx="24" cy="-17" r="2.4" fill="#fff8c4"/>`,
+  },
+}
+
+/** 魚の形 1 匹分。body は胴の色、fill は胴の塗り (グラデーションの url か色) */
+const fishShape = (f: AquaFish, body: string, fill: string, tailAnim: string, eye: string) => {
+  const s = SHAPE[f.kind] ?? SHAPE.maru
+  return (
+    `<path d="${s.tail}" fill="${mix(body, '#0d1117', 0.25)}">${tailAnim}</path>` +
+    `<path d="M16 0 C10 -11 -6 -11 -12 0 C-6 11 10 11 16 0 Z" fill="${fill}"/>` +
+    s.extra(body) +
+    `<path d="${s.dorsal}" fill="${mix(body, '#0d1117', 0.2)}"/>` +
+    `<path d="M1 3 Q-3 9 -6 4 Z" fill="${mix(body, '#ffffff', 0.25)}" opacity=".8"/>` +
+    `<path d="M4 -7 Q1 0 4 7" stroke="#ffffff" stroke-width="1" fill="none" opacity=".3"/>` +
+    eye
+  )
+}
+
+const colorOf = (f: AquaFish) => FISH_COLORS[f.id % FISH_COLORS.length] ?? '#f78166'
+
+/** f は魚、i は並びの番号 (泳ぐ高さと速さの種、グラデーションの id) */
+const fish = (f: AquaFish, i: number, m: Mood) => {
   const r = rng(i * 7919 + 13)
-  const color = FISH_COLORS[i % FISH_COLORS.length] ?? '#f78166'
-  const scale = f1(i === 0 ? 1.55 : 0.75 + r() * 0.5)
+  r() // 0.2.x で大きさに使っていた 1 個を読み飛ばし、泳ぐ高さを前と同じにする
+  const color = colorOf(f)
+  const scale = STAGE_SCALE[stageOf(f.turnsSeen)]
   const y = f1(TOP + 40 + r() * 150)
   const x1 = f1(28 + r() * 40)
   const x2 = f1(W - 28 - r() * 40)
@@ -341,18 +480,17 @@ const fish = (i: number, m: Mood) => {
   const body = m.isUpset ? '#f85149' : color
   const id = `g${i}`
 
-  const drawing =
-    `<path d="M-10 0 L-21 -8 Q-17 0 -21 8 Z" fill="${mix(body, '#0d1117', 0.25)}">` +
-    `<animateTransform attributeName="transform" type="rotate" values="-16 -10 0;16 -10 0;-16 -10 0" dur="${m.isIdle ? 2.6 : tail}s" repeatCount="indefinite"/></path>` +
-    `<path d="M16 0 C10 -11 -6 -11 -12 0 C-6 11 10 11 16 0 Z" fill="url(#${id})"/>` +
-    `<path d="M3 -8 Q-3 -15 -8 -7 Z" fill="${mix(body, '#0d1117', 0.2)}"/>` +
-    `<path d="M1 3 Q-3 9 -6 4 Z" fill="${mix(body, '#ffffff', 0.25)}" opacity=".8"/>` +
-    `<path d="M4 -7 Q1 0 4 7" stroke="#ffffff" stroke-width="1" fill="none" opacity=".3"/>` +
+  const drawing = fishShape(
+    f,
+    body,
+    `url(#${id})`,
+    `<animateTransform attributeName="transform" type="rotate" values="-16 -10 0;16 -10 0;-16 -10 0" dur="${m.isIdle ? 2.6 : tail}s" repeatCount="indefinite"/>`,
     // 夜は目がほんのり光る
-    (m.isNight
+    m.isNight
       ? `<circle class="eye-glow" cx="9" cy="-2" r="5" fill="#fff3a0" opacity=".3"><animate attributeName="opacity" values=".15;.45;.15" dur="${f1(2.4 + (i % 3) * 0.5)}s" repeatCount="indefinite"/></circle>` +
-        `<circle cx="9" cy="-2" r="2.4" fill="#fff8c4"/><circle cx="9.7" cy="-2" r="1.2" fill="#0d1117"/>`
-      : `<circle cx="9" cy="-2" r="2.4" fill="#f0f6fc"/><circle cx="9.7" cy="-2" r="1.2" fill="#0d1117"/>`)
+          `<circle cx="9" cy="-2" r="2.4" fill="#fff8c4"/><circle cx="9.7" cy="-2" r="1.2" fill="#0d1117"/>`
+      : `<circle cx="9" cy="-2" r="2.4" fill="#f0f6fc"/><circle cx="9.7" cy="-2" r="1.2" fill="#0d1117"/>`,
+  )
 
   const grad = `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${mix(body, '#ffffff', 0.3)}"/><stop offset=".6" stop-color="${body}"/><stop offset="1" stop-color="${mix(body, '#0d1117', 0.35)}"/></linearGradient>`
 
@@ -409,14 +547,16 @@ const murk = (level: number) => {
 const hud = (t: AquaTank, v: AquaView) => {
   const bar = 70
   const fill = f1((bar * v.fullness) / 100)
-  const barColor = v.fullness < HUNGRY ? '#f85149' : v.fullness < 60 ? '#d29922' : '#3fb950'
+  const barColor = v.fullness < HUNGRY ? C.red : v.fullness < 60 ? C.yellow : C.green
   const status = v.isUpset ? 'びっくり' : t.isRunning ? '作業中' : v.isIdle ? 'おやすみ' : '待機'
-  const statusColor = v.isUpset ? '#f85149' : t.isRunning ? '#3fb950' : '#8b949e'
+  const statusColor = v.isUpset ? C.red : t.isRunning ? C.green : C.dim
   return (
-    `<text x="14" y="20" font-size="12" fill="#8b949e" font-family="sans-serif">満腹</text>` +
-    `<rect x="44" y="11" width="${bar}" height="10" rx="5" fill="#30363d"/>` +
+    // 文字の地 (空の帯の上に、テーマの面の色で敷く)
+    `<rect x="6" y="5" width="${W - 12}" height="21" rx="8" fill="${C.face}" opacity=".88"/>` +
+    `<text x="14" y="20" font-size="12" fill="${C.dim}" font-family="sans-serif">満腹</text>` +
+    `<rect x="44" y="11" width="${bar}" height="10" rx="5" fill="${C.line}"/>` +
     `<rect x="44" y="11" width="${fill}" height="10" rx="5" fill="${barColor}"/>` +
-    `<text x="${44 + bar + 6}" y="20" font-size="12" fill="#c9d1d9" font-family="sans-serif">${v.fullness}%</text>` +
+    `<text x="${44 + bar + 6}" y="20" font-size="12" fill="${C.text}" font-family="sans-serif">${v.fullness}%</text>` +
     `<text x="${W - 14}" y="20" font-size="12" fill="${statusColor}" font-family="sans-serif" text-anchor="end">${status} / ${v.season}の${v.period}</text>`
   )
 }
@@ -436,7 +576,11 @@ export const drawTank = (t: AquaTank): string => {
   // 季節の飾り: 春は花びら、夏は泡を増やしてきらめき、秋は落ち葉、冬は雪
   const deco = v.season === '春' ? petals() : v.season === '夏' ? glints() : v.season === '秋' ? leaves() : snow()
   const extraBubbles = v.season === '夏' ? 8 : 0
-  const fishes = Array.from({ length: fishCount(t.turns) }, (_, i) => fish(i, mood)).reverse() // 大きい魚を手前に
+  // 育った魚を手前に (後に描く)
+  const fishes = fishOf(t)
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => a.f.turnsSeen - b.f.turnsSeen)
+    .map(({ f, i }) => fish(f, i, mood))
   const surface0 = `M0 ${TOP} Q45 ${TOP - 3} 90 ${TOP} T180 ${TOP} T270 ${TOP} T360 ${TOP}`
   const surface1 = `M0 ${TOP} Q45 ${TOP + 3} 90 ${TOP} T180 ${TOP} T270 ${TOP} T360 ${TOP}`
 
@@ -451,7 +595,7 @@ export const drawTank = (t: AquaTank): string => {
     `<clipPath id="glass"><rect x="4" y="4" width="${W - 8}" height="${H - 8}" rx="12"/></clipPath>` +
     fishes.map(f => f.grad).join('') +
     `</defs>` +
-    `<rect width="${W}" height="${H}" rx="14" fill="#0d1117"/>` +
+    `<rect width="${W}" height="${H}" rx="14" fill="${C.bg}"/>` +
     `<g clip-path="url(#glass)">` +
     `<rect x="0" y="0" width="${W}" height="${TOP}" fill="${c.sky}"/>` +
     (isNight ? moon(c.sky) : '') +
@@ -470,7 +614,48 @@ export const drawTank = (t: AquaTank): string => {
     `<path d="M20 ${TOP + 14} L44 ${TOP + 14} L14 ${H - 20} L-10 ${H - 20} Z" fill="#ffffff" opacity=".04"/>` +
     hud(t, v) +
     `</g>` +
-    `<rect x="2" y="2" width="${W - 4}" height="${H - 4}" rx="13" fill="none" stroke="#30363d" stroke-width="3"/>` +
+    `<rect x="2" y="2" width="${W - 4}" height="${H - 4}" rx="13" fill="none" stroke="${C.line}" stroke-width="3"/>` +
     `</svg>`
   )
+}
+
+// ---------------------------------------------------------------- 魚の一覧
+
+/** 日本時間の「10月20日」 */
+export const dayOf = (ms: number) => {
+  const d = new Date(ms + 9 * HOUR)
+  return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日`
+}
+
+const stageColor = (s: FishStage) => (s === '稚魚' ? C.dim : s === '若魚' ? C.blue : s === '成魚' ? C.green : C.yellow)
+
+/** 魚の一覧の 1 行ぶんの言葉 (terminal と SVG で同じ物を使う) */
+export const fishLine = (f: AquaFish) => ({
+  title: `${KIND_NAME[f.kind] ?? f.kind}${f.name ? ` ${f.name}` : ''}`,
+  stage: stageOf(f.turnsSeen),
+  came: `${dayOf(f.bornAt)}に来た / ${f.turnsSeen}ターン`,
+})
+
+/** 魚の一覧。種類・段階・来た日を、小さな絵と並べる */
+export const fishListSvg = (fish: readonly AquaFish[]): string => {
+  const ROW = 50
+  const top = 52
+  const h = top + fish.length * ROW + 8
+  const rows = fish
+    .map((f, k) => {
+      const y = top + k * ROW
+      const l = fishLine(f)
+      const s = Math.min(1, STAGE_SCALE[l.stage])
+      const color = colorOf(f)
+      const eye = `<circle cx="9" cy="-2" r="2.4" fill="#f0f6fc"/><circle cx="9.7" cy="-2" r="1.2" fill="#0d1117"/>`
+      return (
+        panel(10, y, 360, ROW - 6) +
+        `<g transform="translate(46 ${y + 24}) scale(${s})">${fishShape(f, color, color, '', eye)}</g>` +
+        `<text x="84" y="${y + 19}" font-size="14" font-weight="bold" fill="${C.text}">${esc(l.title)}</text>` +
+        `<text x="358" y="${y + 19}" font-size="13" font-weight="bold" fill="${stageColor(l.stage)}" text-anchor="end">${l.stage}</text>` +
+        `<text x="84" y="${y + 36}" font-size="12" fill="${C.dim}">${esc(l.came)}</text>`
+      )
+    })
+    .join('')
+  return frame(h, header('魚の一覧', `${fish.length} 匹`, C.blue) + rows)
 }

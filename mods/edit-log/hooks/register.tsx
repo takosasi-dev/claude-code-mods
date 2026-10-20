@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { EditLogDetail, EditLogEntry } from '../types'
 import { detailLines, detailSvg, diffBody, fileStats, linesOf, overviewLines, overviewSvg, parentDir, plain, relPath } from './editlog'
+import { followTheme, readTheme } from './style'
 
 const PANE = 'edit-log'
 const TITLE = '変更ログ'
@@ -119,8 +120,10 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = on => {
+  followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await readTheme($)
     // /edits が拒まれたら (組み込みと被ったら) /edit-log にする
     const got = await $.command.register({ name: 'edits', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'edits'
@@ -157,7 +160,7 @@ export const register: Register = on => {
     const entries = await read($, ENTRIES)
     const selected = await read($, SELECTED)
     const note = await read($, NOTE)
-    const noteText = note !== '' && <Text color={note.startsWith('入力欄に入れました') ? 'green' : '#d29922'}>{note}</Text>
+    const noteText = note !== '' && <Text color={note.startsWith('入力欄に入れました') ? 'green' : 'warning'}>{note}</Text>
 
     const linesBox = (lines: ReturnType<typeof overviewLines>) => (
       <Box key="lines" flexDirection="column">
@@ -195,7 +198,7 @@ export const register: Register = on => {
     const lines = detailLines(selected, entries)
     let diff
     if (detail.kind === 'loading') diff = <Text dimColor>差分を読み込み中</Text>
-    else if (detail.kind === 'not-repo') diff = <Text color="#d29922">差分は git のフォルダでだけ出ます</Text>
+    else if (detail.kind === 'not-repo') diff = <Text color="warning">差分は git のフォルダでだけ出ます</Text>
     else if (detail.kind === 'clean')
       diff = <Text dimColor>git の差分はありません(コミット済みか、git が追っていない新しいファイル)</Text>
     else if (detail.kind === 'meta') diff = <Text dimColor>バイナリか権限だけの変更です</Text>

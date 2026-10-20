@@ -128,7 +128,7 @@ test('純関数: 一覧を合わせる・終わり方・消えた物・経過の
 
 test('純関数: 外から来る文字の制御文字を落とす (C3)', () => {
   expect(clean('a\u0007b\bc\u001bd\u007fe')).toBe('abcde')
-  expect(clean('一行目\n二行目\t三\r\n')).toBe('一行目 二行目 三 ')
+  expect(clean('一行目\n二行目\t三\r\n')).toBe('一行目 二行目 三') // 共通の clean (style.ts) は前後の空白も落とす
   const dirty: ListedAgent = { id: 'x', type: 'Exp\u0000lore\u001b', description: 'ベル\u0007と\n改行\fと<b>&"', status: 'failed' }
   const a = applyList({}, [dirty], NOW)
   expect(a.x?.type).toBe('Explore')
@@ -371,4 +371,21 @@ test('/clear で記録を消す', async ($, on) => {
   await $.session.end({ reason: 'clear', sessionId: 's', resume: { id: 's' } } as never)
   expect(await ui.find({ type: 'Button', key: 'view-a1' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'サブエージェントはまだいません' })).toBeDefined()
+})
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  engine(on, newWorld([A1]))
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await start($)
+  await subTurn($, 'a1', 't1')
+  const ui = await $.ui.mount(pane('vscode'))
+  expect(await svgOf(ui)).toMatch(/fill="#ffffff"/)
+  expect(await svgOf(ui)).toContain('stroke="#0969da"') // 実行中の縞は明るい青
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
+  expect(await svgOf(ui)).toContain(`stroke="${BLUE}"`)
 })

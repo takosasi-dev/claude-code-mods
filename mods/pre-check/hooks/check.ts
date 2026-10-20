@@ -1,17 +1,6 @@
 // git の出力を読んで項目ごとの信号を決め、SVG と行を組む。どれも純関数
 import type { PreCheckFile, PreCheckHit, PreCheckReport, PreCheckTest } from '../types'
-
-const C = {
-  bg: '#0d1117',
-  face: '#161b22',
-  line: '#30363d',
-  text: '#c9d1d9',
-  weak: '#8b949e',
-  green: '#3fb950',
-  yellow: '#d29922',
-  red: '#f85149',
-}
-const W = 380
+import { C, HEADER_H, fadeIn, frame, header } from './style'
 
 /** 大きいファイルとみなす大きさ */
 export const LARGE_BYTES = 1024 * 1024
@@ -185,11 +174,12 @@ export function verdictOf(items: Item[], isTestSet: boolean): { light: Light; te
   return { light: 'green', text: 'コミットしてよさそう' }
 }
 
-const COLOR: Record<Light, string> = { green: C.green, yellow: C.yellow, red: C.red, gray: C.weak }
+// C はテーマで中身が替わるので、呼ぶたびに読む
+const COLOR = (l: Light) => ({ green: C.green, yellow: C.yellow, red: C.red, gray: C.dim })[l]
 
 function lamp(cx: number, cy: number, r: number, light: Light, isBlinking: boolean) {
-  const color = COLOR[light]
-  if (light === 'gray') return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.weak}" stroke-width="2" stroke-dasharray="3 3"/>`
+  const color = COLOR(light)
+  if (light === 'gray') return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.dim}" stroke-width="2" stroke-dasharray="3 3"/>`
   const blink = isBlinking ? `<animate attributeName="opacity" values="1;0.35;1" dur="1.2s" repeatCount="indefinite"/>` : ''
   return (
     `<g>${blink}<circle cx="${cx}" cy="${cy}" r="${r + 3}" fill="${color}" opacity="0.6" filter="url(#glow)"/>` +
@@ -197,40 +187,46 @@ function lamp(cx: number, cy: number, r: number, light: Light, isBlinking: boole
   )
 }
 
-const doc = (h: number, body: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
+// 玉の照り(白の光)は絵の中身なのでテーマで変えない
+const DEFS =
   `<defs><radialGradient id="shine" cx="0.35" cy="0.3" r="0.7"><stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/></radialGradient>` +
-  `<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="5"/></filter></defs>` +
-  `<rect width="${W}" height="${h}" fill="${C.bg}"/>${body}</svg>`
+  `<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="5"/></filter></defs>`
+
+/** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く) */
+const doc = (h: number, body: string, accent: string) =>
+  frame(h + HEADER_H, DEFS + header('コミット前', '', accent) + `<g transform="translate(0 ${HEADER_H})">${body}</g>`)
 
 /** 全体の判定と項目ごとの信号の SVG */
 export function paneSvg(items: Item[], verdict: { light: Light; text: string }) {
   const isGo = verdict.light === 'green'
-  let s = `<rect x="6" y="6" width="368" height="92" rx="10" fill="${C.face}" stroke="${COLOR[verdict.light]}" stroke-width="${isGo ? 2 : 1}"/>`
+  let s = `<rect x="6" y="6" width="368" height="92" rx="10" fill="${C.face}" stroke="${COLOR(verdict.light)}" stroke-width="${isGo ? 2 : 1}"/>`
   s += lamp(52, 52, 26, verdict.light, false)
-  s += `<text x="94" y="${isGo ? 60 : 48}" font-size="${isGo ? 24 : 20}" font-weight="bold" fill="${COLOR[verdict.light]}">${esc(verdict.text)}</text>`
+  s += `<text x="94" y="${isGo ? 60 : 48}" font-size="${isGo ? 24 : 20}" font-weight="bold" fill="${COLOR(verdict.light)}">${esc(verdict.text)}</text>`
   if (!isGo) {
     const n = items.filter(i => i.light === 'red').length
     const m = items.filter(i => i.light === 'yellow').length
-    s += `<text x="94" y="74" font-size="13" fill="${C.weak}">赤 ${n} / 黄 ${m}</text>`
+    s += `<text x="94" y="74" font-size="13" fill="${C.dim}">赤 ${n} / 黄 ${m}</text>`
   }
   items.forEach((it, i) => {
     const y = 108 + i * 44
-    s += `<rect x="6" y="${y}" width="368" height="38" rx="6" fill="${C.face}" stroke="${C.line}"/>`
-    s += lamp(28, y + 19, 10, it.light, it.isBlinking === true)
-    s += `<text x="48" y="${y + 24}" font-size="14" font-weight="bold" fill="${C.text}">${esc(it.label)}</text>`
-    s += `<text x="366" y="${y + 24}" font-size="12" fill="${it.light === 'gray' ? C.weak : COLOR[it.light]}" text-anchor="end">${esc(cut(it.summary, 26))}</text>`
+    s += fadeIn(
+      `<rect x="6" y="${y}" width="368" height="38" rx="6" fill="${C.face}" stroke="${C.line}"/>` +
+        lamp(28, y + 19, 10, it.light, it.isBlinking === true) +
+        `<text x="48" y="${y + 24}" font-size="14" font-weight="bold" fill="${C.text}">${esc(it.label)}</text>` +
+        `<text x="366" y="${y + 24}" font-size="12" fill="${it.light === 'gray' ? C.dim : COLOR(it.light)}" text-anchor="end">${esc(cut(it.summary, 26))}</text>`,
+      0.1 + i * 0.06,
+    )
   })
-  return doc(108 + items.length * 44 + 4, s)
+  return doc(108 + items.length * 44 + 10, s, COLOR(verdict.light))
 }
 
 /** git が読めない時の SVG */
 export function messageSvg(title: string, lines: string[], light: Light) {
   let s = `<rect x="6" y="6" width="368" height="${40 + lines.length * 20}" rx="10" fill="${C.face}" stroke="${C.line}"/>`
   s += lamp(30, 30, 10, light, light === 'yellow')
-  s += `<text x="50" y="35" font-size="15" font-weight="bold" fill="${COLOR[light]}">${esc(title)}</text>`
+  s += `<text x="50" y="35" font-size="15" font-weight="bold" fill="${COLOR(light)}">${esc(title)}</text>`
   lines.forEach((l, i) => (s += `<text x="20" y="${60 + i * 20}" font-size="12" fill="${C.text}">${esc(l)}</text>`))
-  return doc(52 + lines.length * 20, s)
+  return doc(52 + lines.length * 20, s, COLOR(light))
 }
 
 const where = (f: { isStaged: boolean; isUnstaged?: boolean }) => (f.isStaged && f.isUnstaged ? '済+未' : f.isStaged ? '済' : '未')

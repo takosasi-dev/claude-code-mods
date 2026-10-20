@@ -309,3 +309,23 @@ test('/ci が拒まれたら /ci-pane で開き、/ci は横取りしない', as
   expect(await $.command.run({ command: 'ci-pane', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: 'CI のペインを開きました。' })
   expect(await $.command.run({ command: 'ci', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: '別の ci' })
 })
+
+test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  mockGh(on, { calls: [] })
+  let theme = 'light'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
+  on('config.set', (_$, e) => ({ value: e.value }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const ui = (await $.ui.mount({ ...PANE, surface: 'vscode' })) as unknown as Ui
+  await ui.press({ key: 'reload' })
+  const BG = (fill: string) => new RegExp(`<rect width="380" height="\\d+" rx="10" fill="${fill}"/>`)
+  expect(await svgOf(ui, 'pr')).toMatch(BG('#ffffff'))
+  expect(await svgOf(ui, 'runs')).toMatch(BG('#ffffff'))
+  theme = 'dark'
+  await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
+  expect(await svgOf(ui, 'pr')).toMatch(BG('#0d1117'))
+  expect(await svgOf(ui, 'runs')).toMatch(BG('#0d1117'))
+})

@@ -1,7 +1,7 @@
 {
   "name": "mod-hub",
-  "version": "0.3.0",
-  "description": "/mod で画面のある mod を開くボタンをペインに並べる",
+  "version": "0.4.0",
+  "description": "/mod で画面のある mod をアイコン付きで並べ、検索・固定・最近開いた順で開く",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"
 }
