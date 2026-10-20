@@ -1,0 +1,22 @@
+{
+  "name": "test-runner",
+  "version": "0.1.0",
+  "description": "/testrun でテストをボタン 1 つで走らせ、結果を信号と直近 20 回の履歴でペインに SVG で表示する",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "testCommand": {
+      "type": "string",
+      "title": "テストのコマンド",
+      "description": "テストを走らせるコマンド (例: npm test)。空白で区切って、シェルを通さずに今の作業フォルダで起動する。空なら未設定",
+      "default": ""
+    },
+    "timeoutSeconds": {
+      "type": "number",
+      "title": "時間の上限 (秒)",
+      "description": "これを過ぎたらテストを止める",
+      "default": 300,
+      "min": 1
+    }
+  }
+}

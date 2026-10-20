@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-10-20
+
+### Added
+
+- 開発支援: edit-log(`/edits`)・todo-board(`/todos`)・test-runner(`/testrun`)・prompt-book(`/prompts`)
+- ネタ系: live-commentary(`/jikkyo`)・turn-gacha(`/gacha`)・dev-rpg(`/rpg`)・code-omikuji(`/omikuji`)
+
 ## [0.2.0] - 2026-10-20
 
 ### Changed

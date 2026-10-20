@@ -1,0 +1,7 @@
+{
+  "name": "turn-gacha",
+  "version": "0.1.0",
+  "description": "/gacha で、ターンが終わるたびに引く開発ネタのカードと図鑑をペインで見る",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

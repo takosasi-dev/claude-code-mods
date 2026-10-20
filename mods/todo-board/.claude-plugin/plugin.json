@@ -1,0 +1,7 @@
+{
+  "name": "todo-board",
+  "version": "0.1.0",
+  "description": "/todos で今の作業フォルダの TODO・FIXME・HACK・XXX を拾い、種類ごとの件数・推移・多いファイルをペインに SVG で表示する",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

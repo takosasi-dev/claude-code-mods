@@ -19,6 +19,14 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | token-meter | `/tokens` | ターンごとのトークンの積み上げ棒とキャッシュの当たり率 |
 | focus-timer | `/focus-timer` | ポモドーロ。減っていくリングと今日の本数 |
 | session-recap | `/session-recap` | セッションのふりかえり。ターンの帯のタイムラインと、押した時だけ作る要約 |
+| edit-log | `/edits` | このセッションで Claude が変えたファイルの時系列。押すと git の差分(HEAD と比べる)と「レビューして」 |
+| todo-board | `/todos` | 今のフォルダの TODO / FIXME / HACK / XXX の件数・推移・一覧。押すと「片付けて」 |
+| test-runner | `/testrun` | 設定したテストのコマンドをボタンで走らせる。信号と直近 20 回の結果、失敗したら「直して」 |
+| prompt-book | `/prompts` | よく使う依頼文を保存して、ボタンで入力欄へ。タグ・使った回数・並び替え |
+| live-commentary | `/jikkyo` | Claude の動きをスポーツ実況風にステータス行へ。口調は熱血・冷静・関西 |
+| turn-gacha | `/gacha` | ターンが終わるたびにガチャ。N / R / SR / SSR のカード 40 種と図鑑 |
+| dev-rpg | `/rpg` | 作業すると経験値がたまる RPG。レベル・称号・実績 |
+| code-omikuji | `/omikuji` | 今日のコード運勢。筒を振るアニメと和紙のおみくじ |
 | reply-frame | 常時 | 返答をオレンジ、自分の発言を青の角丸の枠で囲む |
 | danger-frame | 常時 | 危ないシェルのコマンドの行を赤い枠で囲む |
 | long-turn-toast | 常時 | 長くかかったターン(既定 120 秒超)をトーストで知らせる |
@@ -61,6 +69,7 @@ mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけで�
 | project-board | `memoDir` | 引き継ぎメモ(*.md)が並ぶフォルダ |
 | project-board | `vaultRoot` / `vaultName` | Obsidian の vault の根と名前(入れると「Obsidian で開く」が出る) |
 | devlog-pane | `logDir` | YYYY-MM-DD.md(日付は日本時間)が並ぶフォルダ |
+| test-runner | `testCommand` | テストのコマンド(例 `npm test`。シェルを通さず空白で区切る) |
 
 ```json
 "pluginConfigs": {

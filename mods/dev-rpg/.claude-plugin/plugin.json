@@ -1,0 +1,7 @@
+{
+  "name": "dev-rpg",
+  "version": "0.1.0",
+  "description": "/rpg で作業が経験値になる RPG のステータス窓をペインに SVG で表示する (レベル・称号・実績はセッションをまたいで育つ)",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

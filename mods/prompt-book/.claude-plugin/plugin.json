@@ -1,0 +1,7 @@
+{
+  "name": "prompt-book",
+  "version": "0.1.0",
+  "description": "/prompts でよく使う依頼文を保存し、ボタンひとつで入力欄へ入れるプロンプト帳のペイン",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

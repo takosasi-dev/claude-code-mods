@@ -1,0 +1,16 @@
+{
+  "name": "live-commentary",
+  "version": "0.1.0",
+  "description": "/jikkyo で Claude の動きをスポーツ実況風にステータス行とペインで伝える実況席",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "style": {
+      "type": "string",
+      "title": "実況の口調",
+      "description": "熱血 / 冷静 / 関西 のどれか",
+      "default": "熱血",
+      "options": ["熱血", "冷静", "関西"]
+    }
+  }
+}
