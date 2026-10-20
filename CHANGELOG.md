@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2026-10-20
+
+### Added
+
+- agent-watch(`/agent-watch`): サブエージェントの監視と会話への切り替え
+- canvas-pane(`/canvas`): Claude がグラフ・表・図をペインに描けるツール `mcp__canvas-pane__show`
+- rule-switch(`/rules`): 約束ごとをボタンでオン/オフしてシステムプロンプトに入れる
+- wait-games(`/games`): 2048 とマインスイーパー
+
 ## [0.3.1] - 2026-10-20
 
 レビューで見つかった不具合と安全面の直し。

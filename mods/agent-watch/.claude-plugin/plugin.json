@@ -1,0 +1,7 @@
+{
+  "name": "agent-watch",
+  "version": "0.1.0",
+  "description": "/agents でサブエージェントの状態・経過時間・ツール回数をペインに SVG の帯で表示し、ボタンでその会話を開く",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

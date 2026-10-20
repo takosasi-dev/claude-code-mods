@@ -113,5 +113,6 @@ claude plugin test mods/<名前>       # tests/*.test.tsx を走らせる
 - コマンドの名前が拒まれて予備の名前にした時は、元の名前の `command.run` に `next(e)` を返します。返さないと、同じ名前の別のコマンドを横取りします
 - 制御文字を含む文字列を Text の子や Svg の `alt` に入れると、エンジンは木ごと拒みます。外から来る文字列は先に制御文字を落とします
 - `$.prompt.fill` の `mode: 'replace'` は入力欄の下書きを消します。`insert` を使います
+- mod の名前(plugin.json の `name`)は `claude-` で始められません。Anthropic の物と紛らわしいため validate が拒みます
 - git を読むだけでも `.git/index` は書き直されます。`git status` は `GIT_OPTIONAL_LOCKS=0` で止まりますが、`git diff`(作業ツリーとの比べ)と `git diff HEAD` は止まりません。差分は index を書かない `git diff-files` / `git diff-index` で読みます
 - `git diff` は `--no-textconv` を付けないと、リポジトリの設定にある変換コマンド(textconv)を走らせます。パスは `git --literal-pathspecs` で渡します(`[id].tsx` のような名前がワイルドカードとして読まれないように)

@@ -1,0 +1,7 @@
+{
+  "name": "canvas-pane",
+  "version": "0.1.0",
+  "description": "Claude が呼べるツール show で、グラフ・表・図をペインに SVG で描く。/canvas で直近 20 枚をめくる",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

@@ -27,6 +27,10 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | turn-gacha | `/gacha` | ターンが終わるたびにガチャ。N / R / SR / SSR のカード 40 種と図鑑 |
 | dev-rpg | `/rpg` | 作業すると経験値がたまる RPG。レベル・称号・実績 |
 | code-omikuji | `/omikuji` | 今日のコード運勢。筒を振るアニメと和紙のおみくじ |
+| agent-watch | `/agent-watch` | 動いているサブエージェントの帯のタイムライン(経過・ツール回数・状態)。ボタンでその会話へ切り替え、メインへ戻る |
+| canvas-pane | `/canvas` | Claude が呼べるツール `show` を足す。「売上をグラフにしてペインに出して」と頼むと、棒・折れ線・円・表・Markdown・SVG をペインに描く。直近 20 枚をめくれる |
+| rule-switch | `/rules` | 「日本語で答える」「commit しない」などの約束ごとをボタンでオン/オフし、システムプロンプトに入れる。自分の約束も足せる |
+| wait-games | `/games` | 長いターンの間に遊ぶ 2048 とマインスイーパー。ターンが終わったら知らせる |
 | reply-frame | 常時 | 返答をオレンジ、自分の発言を青の角丸の枠で囲む |
 | danger-frame | 常時 | 危ないシェルのコマンドの行を赤い枠で囲む |
 | long-turn-toast | 常時 | 長くかかったターン(既定 120 秒超)をトーストで知らせる |
@@ -59,7 +63,13 @@ claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
 
 mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけです。mod-hub を最初に入れてください。
 
-コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub` のように mod の名前のコマンドになります。
+コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub`・`/canvas-pane`・`/rule-switch`・`/wait-games` のように mod の名前のコマンドになります。
+
+## 気を付けること
+
+- rule-switch の約束ごとは、サブエージェントのシステムプロンプトにも入ります。また、組織が Claude Code を管理している環境では、利用者が入れたプラグインのシステムプロンプトのフックは動きません
+- rule-switch を切り替えると、プロンプトのキャッシュが作り直されます
+- canvas-pane のツールに渡された生の SVG は、スクリプト・イベント属性・外部の参照を含む物を断ります(ペインでは画像として描かれ、スクリプトは動きません)
 
 ## 設定が要る mod
 
