@@ -1,7 +1,7 @@
 {
   "name": "aqua-pet",
-  "version": "0.1.1",
-  "description": "Claude の作業に反応して魚が泳ぐ水槽のペイン (/aquarium)",
+  "version": "0.2.0",
+  "description": "Claude の作業に反応して魚が泳ぐ水槽のペイン (/aquarium)。背景は時刻と季節で変わる",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"
 }

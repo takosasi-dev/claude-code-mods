@@ -93,82 +93,96 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, isHidden))) return next(e)
 
-    const r = await read($, run)
-    const l = await read($, last)
-    // 定型を減らして選んでいた番号が範囲外になったら 0 番に戻す
-    const stored = await read($, pick)
-    const picked = presets[Number(stored)] ? stored : '0'
-    const t = $.ui.resolve(e)
-    const { Box, Text, Button } = t
-
-    const fill = (text: string) => void $.prompt.fill({ text, mode: 'insert' })
-    const hide = () => update($, isHidden, () => true)
-
-    // 待機中: 定型ボタン列 (多ければ Select) と「隠す」
-    const controls = (
-      <Box key="controls" flexDirection="row" flexWrap="wrap" columnGap={1}>
-        {presets.length > MAX_BUTTONS && 'Select' in t
-          ? [
-              <t.Select
-                key="pick"
-                label="定型"
-                value={picked}
-                options={presets.map((p, i) => ({ label: p.label, value: String(i) }))}
-                onSelect={v => update($, pick, () => v)}
-              />,
-              <Button
-                key="fill"
-                label="入れる"
-                onPress={() => {
-                  const text = presets[Number(picked)]?.text ?? ''
-                  if (text !== '') fill(text)
-                }}
-              />,
-            ]
-          : presets.map((p, i) => <Button key={`preset-${i}`} label={p.label} onPress={() => fill(p.text)} />)}
-        <Button key="hide" label="隠す" onPress={hide} />
-      </Box>
-    )
-
-    // terminal の表にも Svg の名前はある (テストキットで確認) ので、surface でも分ける
-    if (e.surface === 'terminal' || !('Svg' in t)) {
-      // terminal: Text 1 行の簡易表示
-      const line = r
-        ? `${r.lastError ? '● ' : ''}${clock(r.elapsed)}  ${r.active.length ? short(r.active[r.active.length - 1] ?? '') : '考え中'}  ツール ${r.calls}回`
-        : l
-          ? `前のターン ${clock(l.seconds)} / ツール ${l.calls}回 / エラー ${l.errors}件`
-          : ''
-      return (
-        <Box flexDirection="column">
-          {line !== '' && (
-            <Text color={r?.lastError ? 'red' : undefined} dimColor={!r}>
-              {line}
-            </Text>
-          )}
-          {!r && controls}
-        </Box>
-      )
-    }
-
-    const { Svg } = t
-    if (r) {
-      const tool = r.active[r.active.length - 1] ?? null
-      return (
-        <Box flexDirection="column">
-          <Svg
-            source={barSvg({ elapsed: r.elapsed, tool, calls: r.calls, lastError: r.lastError })}
-            alt={`経過 ${clock(r.elapsed)} / ${tool ?? '考え中'} / ツール ${r.calls}回`}
-          />
-          <Svg source={flowSvg(flowColor(r.elapsed))} alt="実行中" />
-        </Box>
-      )
-    }
-
+    // face-band など、帯を描く他の mod がこの下にいればその木が返る。自分の帯の下に並べる
+    const below = await next(e)
+    const own = await drawOwn()
+    if (below.type === 'engine') return own
+    const { Box } = $.ui.resolve(e)
     return (
-      <Box flexDirection="column" rowGap={0}>
-        {l && <Svg source={lastSvg(l)} alt={`前のターン ${clock(l.seconds)} / ツール ${l.calls}回 / エラー ${l.errors}件`} />}
-        {controls}
+      <Box flexDirection="column">
+        <Box key="own">{own}</Box>
+        <Box key="below">{below}</Box>
       </Box>
     )
+
+    async function drawOwn() {
+      const r = await read($, run)
+      const l = await read($, last)
+      // 定型を減らして選んでいた番号が範囲外になったら 0 番に戻す
+      const stored = await read($, pick)
+      const picked = presets[Number(stored)] ? stored : '0'
+      const t = $.ui.resolve(e)
+      const { Box, Text, Button } = t
+
+      const fill = (text: string) => void $.prompt.fill({ text, mode: 'insert' })
+      const hide = () => update($, isHidden, () => true)
+
+      // 待機中: 定型ボタン列 (多ければ Select) と「隠す」
+      const controls = (
+        <Box key="controls" flexDirection="row" flexWrap="wrap" columnGap={1}>
+          {presets.length > MAX_BUTTONS && 'Select' in t
+            ? [
+                <t.Select
+                  key="pick"
+                  label="定型"
+                  value={picked}
+                  options={presets.map((p, i) => ({ label: p.label, value: String(i) }))}
+                  onSelect={v => update($, pick, () => v)}
+                />,
+                <Button
+                  key="fill"
+                  label="入れる"
+                  onPress={() => {
+                    const text = presets[Number(picked)]?.text ?? ''
+                    if (text !== '') fill(text)
+                  }}
+                />,
+              ]
+            : presets.map((p, i) => <Button key={`preset-${i}`} label={p.label} onPress={() => fill(p.text)} />)}
+          <Button key="hide" label="隠す" onPress={hide} />
+        </Box>
+      )
+
+      // terminal の表にも Svg の名前はある (テストキットで確認) ので、surface でも分ける
+      if (e.surface === 'terminal' || !('Svg' in t)) {
+        // terminal: Text 1 行の簡易表示
+        const line = r
+          ? `${r.lastError ? '● ' : ''}${clock(r.elapsed)}  ${r.active.length ? short(r.active[r.active.length - 1] ?? '') : '考え中'}  ツール ${r.calls}回`
+          : l
+            ? `前のターン ${clock(l.seconds)} / ツール ${l.calls}回 / エラー ${l.errors}件`
+            : ''
+        return (
+          <Box flexDirection="column">
+            {line !== '' && (
+              <Text color={r?.lastError ? 'red' : undefined} dimColor={!r}>
+                {line}
+              </Text>
+            )}
+            {!r && controls}
+          </Box>
+        )
+      }
+
+      const { Svg } = t
+      if (r) {
+        const tool = r.active[r.active.length - 1] ?? null
+        return (
+          <Box flexDirection="column">
+            <Svg
+              source={barSvg({ elapsed: r.elapsed, tool, calls: r.calls, lastError: r.lastError })}
+              alt={`経過 ${clock(r.elapsed)} / ${tool ?? '考え中'} / ツール ${r.calls}回`}
+            />
+            <Svg source={flowSvg(flowColor(r.elapsed))} alt="実行中" />
+          </Box>
+        )
+      }
+
+      return (
+        <Box flexDirection="column" rowGap={0}>
+          {l && <Svg source={lastSvg(l)} alt={`前のターン ${clock(l.seconds)} / ツール ${l.calls}回 / エラー ${l.errors}件`} />}
+          {controls}
+        </Box>
+      )
+    }
   })
 }

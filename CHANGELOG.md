@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0] - 2026-10-20
+
+### Added
+
+- spec-board(`/specs`): SpecStatus の確認待ち・途中の仕様書と次のおすすめ
+- ci-pane(`/ci`): 今のブランチの PR と GitHub Actions の結果
+- port-watch(`/ports`): 待ち受け中のポートと、開発サーバーを 2 回押しで止めるボタン
+- pre-check(`/precheck`): コミット前に差分・秘密情報・衝突の印・大きいファイル・テストを確かめる
+- face-band: 入力欄の上に状態で変わる Claude の顔(`/face` でオン/オフ)
+- done-chime(`/chime`): 長いターンが終わったら音で知らせる
+- turn-haiku(`/haiku`): ターンでやった事を五七五の短冊に
+- README に各 mod の画面の画像と、それを作る `tools/shots.mts`
+
+### Changed
+
+- aqua-pet 0.2.0: 背景が時刻(光の筋・月)と季節(花びら・泡・落ち葉・雪)で変わる
+- work-bar 0.1.3: 帯を描く別の mod(face-band など)が一緒にいる時は、その帯も並べて出す
+
 ## [0.4.0] - 2026-10-20
 
 ### Added

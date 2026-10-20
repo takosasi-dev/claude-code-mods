@@ -1,0 +1,22 @@
+{
+  "name": "pre-check",
+  "version": "0.1.0",
+  "description": "/precheck でコミット前に変更の要約・秘密情報らしい文字列・衝突の印・大きいファイル・テストを信号で並べ、全部緑なら「コミットしてよさそう」と出す",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "testCommand": {
+      "type": "string",
+      "title": "テストのコマンド",
+      "description": "「テストも走らせる」で走らせるコマンド (例: npm test)。空白で区切って、シェルを通さずに今の作業フォルダで起動する。空なら未設定でテストの項目を飛ばす",
+      "default": ""
+    },
+    "timeoutSeconds": {
+      "type": "number",
+      "title": "テストの時間の上限 (秒)",
+      "description": "これを過ぎたらテストを止める (3600 秒まで)",
+      "default": 300,
+      "min": 1
+    }
+  }
+}

@@ -94,6 +94,7 @@ export const register: Register = on => {
     isWarned = false
     // リロード時は実行中などの一時的な値を残し、育ち具合だけ store から戻す
     await change($, t => t)
+    // 段は毎分計算するが、書くのは変わった時だけ (背景の時刻は 15 分刻みなので描き直しは 15 分ごと)
     $.clock.every(60_000, () => refresh($))
 
     return next(e)
@@ -157,7 +158,7 @@ export const register: Register = on => {
       ) : null
     const info = (
       <Text dimColor>
-        {`${t.name ? `${t.name} / ` : ''}育てた日数 ${v.days}日 / 累計 ${t.turns}ターン${t.murk > 0 ? ` / 濁り ${t.murk}` : ''}`}
+        {`${t.name ? `${t.name} / ` : ''}育てた日数 ${v.days}日 / 累計 ${t.turns}ターン${t.murk > 0 ? ` / 濁り ${t.murk}` : ''} / ${v.season}の${v.period}`}
       </Text>
     )
 

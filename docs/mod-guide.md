@@ -51,6 +51,8 @@ on('session.start', async ($, e, next) => {
 })
 ```
 
+帯は 1 本しか無いので、帯を描く mod が 2 本あると、上の mod が `next(e)` を呼ばない限り下の mod は描かれません。帯を描く時も `const below = await next(e)` で下の木を受け取り、`below.type !== 'engine'` なら自分の木と並べて返します(`engine` はエンジン自身が描く印で、下に誰もいない時に返ります)。work-bar と face-band がこの形です。
+
 型定義には「AbovePrompt は terminal と desktop だけ」と書かれていますが、VS Code 拡張 2.1.300 の画面には帯を描く処理があります。
 
 ## 4. 値の持ち方

@@ -20,8 +20,14 @@ const BAND = {
 } as const
 
 // エンジンの代役を下に置き、入力欄に入った文を集める
-const setup = (on: On) => {
+const setup = (on: On, below?: string) => {
   const clock = mock.clock(on, { now: NOW })
+  // 帯の下: 既定はエンジンが描く印 (誰も描かない)、below を渡すと別の mod の帯
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    if (below === undefined) return { type: 'engine', ref: 0 } as never
+    const { Text } = $.ui.resolve(e)
+    return <Text>{below}</Text>
+  })
   const filled: { text: string; mode: string }[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -203,4 +209,14 @@ test('ツール名の制御文字を SVG と表示から落とす', () => {
   const bad = `mcp__x${String.fromCharCode(7)}y${String.fromCharCode(27)}`
   expect(barSvg({ elapsed: 0, tool: bad, calls: 0, lastError: false })).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
   expect(short(bad)).toBe('mcp__xy')
+})
+
+test('帯を描く別の mod が下にいれば、その帯も自分の下に並べる', async ($, on) => {
+  setup(on, '顔の帯')
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect(await ui.find({ type: 'Button', text: '続けて' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '顔の帯' })).toBeDefined()
+    await ui.unmount()
+  }
 })

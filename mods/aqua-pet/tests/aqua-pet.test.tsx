@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
 import type { AquaTank } from '../types'
-import { FEED_MS, INITIAL, UPSET_MS, drawTank, fishCount, periodAt, viewAt } from '../hooks/tank'
+import { FEED_MS, INITIAL, UPSET_MS, drawTank, fishCount, periodAt, seasonAt, slotAt, viewAt, waterAt } from '../hooks/tank'
 
 // 2026-10-20 12:00 JST (昼)
 const NOW = Date.parse('2026-10-20T03:00:00Z')
@@ -34,8 +34,8 @@ const fakeStore = (on: On, init: Record<string, unknown> = {}) => {
 }
 
 /** 下の hook は全部ここで足す (test が $ を呼んだ後は足せない) */
-const boot = async ($: Engine, on: On, saved?: Partial<AquaTank>, opts: { failTool?: () => boolean } = {}) => {
-  const clock = mock.clock(on, { now: NOW })
+const boot = async ($: Engine, on: On, saved?: Partial<AquaTank>, opts: { failTool?: () => boolean; now?: number } = {}) => {
+  const clock = mock.clock(on, { now: opts.now ?? NOW })
   const store = fakeStore(on, saved ? { tank: saved } : {})
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -296,4 +296,107 @@ test('同時に来たエラー 2 回は濁り 2 (書き込みを 1 本ずつ流�
 test('初めて開いた時に生まれた時刻を store に残す', async ($, on) => {
   const { store } = await boot($, on)
   expect(store.saved()).toMatchObject({ turns: 0, bornAt: NOW })
+})
+
+// ---- 0.2.0 時刻と季節で変わる背景 ----
+
+const jst = (s: string) => Date.parse(`${s}+09:00`)
+/** 状態を決めて描く (時刻と季節は now から) */
+const drawAt = (now: number, over: Partial<AquaTank> = {}) => {
+  const t: AquaTank = { ...INITIAL, fedAt: now, bornAt: now, ...over }
+  return drawTank({ ...t, view: viewAt(t, now) })
+}
+const count = (s: string, part: string) => s.split(part).length - 1
+const waterTop = (svg: string) => /<linearGradient id="water"[^>]*><stop offset="0" stop-color="(#[0-9a-f]{6})"/.exec(svg)?.[1]
+
+test('季節は JST の月で決まる (春 3-5 / 夏 6-8 / 秋 9-11 / 冬 12-2)', () => {
+  const days = ['02-28', '03-01', '05-31', '06-01', '08-31', '09-01', '11-30', '12-01', '01-15']
+  expect(days.map(d => seasonAt(jst(`2026-${d}T12:00:00`)))).toEqual(['冬', '春', '春', '夏', '夏', '秋', '秋', '冬', '冬'])
+  // UTC ではまだ 2/28 でも、JST で 3/1 なら春
+  expect(seasonAt(jst('2026-03-01T00:30:00'))).toBe('春')
+  expect(seasonAt(jst('2026-02-28T23:59:00'))).toBe('冬')
+})
+
+test('15 分刻みの番号は JST で 0-95', () => {
+  expect(['00:00', '00:14', '00:15', '12:00', '23:59'].map(h => slotAt(jst(`2026-10-20T${h}:00`)))).toEqual([0, 0, 1, 48, 95])
+})
+
+test('朝昼夕夜で水の色・光の筋が変わり、夜は月と光る目が出る', () => {
+  const at = (h: string) => drawAt(jst(`2026-10-20T${h}:00`), { turns: 25 })
+  const [morning, noon, evening, night] = [at('08:00'), at('12:00'), at('17:30'), at('22:00')]
+  const tops = [morning, noon, evening, night].map(waterTop)
+  expect(new Set(tops).size).toBe(4)
+  // 昼は筋が多く強い、夜は月明かりの 1 本
+  expect(count(noon, 'fill="url(#ray)"')).toBe(4)
+  expect(count(night, 'fill="url(#ray)"')).toBe(1)
+  expect(count(evening, 'fill="url(#ray)"')).toBe(2)
+  for (const s of [morning, noon, evening]) {
+    expect(s).not.toContain('id="moon"')
+    expect(s).not.toContain('eye-glow')
+  }
+  expect(night).toContain('id="moon"')
+  expect(count(night, 'class="eye-glow"')).toBe(4) // 魚 4 匹ぶん
+  expect(noon).toContain('秋の昼')
+  expect(night).toContain('秋の夜')
+})
+
+test('季節ごとに飾りが変わる (春 花びら・夏 泡ときらめき・秋 落ち葉・冬 雪)', () => {
+  const at = (d: string) => drawAt(jst(`2026-${d}T12:00:00`))
+  const [spring, summer, autumn, winter] = [at('04-10'), at('07-20'), at('10-20'), at('01-20')]
+  const ids = ['id="petals"', 'id="glints"', 'id="leaves"', 'id="snow"']
+  ;[spring, summer, autumn, winter].forEach((s, i) => ids.forEach((id, k) => expect(s.includes(id)).toBe(i === k)))
+  const bubbles = (s: string) => count(s, 'stroke="#e6f6ff" stroke-width="1" ')
+  expect(bubbles(summer)).toBeGreaterThan(bubbles(autumn))
+  // 同じ時刻でも季節で水の色味が違う
+  expect(new Set([spring, summer, autumn, winter].map(waterTop)).size).toBe(4)
+  expect(waterAt(48, '秋')).toEqual(waterAt(48, '秋'))
+  // 飾りは魚・えさの目印を使わない
+  for (const s of [spring, summer, autumn, winter]) {
+    expect(count(s, 'animateMotion')).toBe(1)
+    expect(s).not.toContain('fill="freeze"')
+  }
+})
+
+test('どの季節・時刻帯でも、一番重い状態で SVG は上限内で、毎回同じ', () => {
+  for (const d of ['04-10', '07-20', '10-20', '01-20'])
+    for (const h of ['08:00', '12:00', '17:30', '22:00']) {
+      const now = jst(`2026-${d}T${h}:00`)
+      const t: AquaTank = { ...INITIAL, turns: 500, murk: 10, isRunning: true, fedAt: now, bornAt: now }
+      const full = { ...t, view: { ...viewAt(t, now), isFeeding: true, isUpset: true } }
+      expect(drawTank(full)).toBe(drawTank(full))
+      expect(drawTank(full).length).toBeLessThan(131_072)
+    }
+})
+
+test('描き直しは 15 分ごと (その間は state を書かない)', async ($, on) => {
+  const { clock, writes, tank } = await boot($, on, { fullness: 70, fedAt: NOW })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const before = writes()
+  const svg0 = await svgOf(ui)
+  await clock.advance(14 * 60_000)
+  expect(writes()).toBe(before)
+  await clock.advance(60_000)
+  expect(writes()).toBe(before + 1)
+  expect((await tank()).view.slot).toBe(49)
+  expect(await svgOf(ui)).not.toBe(svg0)
+})
+
+test('時計が進んで夜になり、日付が変わって季節も変わる', async ($, on) => {
+  // 2/28 18:50 JST (冬の夕)
+  const start = jst('2026-02-28T18:50:00')
+  const { clock, tank } = await boot($, on, { fullness: 100, fedAt: start }, { now: start })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect((await tank()).view).toMatchObject({ period: '夕', season: '冬' })
+  expect(await svgOf(ui)).toContain('id="snow"')
+  expect(await svgOf(ui)).not.toContain('id="moon"')
+  await clock.advance(15 * 60_000)
+  expect((await tank()).view).toMatchObject({ period: '夜', season: '冬' })
+  expect(await svgOf(ui)).toContain('id="moon"')
+  expect(await infoOf(ui)).toContain('冬の夜')
+  // 3/1 0:05 JST
+  await clock.advance(5 * 3_600_000)
+  expect((await tank()).view).toMatchObject({ period: '夜', season: '春' })
+  expect(await svgOf(ui)).toContain('id="petals"')
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await infoOf(term)).toContain('春の夜')
 })

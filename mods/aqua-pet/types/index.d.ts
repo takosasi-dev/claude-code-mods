@@ -1,8 +1,12 @@
 export type AquaPeriod = '朝' | '昼' | '夕' | '夜'
+export type AquaSeason = '春' | '夏' | '秋' | '冬'
 
-// 時刻から決まる「段」。60 秒ごとに計算し、変わった時だけ書く(描き直しを減らす)
+// 時刻から決まる「段」。60 秒ごとに計算し、変わった時だけ書く(描き直しを減らす。時刻は 15 分刻み)
 export type AquaView = {
   period: AquaPeriod
+  season: AquaSeason
+  /** 日本時間の 15 分刻みの番号 0-95。水の色の段階に使う (15 分ごとに描き直す) */
+  slot: number
   /** 満腹度 0-100、5 刻み */
   fullness: number
   /** 待機が 10 分を超えた */
