@@ -361,3 +361,70 @@ test('/recap を登録できた時は /recap で開く', async ($, on) => {
   expect(r).toMatchObject({ text: 'ふりかえりを開きました。' })
   expect(opened).toEqual(['session-recap'])
 })
+
+// ---- 0.1.1 で直した物 ----
+
+test('ターンを起こさないコマンドの直後 (30 秒以内) の普通の依頼に、コマンド名を付けない', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  bottom(on)
+  const last = spy(on)
+  await $.prompt.submit({ text: '/usage-pane', wait: false, origin: { kind: 'composer' }, command: { name: 'usage-pane', args: '' } })
+  await clock.advance(5_000)
+  await $.prompt.submit({ text: 'バグを直して', wait: false, origin: { kind: 'composer' } })
+  await turn($, clock, 'p1', 'バグを直して', 1_000)
+  expect((last.turns as RecapTurn[]).map(t => [t.label, t.prompt])).toEqual([['バグを直して', 'バグを直して']])
+})
+
+test('要約ボタンを同時に二度押しても fork は 1 回', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  bottom(on)
+  let forks = 0
+  on('model.fork', () => {
+    forks++
+    return forkAnswer('- x')
+  })
+  await turn($, clock, 't1', '何か', 1_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await Promise.all([ui.press({ key: 'summarize' }), ui.press({ key: 'summarize' })])
+  expect(forks).toBe(1)
+})
+
+test('要約の途中でリロードしたら「途中で止まりました」に戻し、もう一度要約できる', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  bottom(on)
+  const last = spy(on)
+  let forks = 0
+  on('model.fork', () => {
+    forks++
+    // 1 回目は返らない (リロードで捨てられた)
+    return forks === 1 ? new Promise<{ value: ModelForkResult }>(() => {}) : forkAnswer('- 2 回目')
+  })
+  await turn($, clock, 't1', '何か', 1_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  void ui.press({ key: 'summarize' })
+  for (let n = 0; n < 100 && (last.summary as RecapSummary | undefined)?.status !== 'running'; n++) await Promise.resolve()
+  expect((last.summary as RecapSummary).status).toBe('running')
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  expect(last.summary).toMatchObject({ status: 'failed', text: '途中で止まりました' })
+  await ui.press({ key: 'summarize' })
+  expect(forks).toBe(2)
+  expect((last.summary as RecapSummary).status).toBe('done')
+})
+
+test('依頼文の制御文字は落として描く (木も SVG も壊さない)', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  bottom(on)
+  const last = spy(on)
+  await turn($, clock, 'c1', 'a\x07b\x1b[31mc\x7fd\x00e', 5_000, [['Read']])
+  const label = (last.turns as RecapTurn[])[0]?.label ?? ''
+  expect(label).toBe('ab[31mcde')
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'turn-c1' })
+    expect((await ui.find({ key: 'turn-c1' }))?.text).toMatch(/ab\[31mcde$/)
+    if (surface === 'vscode') {
+      for (const alt of [/^経過/, /^帯のタイムライン/]) expect(await svgSource(ui, alt)).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+    }
+    await ui.unmount()
+  }
+})

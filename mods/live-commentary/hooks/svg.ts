@@ -1,7 +1,7 @@
 // 実況席の絵。数字が毎秒変わる板と、流れ続けるテロップと、照明の絵は別々の Svg にする
 // (source が変わるとアニメが頭からやり直しになるため)
 import type { LiveCommentaryClock, LiveCommentaryKind, LiveCommentaryLine, LiveCommentaryScore } from '../types'
-import { duration } from './phrases'
+import { clean, duration } from './phrases'
 
 const W = 380
 const BG = '#0d1117'
@@ -18,7 +18,7 @@ const ORANGE = '#f78166'
 
 export const KIND_COLOR: Record<LiveCommentaryKind, string> = { play: FG, error: RED, cheer: YELLOW, whistle: BLUE }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const esc = (s: string) => clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 /** 文字幅のおおよそ (全角 = size、半角 = 0.6 size) */
 const textWidth = (s: string, size: number) => [...s].reduce((w, c) => w + ((c.codePointAt(0) ?? 0) > 0xff ? size : size * 0.6), 0)

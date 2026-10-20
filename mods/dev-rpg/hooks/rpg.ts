@@ -117,7 +117,7 @@ export const freshSession = (now: number): RpgSession => ({
   isErrorPending: false,
 })
 
-export const INITIAL: RpgHero = { ...INITIAL_SAVED, s: freshSession(0), hpPct: 100, xpFrom: 0 }
+export const INITIAL: RpgHero = { ...INITIAL_SAVED, s: freshSession(0), hpPct: 100, xpFrom: 0, synced: INITIAL_SAVED }
 
 const SAVED_KEYS = ['xp', 'turns', 'tools', 'edits', 'reads', 'shells', 'recoveries', 'errors', 'sessions', 'dayTurns'] as const
 
@@ -146,6 +146,21 @@ export function fromSaved(raw: unknown): RpgSaved {
   return out
 }
 
+/**
+ * 今の store に、このセッションで増えた分 (mine − base) だけを足す。
+ * 数は足し算、実績は和集合 (早い方の時刻)、日付は新しい方。同じ store を使う別のセッションの分を消さない
+ */
+export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): RpgSaved {
+  const out = { ...store, achievements: { ...store.achievements } }
+  for (const k of SAVED_KEYS) out[k] = Math.max(0, store[k] + mine[k] - base[k])
+  for (const [id, at] of Object.entries(mine.achievements)) out.achievements[id] = Math.min(at, store.achievements[id] ?? at)
+  const day = mine.day > store.day ? mine.day : store.day
+  const mineToday = mine.day === day ? mine.dayTurns - (base.day === day ? base.dayTurns : 0) : 0
+  out.day = day
+  out.dayTurns = Math.max(0, (store.day === day ? store.dayTurns : 0) + mineToday)
+  return out
+}
+
 /** その時刻の日付 (この環境の時刻帯で YYYY-MM-DD) */
 export const dayKey = (ms: number) => {
   const d = new Date(ms)
@@ -167,6 +182,7 @@ export const startSession = (saved: RpgSaved, now: number): RpgHero => ({
   s: freshSession(now),
   hpPct: 100,
   xpFrom: levelInfo(saved.xp).frac,
+  synced: saved,
 })
 
 export const onTurnStart = (h: RpgHero, now: number): RpgHero => {

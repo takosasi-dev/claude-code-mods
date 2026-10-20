@@ -46,6 +46,7 @@ const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTo
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   const failTool = opts.failTool
   on('tool.call', () => (failTool?.() ? { isError: true as const, result: 'boom', text: 'boom' } : { result: 'ok' }))
   const toasts: string[] = []
@@ -65,7 +66,7 @@ const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTo
     if (!last) throw new Error('hero が書かれていない')
     return last
   }
-  return { clock, hero, toasts, stored: () => m.get('hero') as RpgSaved | undefined }
+  return { clock, hero, toasts, stored: () => m.get('hero') as RpgSaved | undefined, put: (v: unknown) => m.set('hero', v) }
 }
 
 const tool = ($: Engine, name: string) => $.tool.call({ tool: name, input: {} } as never)
@@ -321,4 +322,63 @@ test('/rpg が取れればそれで開く', async ($, on) => {
   const r = await $.command.run({ command: 'rpg', args: '', origin: { kind: 'composer' }, presentation })
   expect(r).toMatchObject({ text: '冒険の書を開きました。' })
   expect(opened).toEqual(['dev-rpg'])
+})
+
+const end = ($: Engine, reason: 'answer' | 'error' | 'aborted', turnId = 'te') =>
+  $.turn.complete({ answer: '', durationMs: 1, isAborted: reason === 'aborted', turnId, reason } as never)
+
+test('2 つのセッションが同じ store を使っても、もう一方の進み具合を消さない', async ($, on) => {
+  const { hero, stored, put } = await boot($, on, { xp: 100, turns: 10 })
+  // 別のセッション (VS Code とターミナル) がその間に進めた
+  put({ ...stored(), xp: 600, turns: 60, achievements: { 'turns-100': NOW - 1 } })
+  await $.turn.start({ text: 'hi', turnId: 'm1' })
+  await tool($, 'Read')
+  // ツールのたびには書かない
+  expect(stored()).toMatchObject({ xp: 600, turns: 60 })
+  await end($, 'answer', 'm1')
+  // 600 + Read 2 + ターン 10
+  expect(stored()).toMatchObject({ xp: 612, turns: 61, reads: 1, sessions: 1 })
+  expect(stored()?.achievements['turns-100']).toBe(NOW - 1)
+  // 画面の方も store に合わせる
+  expect(hero()).toMatchObject({ xp: 612, turns: 61 })
+
+  // 同じ時に 2 回保存しても二重に足さない
+  await $.turn.start({ text: 'hi', turnId: 'm2' })
+  await tool($, 'Read')
+  await Promise.all([end($, 'answer', 'm2'), $.session.end({ reason: 'other', sessionId: 's', resume: { id: 's' } } as never)])
+  expect(stored()).toMatchObject({ xp: 624, turns: 62, reads: 2 })
+})
+
+test('エラーや拒否で終わったターンは経験値もターン数も付けない (ツールの分は残す)', async ($, on) => {
+  const { hero, stored } = await boot($, on)
+  await $.turn.start({ text: 'hi', turnId: 'e1' })
+  await tool($, 'Bash')
+  await end($, 'error', 'e1')
+  await $.turn.start({ text: 'hi', turnId: 'e2' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'e2', reason: 'refusal', refusal: {} } as never)
+  expect(hero()).toMatchObject({ xp: 4, turns: 0, shells: 1 })
+  expect(stored()).toMatchObject({ xp: 4, turns: 0, shells: 1 })
+})
+
+test('store が読めない形なら上書きせず、画面で知らせる', async ($, on) => {
+  const { stored } = await boot($, on, 'broken' as never)
+  await turn($, () => tool($, 'Edit').then(() => {}))
+  expect(stored()).toBe('broken' as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /記録を読めなかった/ })).toBeDefined()
+})
+
+test('state が空のまま (/clear の後など) でも、store から読み直して足す', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const m = new Map<string, unknown>([['hero', { xp: 500, turns: 50, sessions: 4 }]])
+  on('store.get', (_$, e) => ({ value: m.get(e.key) }))
+  on('store.set', (_$, e) => {
+    m.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('tool.call', () => ({ result: 'ok' }))
+  await turn($, () => tool($, 'Read').then(() => {}))
+  expect(m.get('hero')).toMatchObject({ xp: 512, turns: 51 })
 })

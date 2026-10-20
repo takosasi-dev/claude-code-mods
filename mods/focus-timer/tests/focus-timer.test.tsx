@@ -88,7 +88,7 @@ test('状態ごとのボタンと、押した時の state の変化 (vscode と 
       expect(await ringAlt(ui)).toBe('待機 残り 25:00')
       expect(await todayAlt(ui)).toBe('今日の完了 0 本')
     } else {
-      expect((await ui.find({ type: 'Text', text: /残り/ }))?.text).toBe('待機  残り 25:00')
+      expect((await ui.find({ type: 'Text', text: /残り/ }))?.text).toBe('待機  残り約 25 分')
       expect((await ui.find({ type: 'Text', text: /^今日/ }))?.text).toBe('今日 0 本 ')
       expect(await ui.find({ type: 'Svg' })).toBeUndefined()
     }
@@ -134,7 +134,7 @@ test('集中 25 分 → 休憩 5 分 → 待機。完了本数が増え、store 
 
   await clock.advance(5 * MIN)
   expect(last.run).toBeNull()
-  expect((await term.find({ type: 'Text', text: /残り/ }))?.text).toBe('待機  残り 25:00')
+  expect((await term.find({ type: 'Text', text: /残り/ }))?.text).toBe('待機  残り約 25 分')
   expect(toasts).toEqual(['集中 25 分おわり。5 分休憩しましょう', '休憩おわり。次の集中をどうぞ'])
   expect(Object.values(last.done as Record<string, number>)).toEqual([1])
 })
@@ -252,4 +252,73 @@ test('/focus が組み込みで拒まれたら /focus-timer で開き、/focus �
   const builtin = await $.command.run({ command: 'focus', args: '', origin: { kind: 'composer' }, presentation })
   expect(builtin).toMatchObject({ text: '組み込みの focus' })
   expect(opened).toEqual(['focus-timer'])
+})
+
+// ---- 0.1.1 で直した物 ----
+
+const todayKey = () => {
+  const d = new Date(NOW)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+test('別のセッションが増やした今日の本数を、古い写しで減らさない (書く直前に読み直して +1)', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const saved = storeSpy(on)
+  saved.done = { [todayKey()]: 1, '2000-01-01': 9 }
+  bottom(on)
+  await start($)
+  // 別の窓が 4 本足した
+  saved.done = { [todayKey()]: 5, '2000-01-01': 9 }
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  expect(saved.done).toEqual({ [todayKey()]: 6, '2000-01-01': 9 })
+  expect(await todayAlt(vs)).toBe('今日の完了 6 本')
+})
+
+test('store の本数が数でなければ 0 として数える', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const saved = storeSpy(on)
+  saved.done = { [todayKey()]: 'x' }
+  bottom(on)
+  await start($)
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await todayAlt(vs)).toBe('今日の完了 0 本')
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  expect(saved.done).toEqual({ [todayKey()]: 1 })
+  expect(await todayAlt(vs)).toBe('今日の完了 1 本')
+})
+
+test('store を読めない時は書かずに知らせる (画面の本数は増やす)', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const saved: Record<string, unknown> = { done: { [todayKey()]: 3 } }
+  let failGet = false
+  on('store.get', ($, e) => (failGet ? { deny: '読めない' } : { value: saved[e.key] }))
+  on('store.set', ($, e) => {
+    saved[e.key] = e.value
+    return { value: undefined }
+  })
+  const toasts = bottom(on)
+  await start($)
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await vs.press({ key: 'start' })
+  failGet = true
+  await clock.advance(25 * MIN)
+  expect(saved.done).toEqual({ [todayKey()]: 3 })
+  expect(await todayAlt(vs)).toBe('今日の完了 4 本')
+  expect(toasts.some(t => t.includes('保存できませんでした'))).toBe(true)
+})
+
+test('terminal の残りは「約 N 分」(1 分ごとの描き直しで古い秒を出さない)', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.store(on)
+  bottom(on)
+  await start($)
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await term.press({ key: 'start' })
+  await clock.advance(30_000)
+  expect((await term.find({ type: 'Text', text: /残り/ }))?.text).toBe('集中中  残り約 25 分')
+  await clock.advance(MIN)
+  expect((await term.find({ type: 'Text', text: /残り/ }))?.text).toBe('集中中  残り約 24 分')
 })

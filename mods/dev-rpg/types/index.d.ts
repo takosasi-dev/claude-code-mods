@@ -43,6 +43,8 @@ export type RpgHero = RpgSaved & {
   hpPct: number
   /** 経験値バーのアニメの始まり (今のレベルの中の割合 0-1) */
   xpFrom: number
+  /** 最後に store と合わせた時の値。保存はここからの差分だけを store に足す (別のセッションの分を消さない) */
+  synced: RpgSaved
 }
 
 declare module 'claude-code' {

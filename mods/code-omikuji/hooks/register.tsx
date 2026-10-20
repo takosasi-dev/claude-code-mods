@@ -1,8 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { OmikujiDay, OmikujiResult } from '../types'
-import { addDay, fillText, fortune, jstDate, paneLines, paneSvg } from './omikuji'
+import { addDay, fillText, fortune, isResult, jstDate, paneLines, paneSvg, toDays } from './omikuji'
 
 const PANE = 'code-omikuji'
 const TITLE = 'おみくじ'
@@ -18,21 +17,26 @@ const MODE = atom({ plugin: 'code-omikuji', key: 'mode' } as const, 'shake')
 const IS_OPENED = atom({ plugin: 'code-omikuji', key: 'isOpened' } as const, false)
 const NOTE = atom({ plugin: 'code-omikuji', key: 'note' } as const, '')
 
-const isResult = (v: unknown): v is OmikujiResult => typeof v === 'object' && v !== null && typeof (v as OmikujiResult).date === 'string'
-const isDays = (v: unknown): v is OmikujiDay[] => Array.isArray(v) && v.every(d => typeof d?.date === 'string' && typeof d?.rank === 'string')
+// 主の名前 (/omikuji) を持てたか。session.start で決まる (リロードでも来る)
+let ownsMain = false
 
-/** 今日の本番を決めて store と state に置く。同じ日なら store の分をそのまま使う */
+/** 今日の本番を決めて store と state に置く。同じ日なら store の分をそのまま使う (形が合わなければ作り直す) */
 async function drawToday($: EngineInterface) {
   const date = jstDate(await $.clock.now())
   const saved = await $.store.get('today')
   const today = isResult(saved) && saved.date === date ? saved : fortune(date)
-  const kept = await $.store.get('history')
-  const history = addDay(isDays(kept) ? kept : [], { date, rank: today.rank })
+  const history = addDay(toDays(await $.store.get('history')), { date, rank: today.rank })
   if (today !== saved) await $.store.set('today', today)
   await $.store.set('history', history)
   await update($, TODAY, () => today)
   await update($, HISTORY, () => history)
   return today
+}
+
+/** state の本番が今日の分ならそれ、日付が変わっていたら引き直す */
+async function currentToday($: EngineInterface) {
+  const today = await read($, TODAY)
+  return today && today.date === jstDate(await $.clock.now()) ? today : drawToday($)
 }
 
 /** store の分を state に写すだけ (開くまでは store に書かない) */
@@ -41,7 +45,22 @@ async function loadSaved($: EngineInterface) {
   const saved = await $.store.get('today')
   const kept = await $.store.get('history')
   if (isResult(saved) && saved.date === date) await update($, TODAY, () => saved)
-  await update($, HISTORY, () => (isDays(kept) ? kept : []))
+  await update($, HISTORY, () => toDays(kept))
+}
+
+/**
+ * 日付が変わったら入れ替える (描画では書けないので 1 分ごとに見る)。
+ * ペインが開いていれば今日の分を引き、閉じていれば昨日の分を下ろすだけ (開くまでは store に書かない)
+ */
+async function rollover($: EngineInterface) {
+  const today = await read($, TODAY)
+  if (!today || today.date === jstDate(await $.clock.now())) return
+  await update($, PLAY, () => null)
+  if ((await $.ui.panes()).some(p => p.id === PANE)) {
+    await drawToday($)
+    await update($, MODE, () => 'paper')
+    await update($, NOTE, () => '')
+  } else await update($, TODAY, () => null)
 }
 
 // 振るアニメが終わったら紙だけの絵に替える (描き直しのたびにアニメが流れないように)
@@ -69,7 +88,7 @@ async function openPane($: EngineInterface) {
 
 /** 遊びの一回。本番 (store) には触らない */
 async function shakeAgain($: EngineInterface) {
-  const today = (await read($, TODAY)) ?? (await drawToday($))
+  const today = await currentToday($)
   const n = await update($, PLAYS, x => x + 1)
   await update($, PLAY, () => fortune(today.date, n))
   await update($, MODE, () => 'shake')
@@ -84,8 +103,9 @@ async function backToToday($: EngineInterface) {
 }
 
 async function fill($: EngineInterface) {
-  const today = (await read($, TODAY)) ?? (await drawToday($))
-  const r = await $.prompt.fill({ text: fillText(today), mode: 'replace' }).catch(() => ({ isFilled: false, refusal: undefined }))
+  const today = await currentToday($)
+  // replace は入力欄の下書きを消すので、カーソルの位置に入れる
+  const r = await $.prompt.fill({ text: fillText(today), mode: 'insert' }).catch(() => ({ isFilled: false, refusal: undefined }))
   const why = r.refusal === 'dialog' ? '(ダイアログが開いています)' : r.refusal === 'no_composer' ? '(この画面には入力欄がありません)' : ''
   await update($, NOTE, () => (r.isFilled ? '入力欄に入れました(送信はしていません)' : `入力欄に入れられませんでした${why}`))
 }
@@ -95,12 +115,15 @@ export const register: Register = on => {
     const started = await next(e)
     // /omikuji が拒まれたら (組み込みと被ったら) /code-omikuji にする
     const got = await $.command.register({ name: 'omikuji', description: DESCRIPTION }).catch(() => undefined)
-    if (got?.command !== 'omikuji') await $.command.register({ name: 'code-omikuji', description: DESCRIPTION }).catch(() => {})
+    ownsMain = got?.command === 'omikuji'
+    if (!ownsMain) await $.command.register({ name: 'code-omikuji', description: DESCRIPTION }).catch(() => {})
     await loadSaved($).catch(() => {})
+    $.clock.every(60_000, () => void rollover($).catch(() => {}))
     return started
   })
 
-  on('command.run', { command: 'omikuji' }, async $ => openPane($))
+  // /omikuji を持てなかった時は、元の /omikuji に回す
+  on('command.run', { command: 'omikuji' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'code-omikuji' }, async $ => openPane($))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -114,7 +137,8 @@ export const register: Register = on => {
     const mode = await read($, MODE)
     const note = await read($, NOTE)
 
-    if (!today) return <Text dimColor>/omikuji で今日の運勢を引きます</Text>
+    // 日付が変わった後の 1 分足らずも、昨日の分を「今日の運勢」として出さない
+    if (!today || today.date !== jstDate(await $.clock.now())) return <Text dimColor>/omikuji で今日の運勢を引きます</Text>
     const shown = play ?? today
     const lines = paneLines(shown, today, history, play !== null)
 

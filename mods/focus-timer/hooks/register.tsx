@@ -25,6 +25,21 @@ const minutes = (v: unknown, fallback: number) => {
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
+/** store の日付ごとの本数を洗う。数でない値は 0。形が違えば undefined */
+const cleanDone = (v: unknown): Record<string, number> | undefined => {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const out: Record<string, number> = {}
+  for (const [k, n] of Object.entries(v)) out[k] = typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
+  return out
+}
+
+/** 日付ごとに大きい方 */
+const maxDone = (a: Record<string, number>, b: Record<string, number>) => {
+  const out = { ...a }
+  for (const [k, n] of Object.entries(b)) out[k] = Math.max(out[k] ?? 0, n)
+  return out
+}
+
 const statusOf = (run: FocusTimerRun | null): Status =>
   run === null ? '待機' : run.endsAt === null ? '一時停止' : run.mode === 'focus' ? '集中中' : '休憩中'
 
@@ -85,10 +100,23 @@ const finish = async ($: $, endsAt: number): Promise<void> => {
   arm($, box.next, now)
   if (ended.mode === 'focus') {
     const key = dayKey(now)
-    const all = { value: {} as Record<string, number> }
-    await update($, doneA, d => (all.value = { ...d, [key]: (d[key] ?? 0) + 1 }))
-    // ponytail: 日付ごとの記録は消さずに溜める。1 日 1 キーなので年単位でも小さい
-    await $.store.set(STORE_KEY, all.value).catch(() => {})
+    // 同じ store を別のセッションも書くので、書く直前に読み直してその日を +1 する (古い写しで上書きしない)
+    const raw = await $.store.get(STORE_KEY).catch(() => null)
+    const stored = raw === undefined ? {} : cleanDone(raw)
+    if (stored === undefined) {
+      await update($, doneA, d => ({ ...d, [key]: (d[key] ?? 0) + 1 }))
+      $.ui.toast('集中の本数を保存できませんでした(記録を読めませんでした)', { timeoutMs: 8000 })
+    } else {
+      // ponytail: 日付ごとの記録は消さずに溜める。1 日 1 キーなので年単位でも小さい
+      const all = { ...stored, [key]: (stored[key] ?? 0) + 1 }
+      await $.store.set(STORE_KEY, all).then(
+        () => update($, doneA, d => maxDone(d, all)),
+        () => {
+          $.ui.toast('集中の本数を保存できませんでした', { timeoutMs: 8000 })
+          return update($, doneA, d => ({ ...d, [key]: (d[key] ?? 0) + 1 }))
+        },
+      )
+    }
     await tell($, `集中 ${Math.round(ended.totalMs / 60_000)} 分おわり。${Math.round(breakMs / 60_000)} 分休憩しましょう`)
   } else {
     await tell($, '休憩おわり。次の集中をどうぞ')
@@ -111,10 +139,9 @@ export const register: Register = (on, options) => {
     }
 
     // 前のセッションまでの完了本数を読み戻す (リロードなら state の方が新しいのでそのまま)
-    const stored = await $.store.get(STORE_KEY).catch(() => undefined)
-    if (stored !== null && typeof stored === 'object' && !Array.isArray(stored)) {
-      await update($, doneA, d => (Object.keys(d).length > 0 ? d : (stored as Record<string, number>)))
-    }
+    // 前のセッションまでの完了本数を読み戻す。リロードで state にある分とは日付ごとに大きい方
+    const stored = cleanDone(await $.store.get(STORE_KEY).catch(() => undefined))
+    if (stored) await update($, doneA, d => maxDone(d, stored))
 
     const now = await $.clock.now()
     lastDay = dayKey(now)
@@ -174,7 +201,8 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Text key="status" color={run?.mode === 'break' ? 'green' : run !== null ? 'red' : undefined}>
-            {`${status}  残り ${mmss(leftMs)}`}
+            {/* 描き直しは 1 分ごとなので、秒は出さない */}
+            {`${status}  残り約 ${Math.ceil(leftMs / 60_000)} 分`}
           </Text>
           <Text key="today" dimColor>{`今日 ${today} 本 ${'●'.repeat(Math.min(today, 20))}`}</Text>
           {buttons}

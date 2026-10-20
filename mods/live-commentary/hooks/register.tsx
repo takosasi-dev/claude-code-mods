@@ -29,6 +29,8 @@ let style: Style = '熱血'
 const lastPick = new Map<string, number>()
 let isAfterError = false
 let clearTimer: Timer | undefined
+// 主の名前 (/jikkyo) を持てたか。session.start で決まる (リロードでも来る)
+let ownsMain = false
 
 function phrase(scene: Scene, vars: Readonly<Record<string, string | number>>): string {
   const list = PHRASES[style][scene]
@@ -79,20 +81,24 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     // /jikkyo が拒まれたら (組み込みと被ったら) /live-commentary にする
     const got = await $.command.register({ name: 'jikkyo', description: DESCRIPTION }).catch(() => undefined)
-    if (got?.command !== 'jikkyo') await $.command.register({ name: 'live-commentary', description: DESCRIPTION }).catch(() => {})
+    ownsMain = got?.command === 'jikkyo'
+    if (!ownsMain) await $.command.register({ name: 'live-commentary', description: DESCRIPTION }).catch(() => {})
     const saved = await $.store.get(STORE_KEY).catch(() => undefined)
     await update($, ON, () => saved !== false)
     $.clock.every(1000, () => void tick($).catch(() => {}))
     return next(e)
   })
 
-  on('command.run', { command: 'jikkyo' }, openPane)
+  // /jikkyo を持てなかった時は、元の /jikkyo に回す
+  on('command.run', { command: 'jikkyo' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'live-commentary' }, openPane)
 
   // 主ループのターンだけ実況する (サブエージェントの分は agentId 付き)
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       clearTimer?.cancel()
+      // 前のターンのエラーは持ち越さない
+      isAfterError = false
       const now = await $.clock.now()
       await update($, CLOCK, c => ({ ...c, startedAt: now, now }))
       await say($, 'start', {})
@@ -105,7 +111,8 @@ export const register: Register = (on, options) => {
       const now = await $.clock.now()
       await update($, CLOCK, () => ({ startedAt: 0, now, lastMs: e.durationMs }))
       const time = duration(e.durationMs)
-      if (e.isAborted) await say($, 'abort', { time })
+      if (e.reason === 'aborted' || e.isAborted) await say($, 'abort', { time })
+      else if (e.reason !== 'answer') await say($, 'fail', { time })
       else if (e.durationMs >= LONG_MS) await say($, 'long', { time }, true)
       else await say($, 'end', { time })
       clearTimer?.cancel()

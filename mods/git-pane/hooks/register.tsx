@@ -21,20 +21,31 @@ const COMMIT_MSG =
   '今の git の変更(ステージ済みと未ステージ)を読んで、コミットメッセージを考えてください。' +
   '1 行目は短い要約、空行のあとに中身を箇条書きで。コミットはまだしないでください。'
 
-// git を読むだけ。書き込む操作 (commit・add・stash など) は呼ばない
+// git を読むだけ。書き込む操作 (commit・add・stash など) は呼ばない。
+// GIT_OPTIONAL_LOCKS=0: status が読むついでに index を書き直さない (Claude の git add/commit と index.lock でぶつからない)。
+// core.fsmonitor=false: リポジトリの設定が指すコマンドを走らせない
 const git = ($: EngineInterface, cwd: string, args: string[]) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', ...args], { cwd, timeoutMs: 15_000 })
+  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', ...args], {
+    cwd,
+    env: { GIT_OPTIONAL_LOCKS: '0' },
+    timeoutMs: 15_000,
+  })
+
+// ponytail: 主の名前を持てたかはモジュール変数。リロードでも session.start が来て決め直す
+let ownsMain = false
 
 async function load($: EngineInterface) {
   const cwd = await $.session.cwd()
   let snap: GitPaneSnapshot
   try {
     const inside = await git($, cwd, ['rev-parse', '--is-inside-work-tree'])
-    if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') snap = { kind: 'not-repo', cwd }
+    if (inside.exitCode !== 0 && /dubious ownership/.test(inside.stderr)) snap = { kind: 'unsafe', cwd }
+    else if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') snap = { kind: 'not-repo', cwd }
     else {
       const [st, un, ca, lg] = await Promise.all([
         git($, cwd, ['status', '--porcelain=v1', '-b', '--no-renames']),
-        git($, cwd, ['diff', '--numstat', '--no-renames']),
+        // 作業ツリーと index の比べ。git diff は GIT_OPTIONAL_LOCKS を見ずに index を書き直すので diff-files にする
+        git($, cwd, ['diff-files', '--numstat', '--no-renames']),
         git($, cwd, ['diff', '--cached', '--numstat', '--no-renames']),
         // 題を最後に置く (題にタブがあっても崩れない)。コミットが無いと失敗するので空として読む
         git($, cwd, ['log', '-8', '--format=%h%x09%ct%x09%s']),
@@ -52,7 +63,7 @@ async function load($: EngineInterface) {
 const isOpen = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE)
 
 async function fill($: EngineInterface, text: string) {
-  const isFilled = await $.prompt.fill({ text, mode: 'replace' }).then(
+  const isFilled = await $.prompt.fill({ text, mode: 'insert' }).then(
     r => r.isFilled,
     () => false,
   )
@@ -98,15 +109,15 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     // /git が組み込みと被って拒まれたら /gitpane にする
-    await $.command
-      .register({ name: 'git', description: DESCRIPTION })
-      .catch(() => $.command.register({ name: 'gitpane', description: DESCRIPTION }))
-      .catch(() => {})
+    const got = await $.command.register({ name: 'git', description: DESCRIPTION }).catch(() => undefined)
+    ownsMain = got?.command === 'git'
+    if (!ownsMain) await $.command.register({ name: 'gitpane', description: DESCRIPTION }).catch(() => {})
     if (await isOpen($)) void load($).catch(() => {})
     return started
   })
 
-  on('command.run', { command: 'git' }, async $ => openPane($))
+  // /git を持てなかった時は、その名前の持ち主 (組み込みなど) に回す
+  on('command.run', { command: 'git' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'gitpane' }, async $ => openPane($))
 
   on('tool.call', async ($, e, next) => {

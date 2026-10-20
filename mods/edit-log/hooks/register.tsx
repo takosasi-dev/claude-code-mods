@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { EditLogDetail, EditLogEntry } from '../types'
-import { detailLines, detailSvg, diffBody, fileStats, linesOf, overviewLines, overviewSvg, relPath } from './editlog'
+import { detailLines, detailSvg, diffBody, fileStats, linesOf, overviewLines, overviewSvg, parentDir, plain, relPath } from './editlog'
 
 const PANE = 'edit-log'
 const TITLE = '変更ログ'
@@ -20,7 +20,10 @@ const NOTE = atom({ plugin: 'edit-log', key: 'note' } as const, '')
 type $ = EngineInterface
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
+const message = (err: unknown) => plain(err instanceof Error ? err.message : String(err))
+
+// ponytail: 主の名前を持てたかはモジュール変数。リロードでも session.start が来て決め直す
+let ownsMain = false
 
 async function record($: $, tool: string, input: Record<string, unknown>, isError: boolean, isSub: boolean) {
   const file = str(input.file_path) || str(input.notebook_path)
@@ -29,26 +32,39 @@ async function record($: $, tool: string, input: Record<string, unknown>, isErro
   const at = await $.clock.now()
   await update($, ENTRIES, list => {
     const id = (list[list.length - 1]?.id ?? 0) + 1
-    const entry: EditLogEntry = { id, at, file, label: relPath(cwd, file), tool, isError, lines: linesOf(tool, input), isSub }
+    // file は git に渡すのでそのまま。label は画面と入力欄の文にだけ使うので制御文字を落とす
+    const entry: EditLogEntry = { id, at, file, label: plain(relPath(cwd, file)), tool, isError, lines: linesOf(tool, input), isSub }
     return [...list, entry].slice(-KEEP)
   })
 }
 
-// git を読むだけ。書き込む操作は呼ばない
+// git を読むだけ。書き込む操作は呼ばない。
+// --literal-pathspecs: パスの [ ] * を形として読まない。core.fsmonitor=false: リポジトリが指すコマンドを走らせない。
+// GIT_OPTIONAL_LOCKS=0: 読むついでに index を書き直さない
 const git = ($: $, cwd: string, args: string[]) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', ...args], { cwd, timeoutMs: 15_000 })
+  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '--literal-pathspecs', ...args], {
+    cwd,
+    env: { GIT_OPTIONAL_LOCKS: '0' },
+    timeoutMs: 15_000,
+  })
+
+// 差分の形。--no-textconv・--no-ext-diff: リポジトリの設定が指すコマンドを走らせない
+const DIFF_OPTS = ['-p', '--no-color', '--no-ext-diff', '--no-textconv']
 
 async function loadDiff($: $, label: string, file: string): Promise<EditLogDetail> {
   try {
-    const cwd = await $.session.cwd()
+    // ファイルの親フォルダで走らせる (作業フォルダの外の worktree のファイルもそのリポジトリで読む)
+    const cwd = parentDir(file) || (await $.session.cwd())
     const inside = await git($, cwd, ['rev-parse', '--is-inside-work-tree'])
     if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') return { kind: 'not-repo' }
-    // HEAD と比べて、git add した後の変更も出す。まだコミットが無ければ作業ツリーと index の差だけ
-    const head = await git($, cwd, ['diff', '--no-color', '--no-ext-diff', 'HEAD', '--', file])
-    const d = head.exitCode === 0 ? head : await git($, cwd, ['diff', '--no-color', '--no-ext-diff', '--', file])
-    if (d.exitCode !== 0) return { kind: 'error', message: d.stderr.trim() || `git diff が失敗しました (${label})` }
+    // HEAD と比べて、git add した後の変更も出す。まだコミットが無ければ作業ツリーと index の差だけ。
+    // git diff は GIT_OPTIONAL_LOCKS を見ずに index を書き直すので、書かない diff-index / diff-files を使う
+    const head = await git($, cwd, ['diff-index', ...DIFF_OPTS, 'HEAD', '--', file])
+    const d = head.exitCode === 0 ? head : await git($, cwd, ['diff-files', ...DIFF_OPTS, '--', file])
+    if (d.exitCode !== 0) return { kind: 'error', message: plain(d.stderr.trim()) || `git diff が失敗しました (${label})` }
     const body = diffBody(d.stdout)
-    return body ? { kind: 'diff', ...body } : { kind: 'clean' }
+    if (body) return { kind: 'diff', ...body }
+    return /^(?:Binary files |GIT binary patch|old mode )/m.test(d.stdout) ? { kind: 'meta' } : { kind: 'clean' }
   } catch (err) {
     return { kind: 'error', message: message(err) }
   }
@@ -81,7 +97,7 @@ const REFUSAL: Record<string, string> = {
 async function fill($: $, text: string) {
   let note: string
   try {
-    const r = await $.prompt.fill({ text, mode: 'replace' })
+    const r = await $.prompt.fill({ text, mode: 'insert' })
     note = r.isFilled
       ? '入力欄に入れました(送信はしていません)'
       : `入力欄に入れられませんでした: ${(r.refusal && REFUSAL[r.refusal]) || 'ほかの mod か画面に断られました'}`
@@ -107,11 +123,13 @@ export const register: Register = on => {
     const started = await next(e)
     // /edits が拒まれたら (組み込みと被ったら) /edit-log にする
     const got = await $.command.register({ name: 'edits', description: DESCRIPTION }).catch(() => undefined)
-    if (got?.command !== 'edits') await $.command.register({ name: 'edit-log', description: DESCRIPTION }).catch(() => {})
+    ownsMain = got?.command === 'edits'
+    if (!ownsMain) await $.command.register({ name: 'edit-log', description: DESCRIPTION }).catch(() => {})
     return started
   })
 
-  on('command.run', { command: 'edits' }, openPane)
+  // /edits を持てなかった時は、その名前の持ち主 (組み込みなど) に回す
+  on('command.run', { command: 'edits' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'edit-log' }, openPane)
 
   // /clear で記録を空にする
@@ -180,6 +198,7 @@ export const register: Register = on => {
     else if (detail.kind === 'not-repo') diff = <Text color="#d29922">差分は git のフォルダでだけ出ます</Text>
     else if (detail.kind === 'clean')
       diff = <Text dimColor>git の差分はありません(コミット済みか、git が追っていない新しいファイル)</Text>
+    else if (detail.kind === 'meta') diff = <Text dimColor>バイナリか権限だけの変更です</Text>
     else if (detail.kind === 'error') diff = <Text color="red">{`git の差分を読めません: ${detail.message}`}</Text>
     else
       diff = (

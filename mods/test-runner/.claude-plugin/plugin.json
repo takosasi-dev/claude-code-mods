@@ -1,6 +1,6 @@
 {
   "name": "test-runner",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "/testrun でテストをボタン 1 つで走らせ、結果を信号と直近 20 回の履歴でペインに SVG で表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",
@@ -14,7 +14,7 @@
     "timeoutSeconds": {
       "type": "number",
       "title": "時間の上限 (秒)",
-      "description": "これを過ぎたらテストを止める",
+      "description": "これを過ぎたらテストを止める (3600 秒まで)",
       "default": 300,
       "min": 1
     }

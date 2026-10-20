@@ -48,6 +48,17 @@ export function linesOf(tool: string, input: Record<string, unknown>): number {
   return 0
 }
 
+/** 制御文字を落とす (タブと改行は残す)。エンジンは制御文字を含む Text・alt を描かない */
+export const plain = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
+/** 絶対パスのファイルの親フォルダ。根なら区切りを残す。相対パスなら空 (git は今の作業フォルダで走らせる) */
+export function parentDir(file: string) {
+  if (!/^(?:[A-Za-z]:)?[\\/]/.test(file)) return ''
+  const i = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'))
+  const dir = file.slice(0, i)
+  return dir === '' || /^[A-Za-z]:$/.test(dir) ? file.slice(0, i + 1) : dir
+}
+
 /** 作業フォルダの中なら相対パス、外なら区切りを / にしたパス */
 export function relPath(cwd: string, file: string) {
   const f = file.replace(/\\/g, '/')
@@ -125,7 +136,7 @@ export function tailFit(s: string, max: number) {
   return `…${out}`
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const esc = (s: string) => plain(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const base = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
 const linesText = (e: { tool: string; lines: number }) => (e.tool === 'Write' ? `${e.lines}行` : `約${e.lines}行`)
 

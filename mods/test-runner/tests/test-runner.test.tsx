@@ -265,3 +265,68 @@ test('/testrun が拒まれたら /test-runner で開き、/testrun は横取り
   expect(builtin).toMatchObject({ text: '組み込みの testrun' })
   expect(opened).toEqual(['test-runner'])
 })
+
+// ── v0.1.1 で直した物
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/
+
+test('数の拾い方は長い数字の並びでも遅くならない', () => {
+  const t0 = Date.now()
+  expect(countResults(`${'1'.repeat(60_000)} x\n`)).toEqual({})
+  expect(countResults(`${'9'.repeat(60_000)}\n`)).toEqual({})
+  expect(Date.now() - t0).toBeLessThan(1000)
+  // 数字の途中から拾わない
+  expect(countResults('Tests: 12 passed, 12 total\n')).toEqual({ passed: 12, failed: 0 })
+})
+
+test('「この失敗を直して」の文: 末尾を文字数でも切り、``` があれば囲いを長くする', () => {
+  const r = { status: 'fail' as const, command: 'npm test', exitCode: 1, ms: 1, finishedAt: NOW }
+  const long = fixPrompt({ ...r, tail: `HEAD${'x'.repeat(10_000)}END` })
+  expect(long).not.toContain('HEAD')
+  expect(long).toContain('END')
+  expect(long.length).toBeLessThan(4300)
+  const fenced = fixPrompt({ ...r, tail: 'expected:\n```\ncode\n```\n' })
+  expect(fenced).toContain('````\nexpected:\n```\ncode\n```\n\n````')
+})
+
+test('出力の末尾から制御文字を落とす (Code に渡すので)', () => {
+  expect(tailOf('a\u0007b\bc\u000cd\te')).toBe('abcd\te')
+})
+
+test('表示するコマンドは argv を空白 1 つでつないだ物', { options: { testCommand: `npm${' '.repeat(80)}test\t--runInBand`, timeoutSeconds: 300 } }, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const world: World = { child: { chunks: [JEST_PASS] }, calls: [] }
+  mockSpawn(on, clock, world)
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgOf(vs)).toContain('npm test --runInBand')
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: 'npm test --runInBand' })).toBeDefined()
+  await term.press({ key: 'run' })
+  expect(world.calls[0]?.argv).toEqual(['npm', 'test', '--runInBand'])
+  expect(await term.find({ type: 'Text', text: 'npm test --runInBand' })).toBeDefined()
+})
+
+test('時間の上限は 3600 秒まで', { options: { testCommand: 'npm test', timeoutSeconds: 999_999 } }, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mockSpawn(on, clock, { child: { chunks: ['slow\n'], wait: 10_000_000 }, calls: [] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'run' })
+  await clock.advance(3_599_000)
+  expect(await ui.find({ type: 'Button', key: 'stop' })).toBeDefined()
+  await clock.advance(2000)
+  expect(await ui.find({ type: 'Text', text: /^時間切れ \/ 所要 60 分 0 秒/ })).toBeDefined()
+})
+
+test('「この失敗を直して」は入力欄の下書きを消さずに入れる (insert)', SET, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mockSpawn(on, clock, { child: { chunks: ['bell\u0007 Tests: 1 failed\n'], code: 1 }, calls: [] })
+  const modes: string[] = []
+  on('prompt.fill', (_$, e) => {
+    modes.push(e.mode)
+    return { isFilled: true }
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'run' })
+  expect(String((await ui.find({ type: 'Code' }))?.props.source)).not.toMatch(CTRL)
+  await ui.press({ key: 'fix' })
+  expect(modes).toEqual(['insert'])
+})

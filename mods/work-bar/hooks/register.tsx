@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { Register, Timer } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import { barSvg, clock, flowColor, flowSvg, lastSvg, parsePresets, short } from './svg'
+import { barSvg, clean, clock, flowColor, flowSvg, lastSvg, parsePresets, short } from './svg'
 
 const run = atom({ plugin: 'work-bar', key: 'run' } as const, null)
 const last = atom({ plugin: 'work-bar', key: 'last' } as const, null)
@@ -11,15 +11,27 @@ const pick = atom({ plugin: 'work-bar', key: 'pick' } as const, '0')
 // これより多いと Select + 「入れる」に切り替える
 const MAX_BUTTONS = 4
 
+// 実行中だけ回す 1 秒タイマー。リロードで消えるので、session.start で run が残っていれば作り直す
+let tick: Timer | undefined
+function startTick($: EngineInterface) {
+  tick?.cancel()
+  tick = $.clock.every(1000, () => {
+    void (async () => {
+      const now = await $.clock.now()
+      await update($, run, r => (r ? { ...r, elapsed: Math.floor((now - r.startedAt) / 1000) } : r))
+    })()
+  })
+}
+
 export const register: Register = (on, options) => {
   const presets = parsePresets(String(options.presets ?? ''))
-  // 実行中だけ回す 1 秒タイマー。リロードで消えるが、その時はタイマーも止まる
-  let tick: Timer | undefined
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'work-bar', description: '作業バーの表示を切り替える' }).catch(() => {})
     // VS Code は帯を「フック無し」と 2 回見ると聞きに来なくなる。後から読み込まれた時のために描き直しを頼む
     $.ui.invalidate('ui.render')
+    // ターンの途中でリロードされた: 経過時間を止めないようタイマーを作り直す
+    if ((await read($, run)) !== null) startTick($)
 
     return next(e)
   })
@@ -36,13 +48,7 @@ export const register: Register = (on, options) => {
       const startedAt = await $.clock.now()
       await update($, run, () => ({ startedAt, elapsed: 0, calls: 0, errors: 0, active: [], lastError: false }))
       $.ui.invalidate('ui.render')
-      tick?.cancel()
-      tick = $.clock.every(1000, () => {
-        void (async () => {
-          const now = await $.clock.now()
-          await update($, run, r => (r ? { ...r, elapsed: Math.floor((now - r.startedAt) / 1000) } : r))
-        })()
-      })
+      startTick($)
     }
 
     return next(e)
@@ -50,7 +56,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
-    const name = String(e.tool)
+    const name = clean(String(e.tool))
     await update($, run, r => (r ? { ...r, calls: r.calls + 1, active: [...r.active, name] } : r))
     let isError = false
     try {
@@ -89,7 +95,9 @@ export const register: Register = (on, options) => {
 
     const r = await read($, run)
     const l = await read($, last)
-    const picked = await read($, pick)
+    // 定型を減らして選んでいた番号が範囲外になったら 0 番に戻す
+    const stored = await read($, pick)
+    const picked = presets[Number(stored)] ? stored : '0'
     const t = $.ui.resolve(e)
     const { Box, Text, Button } = t
 
@@ -108,7 +116,14 @@ export const register: Register = (on, options) => {
                 options={presets.map((p, i) => ({ label: p.label, value: String(i) }))}
                 onSelect={v => update($, pick, () => v)}
               />,
-              <Button key="fill" label="入れる" onPress={() => fill(presets[Number(picked)]?.text ?? '')} />,
+              <Button
+                key="fill"
+                label="入れる"
+                onPress={() => {
+                  const text = presets[Number(picked)]?.text ?? ''
+                  if (text !== '') fill(text)
+                }}
+              />,
             ]
           : presets.map((p, i) => <Button key={`preset-${i}`} label={p.label} onPress={() => fill(p.text)} />)}
         <Button key="hide" label="隠す" onPress={hide} />

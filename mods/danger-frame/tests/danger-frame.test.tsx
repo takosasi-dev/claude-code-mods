@@ -36,6 +36,21 @@ const DANGEROUS = [
   'Get-Process foo | stop-process',
   // 方針: 引用符の中も危ない扱い（用心側）
   'echo "rm -rf /"',
+  // git の後ろの全体オプション
+  'git -C /repo push --force',
+  'git --no-pager push',
+  'git -c a=b clean -fdx',
+  'git --git-dir=/x/.git reset --hard',
+  // 足した物
+  'git checkout .',
+  'git branch --delete --force feature',
+  'git branch -d -f feature',
+  'git stash clear',
+  "find . -name '*.tmp' -delete",
+  'Remove-Item x -Force',
+  'git restore --staged --worktree a.ts',
+  'git rm -rf dist',
+  '/bin/rm -rf x',
 ]
 
 const SAFE = [
@@ -64,11 +79,34 @@ const SAFE = [
   'echo format string',
   'Get-Process',
   'npm run format',
+  // 改行の先の別コマンドの -r を拾わない
+  'rm build.log\ngrep -rn TODO src',
+  'rm a.txt\nls -f',
+  // --rm は rm ではない
+  'docker run --rm -it ubuntu bash',
+  'perm -rf',
+  // 誤検知を外す
+  'git restore --staged a.ts',
+  'git restore -S a.ts',
+  'git rm -r --cached dist',
+  'git branch --delete merged',
+  'git stash list',
+  "find . -name '*.tmp'",
 ]
 
 test('危ないコマンドの判定', () => {
-  for (const c of DANGEROUS) expect([c, isDangerous(c)]).toEqual([c, true])
-  for (const c of SAFE) expect([c, isDangerous(c)]).toEqual([c, false])
+  // 外れた物を全部並べる
+  expect(DANGEROUS.filter(c => !isDangerous(c))).toEqual([])
+  expect(SAFE.filter(c => isDangerous(c))).toEqual([])
+})
+
+test('長い入力でも判定が遅くならない（先頭だけ見る）', () => {
+  const t0 = Date.now()
+  expect(isDangerous('rm '.repeat(30000))).toBe(false)
+  expect(isDangerous('git reset '.repeat(10000))).toBe(false)
+  expect(Date.now() - t0).toBeLessThan(1000)
+  // 先頭 10000 字の中にあれば見つける
+  expect(isDangerous('git push; ' + 'x'.repeat(50000))).toBe(true)
 })
 
 const row = (tool: string, command: string) => ({

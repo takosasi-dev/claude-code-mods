@@ -43,12 +43,15 @@ export const kindOf = (t: RecapTurn): KindId => {
 
 export const colorOf = (k: KindId) => KINDS.find(x => x.id === k)?.color ?? C.dim
 
+/** 制御文字 (タブ・改行・復帰を除く)。描く木や SVG に入ると拒まれてペインが閉じる */
+const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+
 export const esc = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  s.replace(CONTROL, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 /** 先頭 n 字 (サロゲートペアを割らない)。切ったら「…」 */
 export const head = (s: string, n: number) => {
-  const a = Array.from(s.replace(/\s+/g, ' ').trim())
+  const a = Array.from(s.replace(/\s+/g, ' ').replace(CONTROL, '').trim())
   return a.length > n ? `${a.slice(0, n).join('')}…` : a.join('')
 }
 

@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { cardSvg, extractLines, obsidianUrl, toProject } from '../hooks/board'
+import { cardSvg, extractLines, freshnessSvg, obsidianUrl, toProject } from '../hooks/board'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const DAY = 86_400_000
@@ -70,6 +70,12 @@ test('抜き出し: 状態・現状・次にやること・待ち、無ければ
   // 未設定なら作らない (空の根を全部に当てない)
   expect(obsidianUrl('/home/a/x.md', '', 'Claude')).toBeUndefined()
   expect(obsidianUrl(`${DIR}\\Alpha.md`, 'E:\\V', '')).toBeUndefined()
+})
+
+test('ファイル名の制御文字を落とす(Text と SVG が拒まれない)', () => {
+  const p = toProject('a\x07b\x1b.md', '/tmp/demo/a.md', NOW, '# t\n')
+  expect(p.name).toBe('ab')
+  expect(freshnessSvg([{ ...p, name: 'x\x08y' }], NOW)).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
 })
 
 for (const surface of SURFACES) {
@@ -188,5 +194,71 @@ test('/projects で読んで開き、5 分ごとに読み直す(開く前は読�
     expect((await rowKeys(ui))[0]).toBe('open:Delta')
   } finally {
     delete files['Delta.md']
+  }
+})
+
+test('メモが多くても鮮度の SVG は上限内(上位 100 件と「ほか N 件」)', () => {
+  const many = Array.from({ length: 600 }, (_, i) => ({
+    name: `P${String(i).padStart(3, '0')}`,
+    path: `/tmp/demo/${i}.md`,
+    mtimeMs: NOW - i * DAY,
+    title: '',
+    lines: [],
+  }))
+  const svg = freshnessSvg(many, NOW)
+  expect(svg.length).toBeLessThan(131072)
+  expect(svg).toContain('ほか 500 件')
+  expect(svg).toContain('>P099<')
+  expect(svg).not.toContain('>P100<')
+})
+
+// どのパスでも 1 本のメモを返す fs。見に来たパスを集める
+const anyFs = (on: On, text: string) => {
+  const seen = { lists: [] as string[], reads: [] as string[] }
+  on('fs.list', (_$, e) => {
+    seen.lists.push(e.path)
+    return { value: [{ name: 'Alpha.md', kind: 'file' as const, size: text.length, mtimeMs: NOW, isLink: false }] }
+  })
+  on('fs.read', (_$, e) => {
+    seen.reads.push(e.path)
+    return { value: text }
+  })
+  return seen
+}
+
+for (const memoDir of ['notes', './notes', 'C:', 'C:notes']) {
+  test(`メモのフォルダが絶対パスでなければ未設定と同じ扱い(${memoDir})`, { options: { memoDir } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const seen = anyFs(on, GAMMA)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'reload' })
+    expect(await ui.find({ type: 'Text', text: /未設定/ })).toBeDefined()
+    expect(seen.lists).toEqual([])
+  })
+}
+
+test('ドライブの根は区切りを残す(C:\\ を C: にしない)', { options: { memoDir: 'C:\\' } }, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const seen = anyFs(on, GAMMA)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reload' })
+  expect(seen.lists).toEqual(['C:\\'])
+  expect(seen.reads).toEqual(['C:\\Alpha.md'])
+  expect(await rowKeys(ui)).toEqual(['open:Alpha'])
+})
+
+test('本文の file: リンクは押せない(https: はそのまま)', { options: { memoDir: '/tmp/demo/memo' } }, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  anyFs(on, '# Alpha\n\n[手元のメモ](file:///C:/x/a.md) と [サイト](https://example.com) と <file:///C:/y.md>\n')
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'reload' })
+    await ui.press({ key: 'open:Alpha' })
+    const body = await ui.find({ key: 'body' })
+    expect(body?.props.pressableLinks).toEqual(['file:///C:/x/a.md', 'file:///C:/y.md'])
+    // 押しても何も起きない(落ちない)
+    await ui.press({ key: 'body', link: { href: 'file:///C:/x/a.md' } })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
   }
 })

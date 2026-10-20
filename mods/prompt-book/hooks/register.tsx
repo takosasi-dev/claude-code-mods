@@ -23,12 +23,49 @@ type $ = EngineInterface
 
 const say = ($: $, text: string) => update($, NOTICE, () => text)
 
-/** 一覧を変えて store にも残す */
-const change = async ($: $, fn: (items: PromptBookItem[], now: number) => PromptBookItem[]) => {
-  const now = await $.clock.now()
-  const items = await update($, ITEMS, x => fn(x, now))
-  await $.store.set(STORE_KEY, items)
+// 同じ store を同時に開いた別のセッション (VS Code とターミナルなど) と分け合う。
+// 書く直前に store を読み直し、その一覧に今回の操作 (id で足す・数える・消す) だけを当てて書く
+type Fresh = { ok: true; items: PromptBookItem[] | undefined } | { ok: false }
+
+/** store の今の一覧。キーが無ければ items は undefined、読めない・配列でない時は ok: false */
+const readStore = async ($: $): Promise<Fresh> => {
+  try {
+    const raw = await $.store.get(STORE_KEY)
+    if (raw === undefined) return { ok: true, items: undefined }
+    const items = fromSaved(raw)
+    return items ? { ok: true, items } : { ok: false }
+  } catch {
+    return { ok: false }
+  }
 }
+
+// 1 セッションの中の書き込み (連打など) は 1 本ずつ流す
+let chain: Promise<unknown> = Promise.resolve()
+const serial = <T,>(f: () => Promise<T>): Promise<T> => {
+  const p = chain.then(f, f)
+  chain = p.catch(() => {})
+  return p
+}
+
+/** store の今の一覧に fn を当てて state と store に書く。読めなければ書かずに false */
+const change = ($: $, fn: (items: PromptBookItem[], now: number) => PromptBookItem[]) =>
+  serial(async () => {
+    const fresh = await readStore($)
+    if (!fresh.ok) {
+      await say($, '保存した一覧を読めなかったので保存しませんでした')
+      return false
+    }
+    const now = await $.clock.now()
+    const items = fn(fresh.items ?? [], now)
+    try {
+      await $.store.set(STORE_KEY, items)
+    } catch {
+      await say($, '保存できませんでした')
+      return false
+    }
+    await update($, ITEMS, () => items)
+    return true
+  })
 
 // ponytail: 光りを消すタイマーはモジュール変数。リロードで消えても光りが残るだけで、次の保存で消える
 let flashTimer: Timer | undefined
@@ -37,7 +74,8 @@ async function save($: $, draft: PromptBookDraft) {
   const body = draft.body.trim()
   if (body === '') return say($, '本文を入れてください')
   const title = titleOf(draft.title, body)
-  await change($, (items, now) => [...items, { id: newId(now), title, body, tags: parseTags(draft.tags), uses: 0, lastUsedAt: 0, createdAt: now }])
+  const isSaved = await change($, (items, now) => [...items, { id: newId(now), title, body, tags: parseTags(draft.tags), uses: 0, lastUsedAt: 0, createdAt: now }])
+  if (!isSaved) return
   await update($, DRAFT, () => EMPTY_DRAFT)
   await update($, ARMED, () => '')
   await say($, `「${title}」を保存しました`)
@@ -55,9 +93,10 @@ const fillNote = (title: string, r: PromptFilled | undefined) => {
 
 async function use($: $, p: PromptBookItem) {
   await update($, ARMED, () => '')
-  const r = await $.prompt.fill({ text: p.body, mode: 'replace' }).catch(() => undefined)
-  // 入った時だけ数える
-  if (r?.isFilled) await change($, (items, now) => items.map(x => (x.id === p.id ? { ...x, uses: x.uses + 1, lastUsedAt: now } : x)))
+  const r = await $.prompt.fill({ text: p.body, mode: 'insert' }).catch(() => undefined)
+  // 入った時だけ数える。数えた後に保存の失敗などを出したら、そちらを残す
+  if (r?.isFilled && !(await change($, (items, now) => items.map(x => (x.id === p.id ? { ...x, uses: x.uses + 1, lastUsedAt: Math.max(x.lastUsedAt, now) } : x)))))
+    return
   await say($, fillNote(p.title, r))
 }
 
@@ -67,9 +106,8 @@ async function remove($: $, p: PromptBookItem) {
     await update($, ARMED, () => p.id)
     return
   }
-  await change($, items => items.filter(x => x.id !== p.id))
   await update($, ARMED, () => '')
-  await say($, `「${p.title}」を消しました`)
+  if (await change($, items => items.filter(x => x.id !== p.id))) await say($, `「${p.title}」を消しました`)
 }
 
 /** 今の入力欄の中身を本文にして保存 (題・タグは追加欄のもの) */
@@ -82,11 +120,18 @@ async function saveFromPrompt($: $) {
 const setDraft = ($: $, field: keyof PromptBookDraft, value: string) => update($, DRAFT, d => ({ ...d, [field]: value }))
 
 async function load($: $) {
-  const now = await $.clock.now()
-  const saved = fromSaved(await $.store.get(STORE_KEY))
-  const items = saved ?? seeds(now)
-  await update($, ITEMS, () => items)
-  if (saved === undefined) await $.store.set(STORE_KEY, items)
+  const fresh = await readStore($)
+  if (!fresh.ok) {
+    // 読めない間は state を空のままにし、書くたびに読み直す (空で上書きしない)
+    await say($, '保存した一覧を読めませんでした。開き直すと読み直します')
+    return
+  }
+  if (fresh.items !== undefined) {
+    await update($, ITEMS, () => fresh.items!)
+    return
+  }
+  // まだ何も保存していない時だけ例を入れる
+  await change($, (items, now) => (items.length === 0 ? seeds(now) : items))
 }
 
 const openPane = async ($: $) => {
@@ -94,16 +139,20 @@ const openPane = async ($: $) => {
   return { text: 'プロンプト帳を開きました。' }
 }
 
+// /prompts を自分で取れたか。取れなければ /prompts は組み込みに任せる (session.start はリロードでも来る)
+let ownsMain = false
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // /prompts が拒まれたら (組み込みと被ったら) /prompt-book にする
     const got = await $.command.register({ name: 'prompts', description: DESCRIPTION }).catch(() => undefined)
-    if (got?.command !== 'prompts') await $.command.register({ name: 'prompt-book', description: DESCRIPTION }).catch(() => {})
+    ownsMain = got?.command === 'prompts'
+    if (!ownsMain) await $.command.register({ name: 'prompt-book', description: DESCRIPTION }).catch(() => {})
     await load($).catch(() => {})
     return next(e)
   })
 
-  on('command.run', { command: 'prompts' }, openPane)
+  on('command.run', { command: 'prompts' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'prompt-book' }, openPane)
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

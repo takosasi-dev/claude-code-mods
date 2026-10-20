@@ -54,7 +54,9 @@ export const extractLines = (text: string): string[] => {
 export const toProject = (fileName: string, path: string, mtimeMs: number, text: string): ProjectBoardProject => {
   const body = normalize(text)
   const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? ''
-  return { name: fileName.replace(/\.md$/i, ''), path, mtimeMs, title: cut(clean(title), 80), lines: extractLines(body) }
+  // ファイル名にも制御文字が入りうる(Text の子や SVG に入れると木ごと拒まれる)
+  const name = fileName.replace(/\.md$/i, '').replace(/[\x00-\x1f\x7f]/g, '')
+  return { name, path, mtimeMs, title: cut(clean(title), 80), lines: extractLines(body) }
 }
 
 export const arrange = (list: readonly ProjectBoardProject[], sort: ProjectBoardSort, filter: string) => {
@@ -93,7 +95,10 @@ export const obsidianUrl = (path: string, vaultRoot: string, vaultName: string) 
   return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file.slice(root.length + 1))}`
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const esc = (s: string) =>
+  s
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 // 文字幅の目安: 半角 0.55、それ以外 1(font-size 倍)
 const width = (s: string) => [...s].reduce((w, c) => w + (c.charCodeAt(0) < 0x80 ? 0.55 : 1), 0)
@@ -129,11 +134,16 @@ const SVG_HEAD = (h: number) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 ${h}" font-family="sans-serif">` +
   `<rect width="360" height="${h}" rx="10" fill="#0d1117"/>`
 
+// 鮮度のグラフに並べる上限。Svg の source は 131072 字までなので、多いと残りは「ほか N 件」にまとめる
+export const FRESH_ROWS = 100
+
 // 一覧の上の「鮮度」横棒グラフ
-export const freshnessSvg = (list: readonly ProjectBoardProject[], now: number) => {
+export const freshnessSvg = (all: readonly ProjectBoardProject[], now: number) => {
   const ROW = 22
   const TOP = 46
-  const h = TOP + Math.max(1, list.length) * ROW + 12
+  const list = all.slice(0, FRESH_ROWS)
+  const rest = all.length - list.length
+  const h = TOP + Math.max(1, list.length) * ROW + (rest > 0 ? ROW : 0) + 12
   const days = list.map(p => ageDays(p.mtimeMs, now))
   const max = Math.max(14, ...days)
   const X = 118
@@ -160,6 +170,7 @@ export const freshnessSvg = (list: readonly ProjectBoardProject[], now: number) 
     out += `<rect x="${X}" y="${y + 5}" width="${w}" height="12" rx="3" fill="${freshColor(d)}"/>`
     out += `<text x="${X + w + 6}" y="${y + 15}" fill="#8b949e" font-size="12">${d}日</text>`
   })
+  if (rest > 0) out += `<text x="14" y="${TOP + list.length * ROW + 15}" fill="#8b949e" font-size="12">ほか ${rest} 件</text>`
   return `${out}</svg>`
 }
 

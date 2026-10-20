@@ -2,6 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { barSvg, short } from '../hooks/svg'
+
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const SURFACES = ['vscode', 'terminal'] as const
 const BAND = {
@@ -35,6 +37,13 @@ const start = ($: Engine, agentId?: string) =>
   $.turn.start({ text: 'やって', turnId: 't1', ...(agentId ? { agentId } : {}) })
 const complete = ($: Engine, durationMs: number, agentId?: string) =>
   $.turn.complete({ answer: 'ok', durationMs, isAborted: false, turnId: 't1', reason: 'answer', ...(agentId ? { agentId } : {}) })
+
+// まだ一度も書かれていない $.state の値を、前のモジュールが残した値に見せる(書かれた後は本物を返す)
+const seed = (on: On, key: string, value: unknown) =>
+  on('state.get', async (_$, e, next) => {
+    const r = await next(e)
+    return e.plugin === 'work-bar' && e.key === key && r.value?.version === 0 ? { value: { value, version: 0 } } : r
+  })
 
 // 主な表示を 1 本の文字列で取る (vscode は Svg の alt と source、terminal は Text)
 type View = Pick<Mounted, 'find' | 'findAll'>
@@ -155,9 +164,43 @@ test(
   },
 )
 
+test(
+  '定型を減らして選んでいた番号が範囲外になったら 0 番に戻す(空文字を入れない)',
+  { options: { presets: 'a=文A|b=文B|c=文C|d=文D|e=文E' } },
+  async ($, on) => {
+    const { filled } = setup(on)
+    // 前の設定(6 本)で 5 番を選んでいた状態が $.state に残っている
+    seed(on, 'pick', '5')
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect((await ui.find({ key: 'pick' }))?.props.value).toBe('0')
+      await ui.press({ key: 'fill' })
+      await ui.unmount()
+    }
+    expect(filled.map(f => f.text)).toEqual(['文A', '文A'])
+  },
+)
+
+test('ターンの途中でリロードしても経過時間が進む', async ($, on) => {
+  const { clock } = setup(on)
+  // リロード前のモジュールが残した「実行中」(タイマーはリロードで消えている)
+  seed(on, 'run', { startedAt: NOW, elapsed: 0, calls: 0, errors: 0, active: [], lastError: false })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await clock.advance(5_000)
+  expect(await shown(ui)).toContain('0:05')
+  await ui.unmount()
+})
+
 test('アンケート中は譲る', async ($, on) => {
   setup(on)
   on('ui.render', () => <></>)
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true }, surface: 'vscode' })
   expect(await ui.find({ type: 'Button', key: 'hide' })).toBeUndefined()
+})
+
+test('ツール名の制御文字を SVG と表示から落とす', () => {
+  const bad = `mcp__x${String.fromCharCode(7)}y${String.fromCharCode(27)}`
+  expect(barSvg({ elapsed: 0, tool: bad, calls: 0, lastError: false })).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+  expect(short(bad)).toBe('mcp__xy')
 })

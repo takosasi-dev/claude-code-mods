@@ -23,7 +23,9 @@ export const UNSET_HINT = '未設定。/config で test-runner の testCommand �
 export const splitCommand = (s: string) => s.trim().split(/\s+/).filter(Boolean)
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
-const clean = (out: string) => out.replace(ANSI, '').replace(/\r(?!\n)/g, '\n').split(/\r?\n/)
+// 色の後に残った制御文字も落とす。Code は制御文字を含むと描かれない (タブと改行は残す)
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+const clean = (out: string) => out.replace(ANSI, '').replace(/\r(?!\n)/g, '\n').replace(CTRL, '').split(/\r?\n/)
 
 /** 出力の末尾 n 行 (色の制御文字と末尾の空行は落とす) */
 export function tailOf(out: string, n = TAIL_LINES) {
@@ -32,12 +34,13 @@ export function tailOf(out: string, n = TAIL_LINES) {
   return lines.slice(-n).join('\n')
 }
 
+// 1 行は先頭 2000 字だけ見る。数字の途中からは拾わない (長い数字の並びで 2 乗の時間にならない)
 const num = (re: RegExp, s: string) => {
-  const m = re.exec(s)
+  const m = re.exec(s.slice(0, 2000))
   return m ? Number(m[1]) : undefined
 }
-const PASSED = /(\d+) (?:passed|passing)\b/
-const FAILED = /(\d+) (?:failed|failing)\b/
+const PASSED = /(?<!\d)(\d+) (?:passed|passing)\b/
+const FAILED = /(?<!\d)(\d+) (?:failed|failing)\b/
 
 /**
  * 出力から通過・失敗の数を拾う。拾えなければ空。
@@ -78,14 +81,21 @@ export function countResults(out: string): { passed?: number; failed?: number } 
 export const statusOf = (exitCode: number | null, stoppedBy: 'user' | 'timeout' | undefined): TestRunnerStatus =>
   stoppedBy === 'user' ? 'stopped' : stoppedBy === 'timeout' ? 'timeout' : exitCode === 0 ? 'pass' : 'fail'
 
+/** 「この失敗を直して」に入れる出力の末尾の文字数 */
+export const PROMPT_TAIL = 4000
+
 /** 「この失敗を直して」で入力欄に入れる文 */
 export function fixPrompt(r: TestRunnerResult) {
   const how = r.status === 'timeout' ? '時間の上限を過ぎて止まりました' : `失敗しました(終了コード ${r.exitCode})`
+  const tail = r.tail.slice(-PROMPT_TAIL)
+  // 出力に ``` があると囲いが途中で閉じるので、出力に無い長さの囲いにする
+  let fence = '```'
+  while (tail.includes(fence)) fence += '`'
   return (
     `テストのコマンド \`${r.command}\` が${how}。出力の末尾は次のとおりです。\n\n` +
-    '```\n' +
-    r.tail +
-    '\n```\n\n' +
+    `${fence}\n` +
+    tail +
+    `\n${fence}\n\n` +
     '原因を調べて直してください。直したらもう一度テストを走らせて確かめてください。'
   )
 }

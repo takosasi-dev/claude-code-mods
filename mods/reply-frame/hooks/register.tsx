@@ -4,15 +4,16 @@ import type { Register } from 'claude-code'
 const FRAME_COLOR = '#d97757'
 const USER_FRAME_COLOR = '#6b9bd2'
 
-// Markdown 要素が受け取れる上限。超える返答は標準の描画に任せる
-const MARKDOWN_LIMIT = 10000
+// 1 回の描画で Markdown が描ける上限（全体で 10 万字）。超える返答は標準の描画に任せる
+const MARKDOWN_LIMIT = 100000
 
 // 本人の入力: ターミナル、Remote Control、VS Code/デスクトップ(SDK 経由)
 const OWN_PROMPT = new Set(['composer', 'bridge', 'sdk'])
 
 export const register: Register = on => {
   on('ui.render', { component: 'AssistantMessage' }, ($, e, next) => {
-    if (e.props.text.length > MARKDOWN_LIMIT) {
+    // 要約の行は標準の描画（印付き）に任せる
+    if (e.props.isSummary || e.props.text.length > MARKDOWN_LIMIT) {
       return next(e)
     }
 

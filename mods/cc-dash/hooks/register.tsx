@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CcDashCall, CcDashTab } from '../types'
-import { clock, dur, gaugesSvg, left, overviewSvg, shortTool, TOOL_COLORS, timelineSvg, toolBarsSvg, turnsSvg } from './svg'
+import type { CcDashCall, CcDashTab, CcDashUsage } from '../types'
+import { clean, clock, dur, gaugesSvg, left, overviewSvg, shortTool, TOOL_COLORS, timelineSvg, toolBarsSvg, turnsSvg } from './svg'
 import type { Gauge } from './svg'
 
 const PANE = 'cc-dash'
@@ -19,6 +19,7 @@ const callsA = atom({ plugin: 'cc-dash', key: 'calls' } as const, [] as CcDashCa
 const countsA = atom({ plugin: 'cc-dash', key: 'toolCounts' } as const, {} as Record<string, number>)
 const totalA = atom({ plugin: 'cc-dash', key: 'toolTotal' } as const, 0)
 const errorsA = atom({ plugin: 'cc-dash', key: 'errorCount' } as const, 0)
+const usageA = atom({ plugin: 'cc-dash', key: 'usage' } as const, null as CcDashUsage | string | null)
 
 const TABS: [CcDashTab, string][] = [
   ['overview', '概要'],
@@ -26,59 +27,63 @@ const TABS: [CcDashTab, string][] = [
   ['usage', '使用量'],
 ]
 
-type Usage = {
-  sessionPct: number
-  weeklyPct: number
-  sessionResetAt?: unknown
-  weeklyResetAt?: unknown
-  modelName?: unknown
-  modelPct?: unknown
-  modelResetAt?: unknown
-  fetchedAt?: unknown
-}
+const UNSET = '使用量ファイルが未設定です。/config で cc-dash の usageFile に JSON の絶対パスを入れてください'
+
+// 絶対パス(/x、\x、C:\x、C:/x)だけを受け付ける。相対パスは今のフォルダから読まれてしまう
+const isAbsolute = (path: string) => /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path)
 
 type $ = EngineInterface
 
 /** 使用量ファイルを読む。読めなければ理由の文字列 */
-const readUsage = async ($: $, file: string): Promise<Usage | string> => {
+const readUsage = async ($: $, file: string): Promise<CcDashUsage | string> => {
   let raw: string
   try {
     raw = await $.fs.read(file)
   } catch (err) {
-    return `使用量ファイルを読めません: ${file} (${err instanceof Error ? err.message : String(err)})`
+    return clean(`使用量ファイルを読めません: ${file} (${err instanceof Error ? err.message : String(err)})`)
   }
   try {
-    const u = JSON.parse(raw) as Usage
-    if (typeof u.sessionPct !== 'number' || typeof u.weeklyPct !== 'number') throw new Error('bad')
+    const u = JSON.parse(raw) as CcDashUsage | null
+    if (!u || typeof u.sessionPct !== 'number' || typeof u.weeklyPct !== 'number') throw new Error('bad')
     return u
   } catch {
-    return `使用量ファイルを読めません: ${file} (中身の形が違います)`
+    return clean(`使用量ファイルを読めません: ${file} (中身の形が違います)`)
   }
 }
 
-const gaugesOf = (u: Usage, now: number): Gauge[] => [
+/** 使用量を読んで $.state に置く。描画フックの外(30 秒タイマーと使用量タブを開いた時)で呼ぶ */
+async function refreshUsage($: $, file: string) {
+  if (file === '') return
+  const u = await readUsage($, file)
+  await update($, usageA, () => u)
+}
+
+const gaugesOf = (u: CcDashUsage, now: number): Gauge[] => [
   { label: '5時間枠', pct: u.sessionPct, left: left(u.sessionResetAt, now) },
   { label: '週', pct: u.weeklyPct, left: left(u.weeklyResetAt, now) },
   ...(typeof u.modelName === 'string' && typeof u.modelPct === 'number'
-    ? [{ label: `${u.modelName} 週`, pct: u.modelPct, left: left(u.modelResetAt, now) }]
+    ? [{ label: `${clean(u.modelName)} 週`, pct: u.modelPct, left: left(u.modelResetAt, now) }]
     : []),
 ]
 
-const fetchedText = (u: Usage, now: number) =>
+const fetchedText = (u: CcDashUsage, now: number) =>
   typeof u.fetchedAt === 'number' ? `取得: ${Math.max(0, Math.floor((now - u.fetchedAt) / 60_000))}分前` : ''
 
 export const register: Register = (on, options) => {
-  const file = String(options.usageFile ?? '').trim()
+  const raw = String(options.usageFile ?? '').trim()
+  // 絶対パスでなければ未設定と同じ扱い
+  const file = isAbsolute(raw) ? raw : ''
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'dash', description: 'セッションの計器盤をペインに表示' }).catch(() => {})
     // リロードでも session.start は来る。最初の 1 回だけ時刻を入れる
     const now = await $.clock.now()
     await update($, startedA, v => v || now)
-    // 30 秒ごとに、数字が変わる時だけ描き直す (使用量は毎回、概要は経過の分が変わった時、ツールは実行中がある時)
+    // 30 秒ごとに、数字が変わる時だけ描き直す (使用量は読み直して毎回、概要は経過の分が変わった時、ツールは実行中がある時)
     let lastMinute = -1
     $.clock.every(30_000, async () => {
       const tab = await read($, tabA)
+      if (tab === 'usage') await refreshUsage($, file)
       const minute = Math.floor(((await $.clock.now()) - (await read($, startedA))) / 60_000)
       const isDue =
         tab === 'usage' ||
@@ -127,6 +132,9 @@ export const register: Register = (on, options) => {
       await update($, turnDurA, list => [...list, e.durationMs].slice(-KEEP_TURNS))
       await update($, turnCountA, n => n + 1)
       await update($, runningA, () => null)
+      // 答えが返らないまま終わった呼び出し(中断など)を締める。エラーには数えない
+      const end = await $.clock.now()
+      await update($, callsA, list => (list.some(c => c.end === undefined) ? list.map(c => (c.end === undefined ? { ...c, end } : c)) : list))
     }
     return next(e)
   })
@@ -134,17 +142,18 @@ export const register: Register = (on, options) => {
   // 見るだけのフック。落ちても呼び出しは止めない (.catch で next の結果をそのまま返す)
   on('tool.call', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
-    const tool = String(e.tool)
+    const tool = clean(String(e.tool))
     const start = await $.clock.now()
     const id = e.tool_use_id ?? `${tool}-${start}-${Math.random()}`
     await update($, callsA, list => [...list, { id, tool, start, isError: false }].slice(-KEEP_CALLS))
     await update($, countsA, c => ({ ...c, [tool]: (c[tool] ?? 0) + 1 }))
     await update($, totalA, n => n + 1)
 
-    let isError = true
+    // 中断(next が投げる)・deny はエラーに数えない (work-bar とそろえる)
+    let isError = false
     try {
       const r = await next(e)
-      isError = r.deny !== undefined || r.isError === true
+      isError = r.isError === true
       return r
     } finally {
       const end = await $.clock.now()
@@ -166,16 +175,16 @@ export const register: Register = (on, options) => {
             key={`tab-${id}`}
             label={label}
             variant={tab === id ? 'primary' : 'secondary'}
-            onPress={() => update($, tabA, () => id)}
+            onPress={async () => {
+              await update($, tabA, () => id)
+              // 使用量タブを開いた時に読む
+              if (id === 'usage') await refreshUsage($, file)
+            }}
           />
         ))}
       </Box>
     )
 
-    const counts = await read($, countsA)
-    const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1])
-    const rank = new Map(ranked.map(([tool], i) => [tool, i]))
-    const colorOf = (tool: string) => TOOL_COLORS[(rank.get(tool) ?? 0) % TOOL_COLORS.length] ?? TOOL_COLORS[0]!
     // terminal の部品表にも Svg の名前はあるので、画面の種類でも分ける
     const Svg = e.surface !== 'terminal' && 'Svg' in t ? t.Svg : undefined
 
@@ -205,6 +214,11 @@ export const register: Register = (on, options) => {
         </Box>
       )
     } else if (tab === 'tools') {
+      // ツールの回数を読む(購読する)のはこの枝だけ。使用量タブはツールのたびに描き直さない
+      const counts = await read($, countsA)
+      const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1])
+      const rank = new Map(ranked.map(([tool], i) => [tool, i]))
+      const colorOf = (tool: string) => TOOL_COLORS[(rank.get(tool) ?? 0) % TOOL_COLORS.length] ?? TOOL_COLORS[0]!
       const total = await read($, totalA)
       const calls = await read($, callsA)
       const top = ranked.slice(0, 8)
@@ -222,8 +236,8 @@ export const register: Register = (on, options) => {
         </Box>
       )
     } else {
-      // 空なら読まない (空を今のフォルダと読ませない)
-      const u = file === '' ? '使用量ファイルが未設定です。/config で cc-dash の usageFile に JSON の絶対パスを入れてください' : await readUsage($, file)
+      // 描画では読まない。読むのは 30 秒タイマーと使用量タブを開いた時
+      const u = file === '' ? UNSET : ((await read($, usageA)) ?? '読み込み中…')
       if (typeof u === 'string') {
         body = (
           <Text key="usage-error" dimColor>

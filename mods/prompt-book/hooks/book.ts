@@ -4,6 +4,8 @@ import type { PromptBookItem, PromptBookSort } from '../types'
 export const MAX_TAGS = 3
 const MAX_TAG_LEN = 16
 const MAX_TITLE_LEN = 40
+/** SVG に並べるタグのチップの数。残りは「ほか N」にまとめる */
+const MAX_CHIPS = 30
 
 export const SORTS: readonly { value: PromptBookSort; label: string }[] = [
   { value: 'uses', label: 'よく使う順' },
@@ -157,14 +159,15 @@ export function chartSvg(items: readonly PromptBookItem[], selectedTag: string, 
     y += 30
   } else {
     let x = pad
-    for (const t of tags) {
-      const label = `${short(t.tag, 10)} ${t.count}`
+    const shown = tags.slice(0, MAX_CHIPS)
+    const rest = tags.length - shown.length
+    const chips = [...shown.map(t => ({ label: `${short(t.tag, 10)} ${t.count}`, isOn: t.tag === selectedTag })), ...(rest > 0 ? [{ label: `ほか ${rest}`, isOn: false }] : [])]
+    for (const { label, isOn } of chips) {
       const w = Math.ceil(textWidth(label)) + 18
       if (x + w > W - pad && x > pad) {
         x = pad
         y += 30
       }
-      const isOn = t.tag === selectedTag
       parts.push(
         `<rect x="${x}" y="${y}" width="${w}" height="22" rx="11" fill="${isOn ? BLUE : FACE}" stroke="${isOn ? BLUE : LINE}"/>`,
         `<text x="${x + w / 2}" y="${y + 15}" font-size="12" fill="${isOn ? BG : FG}" text-anchor="middle">${esc(label)}</text>`,

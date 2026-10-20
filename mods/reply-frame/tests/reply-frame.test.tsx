@@ -26,11 +26,36 @@ test('長すぎる返答は標準の描画に任せる', async ($, on) => {
     plugin: 'reply-frame',
     surface: 'vscode',
     component: 'AssistantMessage',
-    props: { text: 'a'.repeat(10001), isFirstOfReply: true },
+    props: { text: 'a'.repeat(100001), isFirstOfReply: true },
   })
   expect(await ui.find({ type: 'Box' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
   await ui.unmount()
+})
+
+test('1 万字を超えても 10 万字までは枠で描く', async $ => {
+  const ui = await $.ui.mount({
+    plugin: 'reply-frame',
+    surface: 'vscode',
+    component: 'AssistantMessage',
+    props: { text: 'a'.repeat(50000), isFirstOfReply: true },
+  })
+  expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { borderStyle: 'round' } })
+  await ui.unmount()
+})
+
+test('要約の行は標準の描画に任せる（全画面種）', async ($, on) => {
+  on('ui.render', { component: 'AssistantMessage' }, () => ({ type: 'engine', ref: 0 }))
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({
+      plugin: 'reply-frame',
+      surface,
+      component: 'AssistantMessage',
+      props: { text: 'ファイルを読みました', isFirstOfReply: false, isSummary: true },
+    })
+    expect(await ui.drawn()).toEqual({ type: 'engine', ref: 0 })
+    await ui.unmount()
+  }
 })
 
 const OWN = { kind: 'composer' } as const

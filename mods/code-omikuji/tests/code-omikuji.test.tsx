@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import { expect, mock, test } from 'claude-code/testing'
 
 import type { OmikujiDay, OmikujiResult } from '../types'
-import { RANK_NAMES, WORDS, addDay, fillText, fortune, jstDate, kanji, lastDays, paneSvg, wrap } from '../hooks/omikuji'
+import { RANK_NAMES, WORDS, addDay, fillText, fortune, isResult, jstDate, kanji, lastDays, paneSvg, wrap } from '../hooks/omikuji'
 
 // 2026-10-20 12:00 JST
 const NOW = Date.parse('2026-10-20T03:00:00Z')
@@ -46,17 +46,21 @@ const boot = async ($: Engine, on: On, init: Record<string, unknown> = {}) => {
   const clock = mock.clock(on, { now: NOW })
   const store = fakeStore(on, init)
   const filled: string[] = []
+  const modes: string[] = []
+  const world = { isPaneUp: true }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.panes', () => ({ value: world.isPaneUp ? [{ id: 'code-omikuji', title: 'おみくじ', isShown: true, isFocused: false, isPlaced: true }] : [] }))
   on('prompt.fill', (_$, e) => {
     filled.push(e.text)
+    modes.push(String(e.mode))
     return { isFilled: true }
   })
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   const open = () =>
     $.command.run({ command: 'omikuji', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
-  return { clock, store, filled, open }
+  return { clock, store, filled, modes, world, open }
 }
 
 type Drawn = { find: (q: { type?: string; key?: string; text?: string | RegExp }) => Promise<{ text: string; props: Record<string, unknown> } | undefined> }
@@ -254,4 +258,78 @@ test('/omikuji が取れなければ /code-omikuji を登録する', async ($, o
   expect(tried).toEqual(['omikuji', 'omikuji', 'code-omikuji'])
   const ran = await $.command.run({ command: 'code-omikuji', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
   expect(ran).toMatchObject({ text: 'おみくじを開きました。' })
+})
+
+test('/omikuji が取れなかった時は、元の /omikuji を横取りしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => (e.name === 'omikuji' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
+  const opened: string[] = []
+  on('ui.open', (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true as const } }
+  })
+  on('command.run', { command: 'omikuji' }, () => ({ text: '組み込みの omikuji' }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'omikuji', ...run })).toMatchObject({ text: '組み込みの omikuji' })
+  expect(opened).toEqual([])
+})
+
+// 2026-10-20 12:00 JST から 12 時間 5 分後 = 10/21 00:05 JST
+const PAST_MIDNIGHT = 12 * 3600_000 + 5 * 60_000
+
+test('開いたまま日付をまたぐと、今日の運勢に入れ替わる。入力欄へは今日の分を、下書きを消さずに入れる', async ($, on) => {
+  const { clock, store, filled, modes, open } = await boot($, on)
+  await open()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await clock.advance(PAST_MIDNIGHT)
+  const next = fortune('2026-10-21')
+  expect(store.today()).toEqual(next)
+  expect(store.history()?.map(d => d.date)).toEqual([TODAY, '2026-10-21'])
+  expect(await ui.find({ type: 'Text', text: `10/21 のコード運勢  第${next.number}番` })).toBeDefined()
+  await ui.press({ key: 'fill' })
+  expect(filled).toEqual([fillText(next)])
+  expect(modes).toEqual(['insert'])
+  await ui.press({ key: 'shake' })
+  expect(await ui.find({ type: 'Text', text: `言語: ${fortune('2026-10-21', 1).language}` })).toBeDefined()
+})
+
+test('閉じたまま日付をまたいだら、開くまで store に書かず、昨日の分も今日として出さない', async ($, on) => {
+  const { clock, store, world, open } = await boot($, on)
+  await open()
+  const yesterday = fortune(TODAY)
+  world.isPaneUp = false
+  await clock.advance(PAST_MIDNIGHT)
+  expect(store.today()).toEqual(yesterday)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^10\/20 のコード運勢/ })).toBeUndefined()
+  await open()
+  expect(store.today()).toEqual(fortune('2026-10-21'))
+  expect(await ui.find({ type: 'Text', text: /^10\/21 のコード運勢/ })).toBeDefined()
+})
+
+test('store の運勢が壊れていたら作り直す (第undefined番にしない)', async ($, on) => {
+  const { store, open } = await boot($, on, {
+    today: { date: TODAY, rank: 'ほげ', number: 7 },
+    history: [{ date: '2026-10-18', rank: '吉' }, { date: '2026-10-19', rank: 'ほげ' }, 'x', { date: 5, rank: '凶' }],
+  })
+  await open()
+  const want = fortune(TODAY)
+  expect(store.today()).toEqual(want)
+  expect(store.history()).toEqual([{ date: '2026-10-18', rank: '吉' }, { date: TODAY, rank: want.rank }])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: `10/20 のコード運勢  第${want.number}番` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /undefined/ })).toBeUndefined()
+})
+
+test('store の運勢に項目が足りない・数がおかしい時も作り直す', async ($, on) => {
+  const f = fortune(TODAY)
+  const { store, open } = await boot($, on, { today: { date: TODAY, rank: f.rank } })
+  await open()
+  expect(store.today()).toEqual(f)
+  expect(isResult(f)).toBe(true)
+  for (const bad of [{ ...f, number: 0 }, { ...f, number: 1.5 }, { ...f, number: 101 }, { ...f, words: 3 }, { ...f, rank: '超吉' }, { ...f, date: 20261020 }, null, 'x'])
+    expect(isResult(bad)).toBe(false)
 })

@@ -29,31 +29,54 @@ const DIRTY = {
 }
 const CLEAN = { status: '## main\n', unstaged: '', staged: '', log: `abc1234\t${(NOW - 60 * 60_000) / 1000}\tInitial\n` }
 
-type World = { repo: 'none' | 'clean' | 'dirty'; calls: string[][] }
+// git が C の文字列の形で囲んだ、\b と \f を含む名前。題には BEL と ESC
+const ODD = {
+  status: '## main\n M "a\\bb\\f.txt"\n',
+  unstaged: '1\t0\t"a\\bb\\f.txt"\n',
+  staged: '',
+  log: `abc1234\t${(NOW - 60_000) / 1000}\tFix \u0007bell \u001b[31mred\n`,
+}
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/
+
+type World = {
+  repo: 'none' | 'clean' | 'dirty' | 'odd' | 'unsafe'
+  calls: string[][]
+  /** process.run に渡った env */
+  envs?: (Record<string, string> | undefined)[]
+}
+
+/** git の argv から全体オプション (-c の対と -- で始まる物) を飛ばした、サブコマンドから後ろ */
+const sub = (argv: readonly string[]) => {
+  let i = 1
+  while (i < argv.length && (argv[i] === '-c' || (argv[i] ?? '').startsWith('--'))) i += argv[i] === '-c' ? 2 : 1
+  return argv.slice(i)
+}
 
 // process を差し替える。git の読む操作だけ答え、それ以外が来たら記録に残る
 const mockGit = (on: On, world: World) => {
   on('session.cwd', () => ({ value: CWD }))
   on('process.run', (_$, e) => {
     world.calls.push([...e.argv])
+    world.envs?.push(e.init?.env)
     const out = (stdout: string, exitCode = 0, stderr = '') => ({
       value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
     })
     if (e.init?.cwd !== CWD) return out('', 1, 'wrong cwd')
-    const args = e.argv.slice(3).join(' ')
+    const args = sub(e.argv).join(' ')
     if (world.repo === 'none') return out('', 128, 'fatal: not a git repository')
-    const src = world.repo === 'dirty' ? DIRTY : CLEAN
+    if (world.repo === 'unsafe') return out('', 128, "fatal: detected dubious ownership in repository at '/tmp/demo'\n")
+    const src = world.repo === 'dirty' ? DIRTY : world.repo === 'odd' ? ODD : CLEAN
     if (args === 'rev-parse --is-inside-work-tree') return out('true\n')
     if (args.startsWith('status ')) return out(src.status)
     if (args.startsWith('diff --cached ')) return out(src.staged)
-    if (args.startsWith('diff ')) return out(src.unstaged)
+    if (args.startsWith('diff ') || args.startsWith('diff-files ')) return out(src.unstaged)
     if (args.startsWith('log ')) return out(src.log)
     return out('', 1, `unexpected: ${args}`)
   })
 }
 
-const READ_ONLY = new Set(['rev-parse', 'status', 'diff', 'log'])
-const onlyReads = (world: World) => world.calls.every(a => a[0] === 'git' && READ_ONLY.has(a[3] ?? ''))
+const READ_ONLY = new Set(['rev-parse', 'status', 'diff', 'diff-files', 'log'])
+const onlyReads = (world: World) => world.calls.every(a => a[0] === 'git' && READ_ONLY.has(sub(a)[0] ?? ''))
 
 test('変換: 状態・行数・並び・ahead/behind・コミット', async () => {
   const r = toRepo(DIRTY.status, DIRTY.unstaged, DIRTY.staged, DIRTY.log)
@@ -197,7 +220,7 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'review' })
     expect(filled).toHaveLength(1)
     expect(filled[0]?.text).toMatch(/レビュー/)
-    expect(filled[0]?.mode).toBe('replace')
+    expect(filled[0]?.mode).toBe('insert')
     expect(await ui.find({ type: 'Text', text: '入力欄に入れました(送信はしていません)' })).toBeDefined()
     await ui.press({ key: 'commit-msg' })
     expect(filled[1]?.text).toMatch(/コミットメッセージ/)
@@ -228,9 +251,10 @@ test('/git で読んで開く。ファイルを変えうるツールの後に 2 
   on('ui.panes', () => ({ value: isUp ? [{ id: 'git-pane', title: 'git', isShown: true, isFocused: false, isPlaced: true }] : [] }))
   on('tool.call', () => ({ result: {} as never }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
   await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
 
-  const reads = () => world.calls.filter(a => a[3] === 'rev-parse').length
+  const reads = () => world.calls.filter(a => sub(a)[0] === 'rev-parse').length
   const call = (tool: string) => $.tool.call({ tool, input: {} } as never)
 
   // 開く前はツールが終わっても読まない
@@ -267,4 +291,77 @@ test('/git で読んで開く。ファイルを変えうるツールの後に 2 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: '変更 6 ファイル +29 -17' })).toBeDefined()
   expect(onlyReads(world)).toBe(true)
+})
+
+// ── v0.1.1 で直した物
+
+test('index を書き直さない: 任意のロックを止め、未ステージは diff-files で読み、fsmonitor を走らせない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const world: World = { repo: 'dirty', calls: [], envs: [] }
+  mockGit(on, world)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reload' })
+  expect(world.calls).toHaveLength(5)
+  expect(world.envs?.every(env => env?.GIT_OPTIONAL_LOCKS === '0')).toBe(true)
+  expect(world.calls.every(a => a.includes('core.fsmonitor=false'))).toBe(true)
+  // 作業ツリーと index の比べは diff-files (git diff は GIT_OPTIONAL_LOCKS を見ずに index を書く)
+  const diffs = world.calls.map(a => sub(a)).filter(a => a[0]?.startsWith('diff'))
+  expect(diffs.map(a => a.slice(0, 2).join(' ')).sort()).toEqual(['diff --cached', 'diff-files --numstat'])
+  expect(await ui.find({ type: 'Text', text: '変更 6 ファイル +29 -17' })).toBeDefined()
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 所有者の確認 (dubious ownership) で止まったら、そう出す`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    mockGit(on, { repo: 'unsafe', calls: [] })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'reload' })
+    if (surface === 'vscode') {
+      const svg = await ui.find({ type: 'Svg' })
+      expect(String(svg?.props.source)).toMatch(/git が所有者の確認で止めました/)
+      expect(String(svg?.props.source)).not.toMatch(/git のフォルダではありません/)
+    } else expect(await ui.find({ type: 'Text', text: 'git が所有者の確認で止めました' })).toBeDefined()
+  })
+
+  test(`${surface}: 名前と題の制御文字を落として描く`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    mockGit(on, { repo: 'odd', calls: [] })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'reload' })
+    if (surface === 'vscode') {
+      const svg = await ui.find({ type: 'Svg' })
+      expect(String(svg?.props.source)).not.toMatch(CTRL)
+      expect(String(svg?.props.alt)).not.toMatch(CTRL)
+      expect(String(svg?.props.source)).toMatch(/>ab\.txt</)
+    } else {
+      expect(await ui.find({ type: 'Text', text: ' M +1 -0  ab.txt' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^abc1234 Fix bell \[31mred / })).toBeDefined()
+    }
+  })
+}
+
+test('変換: 囲まれた名前の \\b \\f は本物の制御文字に戻さない', () => {
+  const r = toRepo(ODD.status, ODD.unstaged, '', ODD.log)
+  expect(r.files.map(f => f.path)).toEqual(['ab.txt'])
+  expect(r.files[0]).toMatchObject({ add: 1, del: 0 })
+  expect(r.commits[0]?.subject).not.toMatch(CTRL)
+})
+
+test('/git が拒まれて /gitpane にした時は、/git を横取りしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockGit(on, { repo: 'clean', calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const tried: string[] = []
+  on('command.register', (_$, e) => {
+    tried.push(e.name)
+    return e.name === 'git' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }
+  })
+  on('command.run', { command: 'git' }, () => ({ text: '組み込みの git' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  expect(tried).toEqual(['git', 'gitpane'])
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'git', ...run })).toMatchObject({ text: '組み込みの git' })
+  expect(await $.command.run({ command: 'gitpane', ...run })).toMatchObject({ text: 'git のペインを開きました。' })
 })

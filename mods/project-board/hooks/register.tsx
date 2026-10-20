@@ -8,6 +8,7 @@ import {
   arrange,
   cardSvg,
   dateLabel,
+  FRESH_ROWS,
   freshnessSvg,
   normalize,
   obsidianUrl,
@@ -27,6 +28,25 @@ const SORT = atom({ plugin: 'project-board', key: 'sort' } as const, 'new')
 const FILTER = atom({ plugin: 'project-board', key: 'filter' } as const, '')
 const DETAIL = atom({ plugin: 'project-board', key: 'detail' } as const, null)
 
+// 絶対パス(/x、\x、C:\x、C:/x)だけを受け付ける。相対パスや「C:」は今のフォルダから読まれてしまう
+const isAbsolute = (path: string) => /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path)
+
+// 設定のフォルダ: 絶対パスでなければ未設定(空)。末尾の区切りは外すが、根(C:\ や /)は区切りを残す
+const folderOption = (value: unknown) => {
+  const raw = String(value ?? '').trim()
+  if (!isAbsolute(raw)) return ''
+  const trimmed = raw.replace(/[\\/]+$/, '')
+  return trimmed === '' || /^[A-Za-z]:$/.test(trimmed) ? raw.slice(0, trimmed.length + 1) : trimmed
+}
+
+// 本文の file: リンク。Markdown は file: も押せるリンクにするので、押しても何もしないようにする
+const fileLinks = (text: string) => {
+  const found = new Set<string>()
+  for (const m of text.matchAll(/\]\(\s*<?(file:[^)\s>]+)>?/gi)) if (m[1]) found.add(m[1])
+  for (const m of text.matchAll(/<(file:[^>\s]+)>/gi)) if (m[1]) found.add(m[1])
+  return [...found]
+}
+
 const SORTS: { value: ProjectBoardSort; label: string }[] = [
   { value: 'new', label: '更新が新しい順' },
   { value: 'name', label: '名前順' },
@@ -41,12 +61,14 @@ async function load($: EngineInterface, memoDir: string) {
     return
   }
   const sep = memoDir.includes('\\') || !memoDir.includes('/') ? '\\' : '/'
+  // 根(C:\ や /)は区切りで終わっているので足さない
+  const base = /[\\/]$/.test(memoDir) ? memoDir : `${memoDir}${sep}`
   try {
     const entries = await $.fs.list(memoDir)
     const files = entries.filter(f => f.kind === 'file' && /\.md$/i.test(f.name))
     const list = await Promise.all(
       files.map(async f => {
-        const path = `${memoDir}${sep}${f.name}`
+        const path = `${base}${f.name}`
         const text = await $.fs.read(path).catch(() => '')
         return toProject(f.name, path, f.mtimeMs, text)
       }),
@@ -74,8 +96,8 @@ async function openDetail($: EngineInterface, p: ProjectBoardProject, isFull: bo
 }
 
 export const register: Register = (on, options) => {
-  const memoDir = String(options.memoDir ?? '').trim().replace(/[\\/]+$/, '')
-  const vaultRoot = String(options.vaultRoot ?? '').trim()
+  const memoDir = folderOption(options.memoDir)
+  const vaultRoot = folderOption(options.vaultRoot)
   const vaultName = String(options.vaultName ?? '').trim()
 
   on('session.start', async ($, e, next) => {
@@ -136,7 +158,16 @@ export const register: Register = (on, options) => {
           ) : (
             p.path !== '' && <Code source={url ? `${p.path}\n${url}` : p.path} />
           )}
-          <Markdown key="body" text={detail.body} />
+          {(() => {
+            const links = fileLinks(detail.body)
+            if (links.length === 0) return <Markdown key="body" text={detail.body} />
+            // 256 本を超える時は全部のリンクを押しても何もしない側にする
+            return links.length <= 256 ? (
+              <Markdown key="body" text={detail.body} pressableLinks={links} onLinkPress={() => {}} />
+            ) : (
+              <Markdown key="body" text={detail.body} onLinkPress={() => {}} />
+            )
+          })()}
           {detail.more && <Button key="more" label="続きを読む" onPress={() => void openDetail($, p, true)} />}
         </Box>
       )
@@ -153,7 +184,13 @@ export const register: Register = (on, options) => {
         {loadedAt === 0 && <Text dimColor>読み込み中</Text>}
         {error !== '' && <Text color="red">{error}</Text>}
         {Svg ? (
-          <Svg source={freshnessSvg(shown, now)} alt={`鮮度: ${shown.map((p, i) => `${p.name} ${days[i]}日`).join('、')}`} />
+          <Svg
+            source={freshnessSvg(shown, now)}
+            alt={`鮮度: ${shown
+              .slice(0, FRESH_ROWS)
+              .map((p, i) => `${p.name} ${days[i]}日`)
+              .join('、')}${shown.length > FRESH_ROWS ? `、ほか ${shown.length - FRESH_ROWS} 件` : ''}`}
+          />
         ) : (
           <Text>{`鮮度 3日以内 ${count(-1, 3)} / 14日以内 ${count(3, 14)} / それ以上 ${count(14, Infinity)}`}</Text>
         )}

@@ -22,6 +22,8 @@ export type EditLogDetail =
   | { kind: 'loading' }
   | { kind: 'diff'; diff: string; isCut: boolean }
   | { kind: 'clean' }
+  /** 差分はあるが行の変化が無い (バイナリか、権限だけ) */
+  | { kind: 'meta' }
   | { kind: 'not-repo' }
   | { kind: 'error'; message: string }
 

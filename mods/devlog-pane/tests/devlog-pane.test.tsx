@@ -60,13 +60,18 @@ test('日付は JST の境界で切り替わる', () => {
 })
 
 test('長文は後ろ側を行頭から残し、前略を付ける', () => {
-  const lines = Array.from({ length: 2000 }, (_, i) => `line-${String(i).padStart(4, '0')}`)
+  const lines = Array.from({ length: 20000 }, (_, i) => `line-${String(i).padStart(5, '0')}`)
   const text = lines.join('\n')
   const out = fit(text)
-  expect(out.length).toBeLessThanOrEqual(10000)
+  // Markdown は 1 回の描画で 10 万字まで描ける
+  expect(out.length).toBeLessThanOrEqual(100000)
+  expect(out.length).toBeGreaterThan(90000)
   expect(out.startsWith(HEAD)).toBe(true)
-  expect(out.slice(HEAD.length)).toMatch(/^line-\d{4}\n/)
-  expect(out.endsWith('line-1999')).toBe(true)
+  expect(out.slice(HEAD.length)).toMatch(/^line-\d{5}\n/)
+  expect(out.endsWith('line-19999')).toBe(true)
+  // 1 万字を超えても 10 万字までは削らない
+  const mid = 'a'.repeat(50000)
+  expect(fit(mid)).toBe(mid)
   expect(fit('a\r\nb')).toBe('a\nb')
   expect(fit('短い')).toBe('短い')
 })

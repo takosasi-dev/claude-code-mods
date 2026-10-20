@@ -271,3 +271,96 @@ test('/dash でペインを開く', async ($, on) => {
   expect(opened).toEqual(['cc-dash:計器盤'])
   expect(r).toMatchObject({ text: '計器盤を開きました。' })
 })
+
+test('使用量タブ: 描画でファイルを読まず、ツールのたびに描き直さない', USAGE_FILE, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  let reads = 0
+  on('fs.read', () => {
+    reads++
+    return { value: usage(32) }
+  })
+  on('tool.call', () => ({ result: 'ok' }))
+  // 描画のたびに今のタブを読むので、その回数を描画の回数とみなす
+  let renders = 0
+  on('state.get', ($, e, next) => {
+    if (e.plugin === 'cc-dash' && e.key === 'tab') renders++
+    return next(e)
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'tab-usage' })
+  expect(await svgSource(ui, 'gauges')).toContain('>32%<')
+  const [readsBefore, rendersBefore] = [reads, renders]
+  for (let i = 0; i < 5; i++) await $.tool.call({ tool: 'Bash', command: `echo ${i}` })
+  expect(reads).toBe(readsBefore)
+  expect(renders).toBe(rendersBefore)
+  // 描き直し(開き直し)でも読まない
+  await ui.unmount()
+  const again = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgSource(again, 'gauges')).toContain('>32%<')
+  expect(reads).toBe(readsBefore)
+})
+
+for (const usageFile of ['usage.json', './usage.json', 'C:usage.json', 'C:']) {
+  test(`使用量: 絶対パスでなければ未設定と同じ扱い(${usageFile})`, { options: { usageFile } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    let reads = 0
+    on('fs.read', () => {
+      reads++
+      return { value: usage(10) }
+    })
+    const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+    await ui.press({ key: 'tab-usage' })
+    expect(await ui.find({ type: 'Text', text: /未設定/ })).toBeDefined()
+    expect(reads).toBe(0)
+  })
+}
+
+test('中断で終わった呼び出しはエラーに数えない(work-bar とそろえる)', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const last = spy(on)
+  on('tool.call', () => {
+    throw new Error('interrupted')
+  })
+  await $.tool.call({ tool: 'Bash', command: 'sleep 99' }).catch(() => {})
+  expect(last.errorCount ?? 0).toBe(0)
+  const calls = last.calls as CcDashCall[]
+  expect(calls[0]?.isError).toBe(false)
+  expect(calls[0]?.end).toBeDefined()
+})
+
+test('ターンの終わりで end の無い呼び出しを締める', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const last = spy(on)
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  // 答えが返ってこない呼び出し
+  on('tool.call', () => new Promise<never>(() => {}))
+  await $.turn.start({ text: 'p', turnId: 't1' })
+  void $.tool.call({ tool: 'Bash', command: 'hang' }).catch(() => {})
+  await clock.advance(3_000)
+  await $.turn.complete({ answer: 'a', durationMs: 3_000, isAborted: true, turnId: 't1', reason: 'aborted' })
+  const calls = last.calls as CcDashCall[]
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.end).toBe(NOW + 3_000)
+  expect(calls[0]?.isError).toBe(false)
+})
+
+test('ツール名とモデル名の制御文字を落とす(SVG と Text)', USAGE_FILE, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const bad = `mcp__x__to${String.fromCharCode(7)}ol${String.fromCharCode(27)}`
+  on('fs.read', () => ({
+    value: JSON.stringify({ sessionPct: 1, weeklyPct: 2, modelName: `Fa${String.fromCharCode(8)}ble`, modelPct: 3 }),
+  }))
+  on('tool.call', () => ({ result: 'ok' }))
+  await $.tool.call({ tool: bad, command: 'x' } as never)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-tools' })
+    if (surface === 'vscode') expect(await svgSource(ui, 'tool-bars')).toContain('>tool<')
+    else expect((await ui.find({ type: 'Text', text: /^tool / }))?.text).toBe('tool 1')
+    await ui.press({ key: 'tab-usage' })
+    if (surface === 'vscode') expect(await svgSource(ui, 'gauges')).toContain('Fable 週')
+    else expect(await ui.find({ type: 'Text', text: /^Fable 週/ })).toBeDefined()
+    await ui.unmount()
+  }
+})

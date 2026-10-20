@@ -22,8 +22,13 @@ const MID = 190
 const HALF = 170
 const MONO = 'ui-monospace, Consolas, monospace'
 
-// core.quotePath=false でも " や \ を含む名前は C の文字列の形で囲まれる
-const unquote = (s: string) => {
+/** 制御文字を落とす (タブと改行は残す)。エンジンは制御文字を含む Text・alt を描かない */
+export const plain = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
+// core.quotePath=false でも " や \ や制御文字を含む名前は C の文字列の形で囲まれる。
+// 戻すと \b などが本物の制御文字になるので、表示用に落とす
+const unquote = (s: string) => plain(rawUnquote(s))
+const rawUnquote = (s: string) => {
   if (!(s.length > 1 && s.startsWith('"') && s.endsWith('"'))) return s
   try {
     return JSON.parse(s) as string
@@ -43,10 +48,10 @@ function parseHead(line: string) {
     behind = Number(/behind (\d+)/.exec(m[1] ?? '')?.[1] ?? 0)
   }
   const fresh = /^(?:No commits yet on|Initial commit on) (.+)$/.exec(s)
-  if (fresh) return { branch: fresh[1] ?? '', upstream: '', ahead, behind }
+  if (fresh) return { branch: plain(fresh[1] ?? ''), upstream: '', ahead, behind }
   if (s.startsWith('HEAD (no branch)')) return { branch: '(切り離し HEAD)', upstream: '', ahead, behind }
   const [branch = '', upstream = ''] = s.split('...')
-  return { branch, upstream, ahead, behind }
+  return { branch: plain(branch), upstream: plain(upstream), ahead, behind }
 }
 
 /**
@@ -90,7 +95,7 @@ export function toRepo(status: string, unstaged: string, staged: string, log: st
   const commits: GitPaneCommit[] = []
   for (const line of log.split(/\r?\n/)) {
     const [hash, ct, ...subject] = line.split('\t')
-    if (hash && ct) commits.push({ hash, time: Number(ct) * 1000, subject: subject.join('\t') })
+    if (hash && ct) commits.push({ hash, time: Number(ct) * 1000, subject: plain(subject.join('\t')) })
   }
   return { ...head, files, commits }
 }
@@ -138,7 +143,7 @@ export function headFit(s: string, max: number) {
   return `${out}…`
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const esc = (s: string) => plain(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const base = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
 const sum = (r: Repo) => ({
   files: r.files.length,
@@ -163,10 +168,14 @@ function messageSvg(title: string, color: string, sub: string, hint: string) {
   )
 }
 
+const UNSAFE = 'git が所有者の確認で止めました'
+const UNSAFE_HINT = 'git config の safe.directory に入れると読めます'
+
 /** ペインに出す SVG 1 枚 */
 export function paneSvg(snap: GitPaneSnapshot, now: number) {
   if (snap.kind === 'idle') return messageSvg('読み込み中', C.blue, '', '「再読込」で git の様子を読みます')
   if (snap.kind === 'not-repo') return messageSvg('git のフォルダではありません', C.yellow, snap.cwd, 'git のリポジトリの中で開くと表示されます')
+  if (snap.kind === 'unsafe') return messageSvg(UNSAFE, C.yellow, snap.cwd, UNSAFE_HINT)
   if (snap.kind === 'error') return messageSvg('git を実行できません', C.red, snap.message, 'git が入っているか確かめてください')
 
   const t = sum(snap)
@@ -274,13 +283,19 @@ export function paneSvg(snap: GitPaneSnapshot, now: number) {
   return svgDoc(y + 8, s)
 }
 
-/** Svg の alt と terminal で使う文の行 */
-export function paneLines(snap: GitPaneSnapshot, now: number): { text: string; color?: string; isDim?: boolean; isBold?: boolean }[] {
+type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }
+
+/** Svg の alt と terminal で使う文の行。制御文字を落とす (タブと改行は空白に) */
+export const paneLines = (snap: GitPaneSnapshot, now: number): Line[] =>
+  rawLines(snap, now).map(l => ({ ...l, text: plain(l.text).replace(/[\t\r\n]/g, ' ') }))
+
+function rawLines(snap: GitPaneSnapshot, now: number): Line[] {
   if (snap.kind === 'idle') return [{ text: '読み込み中', isDim: true }]
   if (snap.kind === 'not-repo') return [{ text: 'git のフォルダではありません', color: 'yellow' }, { text: snap.cwd, isDim: true }]
+  if (snap.kind === 'unsafe') return [{ text: UNSAFE, color: 'yellow' }, { text: snap.cwd, isDim: true }, { text: UNSAFE_HINT, isDim: true }]
   if (snap.kind === 'error') return [{ text: `git を実行できません: ${snap.message}`, color: 'red' }]
   const t = sum(snap)
-  const lines: { text: string; color?: string; isDim?: boolean; isBold?: boolean }[] = [
+  const lines: Line[] = [
     { text: `ブランチ ${snap.branch}${snap.upstream ? ` ↑${snap.ahead} ↓${snap.behind}` : ' (上流なし)'}`, isBold: true },
     { text: `変更 ${t.files} ファイル +${t.add} -${t.del}` },
   ]

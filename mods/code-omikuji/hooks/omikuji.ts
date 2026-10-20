@@ -209,6 +209,26 @@ export function fortune(date: string, n = 0): OmikujiResult {
   }
 }
 
+// ── store の中身は信用しない (古い版・手で書き換えた値で「第undefined番」や描画失敗にしない)
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const TEXT_KEYS = ['words', 'language', 'command', 'bug', 'review', 'lost', 'warning', 'commit'] as const
+const isRank = (r: unknown): r is OmikujiRank => RANK_NAMES.includes(r as OmikujiRank)
+const isDate = (d: unknown): d is string => typeof d === 'string' && DATE_RE.test(d)
+
+/** 運勢として形が揃っているか (rank は 7 つの名前、number は 1〜100 の整数、文字の項目は全部 string) */
+export function isResult(v: unknown): v is OmikujiResult {
+  if (typeof v !== 'object' || v === null) return false
+  const o = v as Record<string, unknown>
+  const n = o.number
+  return isDate(o.date) && isRank(o.rank) && Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 100 && TEXT_KEYS.every(k => typeof o[k] === 'string')
+}
+
+/** store の直近の日のうち、形の合う物だけ */
+export const toDays = (v: unknown): OmikujiDay[] =>
+  Array.isArray(v)
+    ? v.filter((d): d is OmikujiDay => typeof d === 'object' && d !== null && isDate(d.date) && isRank(d.rank)).map(d => ({ date: d.date, rank: d.rank }))
+    : []
+
 /** JST の日付 `YYYY-MM-DD` (Date のタイムゾーンに頼らない) */
 export const jstDate = (ms: number) => new Date(ms + 9 * 3600_000).toISOString().slice(0, 10)
 

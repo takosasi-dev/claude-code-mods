@@ -31,6 +31,9 @@ const W = 380
 
 const zero = (): Record<TodoKind, number> => ({ FIXME: 0, TODO: 0, HACK: 0, XXX: 0 })
 
+/** 制御文字を落とす (タブと改行は残す)。エンジンは制御文字を含む Text・alt を描かない */
+export const plain = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
 /** `git grep -n -z` の出力 (`ファイル\0行\0本文\n` の並び) から表示用のデータを作る */
 export function parseGrep(out: string, limit = LIMIT): Omit<Repo, 'kind' | 'cwd' | 'isCut' | 'loadedAt'> {
   const counts = zero()
@@ -38,9 +41,11 @@ export function parseGrep(out: string, limit = LIMIT): Omit<Repo, 'kind' | 'cwd'
   const items: TodoItem[] = []
   let total = 0
   for (const raw of out.split('\n')) {
-    const [path = '', ln = '', ...rest] = raw.split('\0')
+    const [rawPath = '', ln = '', ...rest] = raw.split('\0')
+    // -z なので名前は囲まれずに来る。表示と入力欄の文にしか使わないので、ここで制御文字を落とす
+    const path = plain(rawPath)
     if (path === '' || rest.length === 0) continue
-    const text = rest.join(' ').replace(/\r$/, '')
+    const text = plain(rest.join(' ').replace(/\r$/, ''))
     const kind = KIND_RE.exec(text)?.[1] as TodoKind | undefined
     if (!kind) continue
     total++
@@ -99,7 +104,7 @@ export function headFit(s: string, max: number) {
   return `${out}…`
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const esc = (s: string) => plain(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const base = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
 
 const svgDoc = (h: number, body: string) =>
@@ -262,8 +267,8 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
 /** Svg の alt と terminal で使う文の行 */
 export function paneLines(snap: TodoSnapshot, history: readonly TodoPoint[]): Line[] {
   if (snap.kind === 'idle') return [{ text: '読み込み中', isDim: true }]
-  if (snap.kind === 'not-repo') return [{ text: 'git のフォルダでだけ使えます', color: 'yellow' }, { text: snap.cwd, isDim: true }]
-  if (snap.kind === 'error') return [{ text: `git grep を実行できません: ${snap.message}`, color: 'red' }]
+  if (snap.kind === 'not-repo') return [{ text: 'git のフォルダでだけ使えます', color: 'yellow' }, { text: plain(snap.cwd), isDim: true }]
+  if (snap.kind === 'error') return [{ text: plain(`git grep を実行できません: ${snap.message}`), color: 'red' }]
   const lines: Line[] = [
     { text: `合計 ${snap.total} 件`, isBold: true },
     { text: KINDS.map(k => `${k} ${snap.counts[k]}`).join(' / ') },

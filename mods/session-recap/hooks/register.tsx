@@ -56,10 +56,15 @@ const whyNot = (r: ModelForkResult): string => {
 }
 
 const summarize = async ($: $, upTo?: RecapTurn) => {
-  if ((await read($, summaryA)).status === 'running') return
   const at = await $.clock.now()
   const scope = upTo ? `${hm(upTo.start)} のターンまで` : 'ここまで'
-  await update($, summaryA, () => ({ status: 'running', text: '', scope, at }))
+  // 二度押し: running を自分で取れた時だけ fork する (update は衝突でやり直すので旗は毎回決め直す)
+  let isMine = false
+  await update($, summaryA, (s): RecapSummary => {
+    isMine = s.status !== 'running'
+    return isMine ? { status: 'running', text: '', scope, at } : s
+  })
+  if (!isMine) return
   await update($, noticeA, () => '')
   let r: ModelForkResult
   try {
@@ -98,6 +103,8 @@ export const register: Register = on => {
     }
     const now = await $.clock.now()
     await update($, startedA, v => v || now)
+    // 要約の途中でリロードすると答えを受け取る先が無くなるので、running のまま残さない
+    await update($, summaryA, (s): RecapSummary => (s.status === 'running' ? { ...s, status: 'failed', text: '途中で止まりました' } : s))
     // 経過の分と実行中の帯が動くので 1 分ごとに描き直す
     $.clock.every(60_000, () => $.ui.invalidate('ui.render'))
     return next(e)
@@ -128,6 +135,9 @@ export const register: Register = on => {
       const { name, args } = e.command
       const at = await $.clock.now()
       await update($, pendingA, () => ({ name, args, at }))
+    } else if (!e.command && e.turnId === undefined) {
+      // 普通の依頼: 前に見たコマンドがターンを起こさなかったなら、ここで忘れる
+      await update($, pendingA, () => null)
     }
     return next(e)
   }).catch(($, e, next) => next(e))

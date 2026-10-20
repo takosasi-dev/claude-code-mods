@@ -3,10 +3,22 @@ import type { ModHubCommand, ModHubMod } from '../types'
 
 export const SELF = 'mod-hub'
 
+/** 外から来る文字列(説明・版)の制御文字を落とす。エンジンは制御文字を含む Text の子や alt を拒み、ペインが閉じる */
+export const clean = (s: string) => s.replace(/[\t\n\r]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, '').trim()
+
 /** 画面を持つ mod: ペインを開くか、何かを描く */
 export const isGui = (events: readonly string[], calls: readonly string[]) => calls.includes('ui.open') || events.includes('ui.render')
 
-export type Launcher = { name: string; version: string; commands: ModHubCommand[] }
+/** plugin.register の next(e) の結果が allow の時だけ記録する物を返す(後ろの mod に拒まれた mod は並べない) */
+export function noteMod(
+  e: { name: string; version?: string; uses: { events: readonly string[]; calls: readonly string[] } },
+  result: { allow?: true; refuse?: string },
+): ModHubMod | undefined {
+  if (result.allow !== true) return undefined
+  return { name: e.name, version: clean(e.version ?? ''), isGui: isGui(e.uses.events, e.uses.calls) }
+}
+
+export type Launcher ={ name: string; version: string; commands: ModHubCommand[] }
 
 const baseName = (plugin: string) => plugin.split('@')[0] ?? plugin
 

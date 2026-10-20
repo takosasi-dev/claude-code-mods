@@ -1,4 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
 
 const NOW = Date.parse('2026-10-03T07:15:00Z')
 const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
@@ -30,9 +32,24 @@ const usage = (sessionPct: number) =>
 
 const FILE = { options: { usageFile: '/tmp/demo/usage.json' } }
 
+// ペインを開く求めに答える
+const allowOpen = (on: On) => on('ui.open', () => ({ value: { isPlaced: true } }))
+
+// /usage-pane で開く(ここでファイルを読む)
+const openPane = async ($: Engine) => {
+  await $.command.run({
+    command: 'usage-pane',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 120 },
+  })
+}
+
 test('3 本のバーと残り時間・取得時刻を全画面種で描く', FILE, async ($, on) => {
   mock.clock(on, { now: NOW })
   on('fs.read', () => ({ value: usage(85) }))
+  allowOpen(on)
+  await openPane($)
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: '85%' }))?.props.color).toBe('red')
@@ -49,6 +66,8 @@ test('3 本のバーと残り時間・取得時刻を全画面種で描く', FIL
 test('model 系が無ければ 2 本だけ', FILE, async ($, on) => {
   mock.clock(on, { now: NOW })
   on('fs.read', () => ({ value: JSON.stringify({ sessionPct: 10, weeklyPct: 20 }) }))
+  allowOpen(on)
+  await openPane($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.findAll({ type: 'Text', text: /%$/ })).toHaveLength(2)
 })
@@ -57,8 +76,10 @@ test('ファイルが無い・壊れているときは dim の説明文', FILE, 
   mock.clock(on, { now: NOW })
   let text = '{ broken'
   on('fs.read', () => (text === '' ? { deny: 'ENOENT' } : { value: text }))
-  for (const body of ['{ broken', '', '{"sessionPct":"x"}']) {
+  allowOpen(on)
+  for (const body of ['{ broken', '', '{"sessionPct":"x"}', 'null']) {
     text = body
+    await openPane($)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     const el = await ui.find({ type: 'Text', text: /読めません/ })
     expect(el?.props.dimColor).toBe(true)
@@ -79,6 +100,26 @@ test('30 秒ごとに読み直して描き直す', FILE, async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '40%' })).toBeDefined()
 })
 
+test('描画ではファイルを読まない(読むのはタイマーとコマンド)', FILE, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  let reads = 0
+  on('fs.read', () => {
+    reads++
+    return { value: usage(32) }
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '', surface: 'terminal', isInteractive: true })
+  const afterStart = reads
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: '32%' })).toBeDefined()
+    await ui.unmount()
+  }
+  expect(reads).toBe(afterStart)
+  await clock.advance(30_000)
+  expect(reads).toBe(afterStart + 1)
+})
+
 test('ファイルが未設定なら読まずに設定のしかたを出す', async ($, on) => {
   mock.clock(on, { now: NOW })
   let reads = 0
@@ -86,7 +127,25 @@ test('ファイルが未設定なら読まずに設定のしかたを出す', as
     reads++
     return { value: '{}' }
   })
+  allowOpen(on)
+  await openPane($)
   const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
   expect((await ui.find({ type: 'Text' }))?.text).toMatch(/未設定/)
   expect(reads).toBe(0)
 })
+
+for (const usageFile of ['usage.json', './usage.json', 'C:usage.json', 'C:']) {
+  test(`絶対パスでなければ未設定と同じ扱い(${usageFile})`, { options: { usageFile } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    let reads = 0
+    on('fs.read', () => {
+      reads++
+      return { value: usage(10) }
+    })
+    allowOpen(on)
+    await openPane($)
+    const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+    expect((await ui.find({ type: 'Text' }))?.text).toMatch(/未設定/)
+    expect(reads).toBe(0)
+  })
+}

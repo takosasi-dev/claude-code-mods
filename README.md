@@ -13,13 +13,13 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | mod-hub | `/mod` | 画面のある mod(ペインや帯を出す物)を開くボタンを並べる |
 | cc-dash | `/dash` | セッションの計器盤。経過・ターン・ツール・エラーのタイル、ターンの所要時間の棒グラフ、ツールのタイムライン、使用量のリング型ゲージ |
 | work-bar | 入力欄の上に自動で出る | 作業中は経過時間・今のツール・流れる光の帯。待ち中は前のターンのまとめと定型文のボタン |
-| aqua-pet | `/aquarium` | 作業に反応する水槽。ターンを重ねると魚が増え、エラーで赤く震える。えさ・名前・掃除のボタン |
+| aqua-pet | `/aquarium` | 作業に反応する水槽。ターンを重ねると魚が増え、エラーで赤く震える。えさ・名前・掃除のボタン。水の色は日本時間の朝・昼・夕・夜で変わる |
 | project-board | `/projects` | フォルダに並んだ引き継ぎメモ(*.md)の鮮度グラフと一覧・詳細 |
 | git-pane | `/git` | 今のフォルダの git の様子。ブランチ・変更行数の差分バー・直近コミット。git には書き込まない |
 | token-meter | `/tokens` | ターンごとのトークンの積み上げ棒とキャッシュの当たり率 |
 | focus-timer | `/focus-timer` | ポモドーロ。減っていくリングと今日の本数 |
 | session-recap | `/session-recap` | セッションのふりかえり。ターンの帯のタイムラインと、押した時だけ作る要約 |
-| edit-log | `/edits` | このセッションで Claude が変えたファイルの時系列。押すと git の差分(HEAD と比べる)と「レビューして」 |
+| edit-log | `/edits` | このセッションで Claude が Edit / Write などの編集ツールで変えたファイルの時系列。押すと git の差分(HEAD と比べる)と「レビューして」 |
 | todo-board | `/todos` | 今のフォルダの TODO / FIXME / HACK / XXX の件数・推移・一覧。押すと「片付けて」 |
 | test-runner | `/testrun` | 設定したテストのコマンドをボタンで走らせる。信号と直近 20 回の結果、失敗したら「直して」 |
 | prompt-book | `/prompts` | よく使う依頼文を保存して、ボタンで入力欄へ。タグ・使った回数・並び替え |
@@ -59,6 +59,8 @@ claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
 
 mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけです。mod-hub を最初に入れてください。
 
+コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub` のように mod の名前のコマンドになります。
+
 ## 設定が要る mod
 
 次の mod は、読むファイルやフォルダを設定するまで「未設定」と表示します。`/config` で入れるか、`~/.claude/settings.json` の `pluginConfigs` に書きます。
@@ -70,6 +72,7 @@ mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけで�
 | project-board | `vaultRoot` / `vaultName` | Obsidian の vault の根と名前(入れると「Obsidian で開く」が出る) |
 | devlog-pane | `logDir` | YYYY-MM-DD.md(日付は日本時間)が並ぶフォルダ |
 | test-runner | `testCommand` | テストのコマンド(例 `npm test`。シェルを通さず空白で区切る) |
+| test-runner | `timeoutSeconds` | 時間の上限(秒、既定 300) |
 
 ```json
 "pluginConfigs": {
@@ -78,6 +81,8 @@ mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけで�
   }
 }
 ```
+
+キーは入れ方で変わります。マーケットプレイスから入れた時は `<mod>@claude-code-mods`、`--plugin-dir` や `CLAUDE_CODE_PLUGIN_DIRS` でフォルダを読ませている時は `<mod>` です。パスは絶対パスで書いてください(相対パスは未設定と同じ扱いです)。
 
 使用量の JSON はほかのツールで書き出す前提です。形は次のとおりです(`model*` は無くても動きます)。
 

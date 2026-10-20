@@ -39,9 +39,13 @@ const boot = async ($: Engine, on: On, init?: unknown) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  on('tool.call', (_$, e) => ((e as unknown as { command?: string }).command === 'fail' ? { isError: true as const, result: 'x', text: 'x' } : { result: 'ok' as never }))
+  on('tool.call', (_$, e) => {
+    const command = (e as unknown as { command?: string }).command
+    if (command === 'deny') return { deny: '断りました' } as never
+    return command === 'fail' ? { isError: true as const, result: 'x', text: 'x' } : { result: 'ok' as never }
+  })
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
-  return { clock, toasts, saved: () => fromSaved(m.get('save')) }
+  return { clock, toasts, saved: () => fromSaved(m.get('save')), raw: () => m.get('save') }
 }
 
 let n = 0
@@ -50,7 +54,8 @@ const turn = async ($: Engine, opts: { agentId?: string; isAborted?: boolean; fa
   const agent = opts.agentId ? { agentId: opts.agentId } : {}
   await $.turn.start({ text: 'p', turnId, ...agent })
   if (opts.fail) await $.tool.call({ tool: 'Bash', command: 'fail', ...agent } as never)
-  await $.turn.complete({ answer: 'a', durationMs: 1000, isAborted: opts.isAborted ?? false, turnId, reason: 'answer', ...agent } as never)
+  const isAborted = opts.isAborted ?? false
+  await $.turn.complete({ answer: 'a', durationMs: 1000, isAborted, turnId, reason: isAborted ? 'aborted' : 'answer', ...agent } as never)
 }
 
 /** SR 以上を引いた枚数 (図鑑から数える) */
@@ -241,4 +246,53 @@ test('/gacha を登録して開く。取れなければ /turn-gacha', async ($, 
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
   expect((await $.command.run({ command: 'turn-gacha', ...run })).text).toBe('ガチャを開きました。')
   expect(opened).toBe('turn-gacha')
+})
+
+test('/gacha が取れなかった時は、元の /gacha を横取りしない', async ($, on) => {
+  mock.store(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => (e.name === 'gacha' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
+  const opened: string[] = []
+  on('ui.open', (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true as const } }
+  })
+  on('command.run', { command: 'gacha' }, () => ({ text: '組み込みの gacha' }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'gacha', ...run })).toMatchObject({ text: '組み込みの gacha' })
+  expect(opened).toEqual([])
+})
+
+test('同時に押しても 1 枚も消えず、手動は 1 日 3 回を超えない。ターン終わりと重なっても数が合う', async ($, on) => {
+  const { saved } = await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await Promise.all([ui.press({ key: 'pull' }), ui.press({ key: 'pull' }), ui.press({ key: 'pull' }), ui.press({ key: 'pull' })])
+  expect(saved()).toMatchObject({ total: 3, manualUsed: 3 })
+  expect(Object.values(saved().book).reduce((k, v) => k + v.count, 0)).toBe(3)
+  await Promise.all([turn($), turn($)])
+  expect(saved().total).toBe(5)
+})
+
+test('エラー・拒否で終わったターンは引かない。断られたツール (deny) はエラーに数えない', async ($, on) => {
+  const { saved } = await boot($, on)
+  await $.turn.start({ text: 'p', turnId: 'e1' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'e1', reason: 'error' } as never)
+  await $.turn.start({ text: 'p', turnId: 'e2' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'e2', reason: 'refusal', refusal: {} } as never)
+  expect(saved().total).toBe(0)
+  await $.turn.start({ text: 'p', turnId: 'd1' })
+  await $.tool.call({ tool: 'Bash', command: 'deny' } as never)
+  await $.turn.complete({ answer: 'a', durationMs: 1, isAborted: false, turnId: 'd1', reason: 'answer' } as never)
+  expect(saved().total).toBe(1)
+  expect(saved().history[0]?.isClean).toBe(true)
+})
+
+test('store が読めない形なら書かずに知らせる', async ($, on) => {
+  const { raw } = await boot($, on, 'broken')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await turn($)
+  await ui.press({ key: 'pull' })
+  expect(raw()).toBe('broken')
+  expect(await ui.find({ type: 'Text', text: /記録を読めなかった/ })).toBeDefined()
 })

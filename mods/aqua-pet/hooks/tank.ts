@@ -19,7 +19,7 @@ export const fishCount = (turns: number) => (turns < 5 ? 1 : Math.min(8, 2 + Mat
 export const fullnessAt = (t: AquaTank, now: number) =>
   clamp(t.fullness - (Math.max(0, now - t.fedAt) / HOUR) * HUNGER_PER_HOUR, 0, 100)
 
-/** JST の時刻帯 (Date のタイムゾーンに頼らない) */
+/** 日本時間 (JST, UTC+9) 固定の時刻帯。動いている環境のタイムゾーンには頼らない */
 export const periodAt = (now: number): AquaPeriod => {
   const h = Math.floor(now / HOUR + 9) % 24
   return h >= 5 && h < 10 ? '朝' : h >= 10 && h < 16 ? '昼' : h >= 16 && h < 19 ? '夕' : '夜'

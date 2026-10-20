@@ -1,6 +1,6 @@
 {
   "name": "devlog-pane",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/devlog で今日の開発ログ (YYYY-MM-DD.md) をペインに表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

@@ -2,7 +2,10 @@ import type { WorkBarLast } from '../types'
 
 const FONT = 'font-family="sans-serif"'
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// 制御文字を落とす(エンジンは制御文字を含む Text の子や alt を拒み、SVG も壊れる)
+const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+
+const esc = (s: string) => s.replace(CONTROL, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 // 1:23 / 1:02:03
 export const clock = (sec: number) => {
@@ -13,7 +16,12 @@ export const clock = (sec: number) => {
 }
 
 // 長い MCP 名などは頭を残して切る
-export const short = (name: string, max = 26) => (name.length > max ? `${name.slice(0, max - 3)}...` : name)
+export const clean = (s: string) => s.replace(CONTROL, '')
+
+export const short = (raw: string, max = 26) => {
+  const name = clean(raw)
+  return name.length > max ? `${name.slice(0, max - 3)}...` : name
+}
 
 // 経過で帯の色: 120 秒まで青、300 秒まで黄、超えたら赤
 export const flowColor = (sec: number) => (sec > 300 ? '#f85149' : sec > 120 ? '#d29922' : '#58a6ff')

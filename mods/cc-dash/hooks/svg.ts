@@ -20,8 +20,11 @@ export const TOOL_COLORS = [C.blue, C.green, C.purple, C.orange, C.yellow]
 const W = 360
 const FONT = 'font-family="sans-serif"'
 
+/** 制御文字を落とす。エンジンは制御文字を含む Text の子や alt を拒み、SVG も壊れる */
+export const clean = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
 export const esc = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 2)}..` : s)
 

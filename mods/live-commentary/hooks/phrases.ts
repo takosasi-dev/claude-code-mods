@@ -20,9 +20,11 @@ export type Scene =
   | 'ten'
   | 'end'
   | 'abort'
+  /** ターンがエラーや拒否で終わった */
+  | 'fail'
   | 'long'
 
-export const SCENES: readonly Scene[] = ['start', 'shell', 'edit', 'write', 'read', 'search', 'web', 'agent', 'other', 'error', 'streak', 'comeback', 'ten', 'end', 'abort', 'long']
+export const SCENES: readonly Scene[] = ['start', 'shell', 'edit', 'write', 'read', 'search', 'web', 'agent', 'other', 'error', 'streak', 'comeback', 'ten', 'end', 'abort', 'fail', 'long']
 
 /** 場面ごとのログの色の種類 */
 export const KIND: Record<Scene, LiveCommentaryKind> = {
@@ -41,6 +43,7 @@ export const KIND: Record<Scene, LiveCommentaryKind> = {
   ten: 'cheer',
   end: 'whistle',
   abort: 'whistle',
+  fail: 'error',
   long: 'whistle',
 }
 
@@ -151,6 +154,13 @@ export const PHRASES: Record<Style, Record<Scene, readonly string[]>> = {
       '試合が止められた!ベンチの指示だ!',
       'ここでストップ!{time}で一旦終了!',
       'まさかの打ち切り!仕切り直しだ!',
+    ],
+    fail: [
+      'ああっと、ここで試合が止まった!エラーで幕切れだ!',
+      'なんということだ!{time}の攻防はエラーで終わった!',
+      '無念!決着つかずのまま終了!',
+      'まさかの幕切れ!この試合、ノーゲームです!',
+      'ここで打ち止め!次の試合で雪辱を!',
     ],
     long: [
       '{time}の長丁場、ついに決着!',
@@ -266,6 +276,13 @@ export const PHRASES: Record<Style, Record<Scene, readonly string[]>> = {
       '中断です。仕切り直しでしょう。',
       '{time}で止められました。',
     ],
+    fail: [
+      'エラーでターンが終わりました。',
+      '{time}でしたが、決着はつきませんでした。',
+      'ここで終了です。結果はエラーでした。',
+      '答えが出ないまま終わりました。',
+      'エラーで止まりました。立て直しが必要です。',
+    ],
     long: [
       '{time}の長いターンが終わりました。',
       '{time}かかりましたが、完了です。',
@@ -380,6 +397,13 @@ export const PHRASES: Record<Style, Record<Scene, readonly string[]>> = {
       '{time}でストップや!',
       'いったん休憩やな!',
     ],
+    fail: [
+      'あかん、エラーで終わってもうた!',
+      '{time}粘ったのに、エラーで幕切れや!',
+      'なんでやねん!決着つかへんかった!',
+      'ここで終わりかいな!エラーやで!',
+      'しゃあない、次で取り返そ!',
+    ],
     long: [
       '{time}も粘ったで!ようやく決着や!',
       '長かったなあ!{time}の大勝負や!',
@@ -410,11 +434,14 @@ export function sceneOf(tool: string): Scene {
   return 'other'
 }
 
+/** 制御文字を落とす (Text の子や SVG に入るとペインが閉じる)。タブと改行は空白に */
+export const clean = (s: string) => s.replace(/[\t\n\r]/g, ' ').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
 /** ツールの入力から、触っているファイルの名前 (フォルダは落とす)。無ければ「ファイル」 */
 export function fileOf(input: Record<string, unknown>): string {
   for (const k of ['file_path', 'notebook_path', 'path']) {
     const v = input[k]
-    if (typeof v === 'string' && v.trim() !== '') return v.split(/[\\/]/).filter(Boolean).pop() ?? v
+    if (typeof v === 'string' && v.trim() !== '') return clean(v.split(/[\\/]/).filter(Boolean).pop() ?? v)
   }
   return 'ファイル'
 }

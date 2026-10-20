@@ -1,7 +1,8 @@
-import type { Register } from 'claude-code'
+import type { On, Register } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
-import { headerSvg, isGui, launchers } from '../hooks/hub'
+import { clean, headerSvg, isGui, launchers, noteMod } from '../hooks/hub'
 
 const SURFACES = ['vscode', 'terminal'] as const
 const PANE = {
@@ -20,6 +21,13 @@ const PANE = {
 
 // テストから打つコマンドの決まった部分
 const RUN = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+
+// セッションを始めて /mod を持たせる(/mod を開けるのは持てた時だけ)
+const start = async ($: Engine, on: On) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+}
 
 // mod-hub より後に読み込まれる試しの mod: ペインを開く物・帯を描く物・画面を持たない物
 const pane: Register = on => {
@@ -94,6 +102,7 @@ for (const surface of SURFACES) {
       ran.push(e.command)
       return { text: 'opened' }
     })
+    await start($, on)
     const r = await $.command.run({ command: 'mod', ...RUN })
     expect(r.text).toBe('mod の一覧を開きました。')
     expect(opened).toBe('mod-hub')
@@ -125,4 +134,38 @@ test('起動時に /mod を登録し、拒まれたら /mod-hub にする', asyn
   isTaken = true
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['mod', 'mod', 'mod-hub'])
+})
+
+// テストの道具は、読み込みを拒まれた mod があるとテストを落とすので、記録の判断は純関数で確かめる
+test('後ろの mod に拒まれた mod は並べない(next(e) が allow の時だけ記録)', () => {
+  const e = { name: 'band-mod', version: '1.0.0\x07', uses: { events: ['ui.render'], calls: [] } }
+  expect(noteMod(e, { refuse: '試しに拒む' })).toBeUndefined()
+  expect(noteMod(e, { allow: true })).toEqual({ name: 'band-mod', version: '1.0.0', isGui: true })
+})
+
+test('説明と版の制御文字を落として描く(木が拒まれない)', PLUGINS, async ($, on) => {
+  const BAD = '\x07試しの\x1b[31mペイン\x00'
+  on('command.list', () => ({
+    value: [{ name: 'pane-open', description: BAD, source: 'plugin', plugin: 'pane-mod' }],
+  }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await start($, on)
+  await $.command.run({ command: 'mod', ...RUN })
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: '試しの[31mペイン' })).toBeDefined()
+    await ui.unmount()
+  }
+  expect(clean('1.0.0\b\t\n')).toBe('1.0.0')
+})
+
+test('/mod を持てなかった時は /mod を横取りしない', async ($, on) => {
+  on('command.list', () => ({ value: [] }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => (e.name === 'mod' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
+  on('command.run', { command: 'mod' }, () => ({ text: '組み込みの /mod' }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  expect((await $.command.run({ command: 'mod', ...RUN })).text).toBe('組み込みの /mod')
+  expect((await $.command.run({ command: 'mod-hub', ...RUN })).text).toBe('mod の一覧を開きました。')
 })

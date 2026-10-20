@@ -14,6 +14,8 @@ export type GitPaneCommit = { hash: string; subject: string; /** コミット時
 export type GitPaneSnapshot =
   | { kind: 'idle' }
   | { kind: 'not-repo'; cwd: string }
+  /** git が所有者の確認 (safe.directory) で止めた */
+  | { kind: 'unsafe'; cwd: string }
   | { kind: 'error'; cwd: string; message: string }
   | {
       kind: 'repo'

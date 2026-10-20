@@ -73,7 +73,8 @@ on('session.start', async ($, e, next) => {
 - `userConfig` の既定値に、作者の環境のパスや名前を入れません。既定値は空文字にします
 - 空のときは画面に「未設定」と設定のしかた(`/config` でどの項目を入れるか)を出します
 - **空を「今のフォルダ」と読みません。** `$.fs` は相対パスを今のフォルダから読むので、空文字のまま読みに行かないようにします
-- 自分の環境の値は `~/.claude/settings.json` の `pluginConfigs` に入れます
+- 自分の環境の値は `~/.claude/settings.json` の `pluginConfigs` に入れます。キーは、マーケットプレイスから入れた時は `<mod>@<marketplace>`、フォルダを読ませている時は `<mod>` です
+- パスは絶対パスだけを受け付け、相対パスや `C:` のようなドライブだけの値は未設定と同じに扱います
 
   ```json
   "pluginConfigs": {
@@ -100,6 +101,17 @@ claude plugin validate mods/<名前>   # マニフェストとフックの読み
 claude plugin test mods/<名前>       # tests/*.test.tsx を走らせる
 ```
 
+各 mod の `tsconfig.json` は、エンジンが mod を読み込んだ時に置く `.claude-plugin/types/tsconfig.json` を継いでいます。clone した直後は一度 Claude Code に読み込ませてから `tsc -p mods/<名前>` を使ってください。
+
 - テストは `vscode` と `terminal` の両方で mount し、主な要素が描かれることと、ボタンを押すと値が変わることを確かめます
 - Windows では、エンジンが `/tmp/...` のようなパスを `<ドライブ>:\tmp\...` に直してから `fs` に渡します。テストの仮のファイル置き場は、区切りとドライブ名をそろえて比べます
 - `plugin.register` イベントで見えるのは、自分より後に読み込まれる mod だけです(mod-hub はこれを使っています)
+
+## 9. 落とし穴
+
+- `$.store` はプラグインごとに 1 つで、同時に開いた複数のセッションが共有します。セッション開始時に読んだ写しを丸ごと書き戻すと、もう一方の進み具合が消えます。書く直前に読み直し、増えた分だけを足します
+- コマンドの名前が拒まれて予備の名前にした時は、元の名前の `command.run` に `next(e)` を返します。返さないと、同じ名前の別のコマンドを横取りします
+- 制御文字を含む文字列を Text の子や Svg の `alt` に入れると、エンジンは木ごと拒みます。外から来る文字列は先に制御文字を落とします
+- `$.prompt.fill` の `mode: 'replace'` は入力欄の下書きを消します。`insert` を使います
+- git を読むだけでも `.git/index` は書き直されます。`git status` は `GIT_OPTIONAL_LOCKS=0` で止まりますが、`git diff`(作業ツリーとの比べ)と `git diff HEAD` は止まりません。差分は index を書かない `git diff-files` / `git diff-index` で読みます
+- `git diff` は `--no-textconv` を付けないと、リポジトリの設定にある変換コマンド(textconv)を走らせます。パスは `git --literal-pathspecs` で渡します(`[id].tsx` のような名前がワイルドカードとして読まれないように)

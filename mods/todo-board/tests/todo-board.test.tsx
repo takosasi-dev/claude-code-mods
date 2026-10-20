@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { MockClock } from 'claude-code/testing'
 
 import { LIMIT, delta, paneSvg, parseGrep } from '../hooks/todo'
 
@@ -34,24 +35,39 @@ const MANY = [
 const FEWER = [row('src/app.ts', 10, '  // FIXME 0 で割ると落ちる <x> & y'), row('lib/日本語.py', 1, '# XXX あとで消す'), row('lib/日本語.py', 5, '# TODO 名前を変える'), row('README.md', 40, '- TODO と FIXME を拾う')].join('')
 const HUGE = Array.from({ length: 520 }, (_, i) => row(`gen/f${i % 13}.ts`, i + 1, `// TODO 項目 ${i}`)).join('')
 
-type World = { repo: 'none' | 'empty' | 'many' | 'fewer' | 'huge' | 'broken'; calls: string[][] }
+type World = {
+  repo: 'none' | 'empty' | 'many' | 'fewer' | 'huge' | 'broken' | 'odd'
+  calls: string[][]
+  /** 作業フォルダ。無ければ CWD */
+  cwd?: string
+  /** grep の答えを返すまでの待ち (1 回目, 2 回目, ...)。clock と組で使う */
+  delays?: number[]
+  clock?: MockClock
+}
+// 制御文字の入ったファイル名と本文 (-z なので名前は囲まれずにそのまま来る)
+const ODD = row('src/a\bb\x1b.ts', 7, '  // TODO \x0c改ページ \x07鳴る')
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/
 
 // process を差し替える。git の読む操作だけ答え、それ以外が来たら記録に残る
 const mockGit = (on: On, world: World) => {
-  on('session.cwd', () => ({ value: CWD }))
-  on('process.run', (_$, e) => {
+  on('session.cwd', () => ({ value: world.cwd ?? CWD }))
+  let greps = 0
+  on('process.run', async (_$, e) => {
     world.calls.push([...e.argv])
     const out = (stdout: string, exitCode = 0, stderr = '') => ({
       value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
     })
-    if (e.init?.cwd !== CWD) return out('', 1, 'wrong cwd')
+    if (e.init?.cwd !== (world.cwd ?? CWD)) return out('', 1, 'wrong cwd')
     const args = e.argv.slice(3).join(' ')
-    if (world.repo === 'none') return out('', 128, 'fatal: not a git repository')
+    const repo = world.repo
+    if (repo === 'none') return out('', 128, 'fatal: not a git repository')
     if (args === 'rev-parse --is-inside-work-tree') return out('true\n')
-    if (args === 'grep -n -I -z --no-color -E \\b(TODO|FIXME|HACK|XXX)\\b') {
-      if (world.repo === 'broken') return out('', 2, 'fatal: bad pattern')
-      if (world.repo === 'empty') return out('', 1)
-      return out(world.repo === 'many' ? MANY : world.repo === 'fewer' ? FEWER : HUGE)
+    if (args.startsWith('grep ') && args.endsWith(' -E \\b(TODO|FIXME|HACK|XXX)\\b')) {
+      const wait = world.delays?.[greps++] ?? 0
+      if (wait > 0 && world.clock) await world.clock.sleep(wait)
+      if (repo === 'broken') return out('', 2, 'fatal: bad pattern')
+      if (repo === 'empty') return out('', 1)
+      return out(repo === 'many' ? MANY : repo === 'fewer' ? FEWER : repo === 'odd' ? ODD : HUGE)
     }
     return out('', 1, `unexpected: ${args}`)
   })
@@ -168,7 +184,7 @@ for (const surface of SURFACES) {
     expect((await ui.find({ key: 'fix' }))?.props.label).toBe('この FIXME を片付けて')
 
     await ui.press({ key: 'fix' })
-    expect(filled[0]?.mode).toBe('replace')
+    expect(filled[0]?.mode).toBe('insert')
     expect(filled[0]?.text).toMatch(/^src\/app\.ts の 10 行目にある FIXME を片付けてください/)
     expect(filled[0]?.text).toMatch(/0 で割ると落ちる/)
     await ui.press({ key: 'cause' })
@@ -311,4 +327,80 @@ test('/todos が取れなければ /todo-board を登録する', async ($, on) =
   isTaken = true
   await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['todos', 'todos', 'todo-board'])
+})
+
+// ── v0.1.1 で直した物
+
+test('追跡していない新しいファイルも拾う (git grep --untracked)', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const world: World = { repo: 'many', calls: [] }
+  mockGit(on, world)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reload' })
+  const grep = world.calls.find(a => a[3] === 'grep')
+  expect(grep).toContain('--untracked')
+  expect(await ui.find({ type: 'Text', text: '合計 6 件' })).toBeDefined()
+})
+
+test('読み込みが 2 本並んでも、遅い方の古い件数で上書きしない', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  // 1 本目は遅く (読み始めた時の 6 件)、2 本目はすぐ (片付けた後の 4 件) 返る
+  const world: World = { repo: 'many', calls: [], delays: [1000, 0], clock }
+  mockGit(on, world)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reload' })
+  world.repo = 'fewer'
+  await ui.press({ key: 'reload' })
+  await clock.advance(1500)
+  expect(await ui.find({ type: 'Text', text: '合計 4 件' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '推移 4' })).toBeDefined()
+})
+
+test('作業フォルダが変わったら推移を消す', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const world: World = { repo: 'many', calls: [] }
+  mockGit(on, world)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reload' })
+  expect(await ui.find({ type: 'Text', text: '推移 6' })).toBeDefined()
+  world.cwd = '/tmp/other'
+  world.repo = 'fewer'
+  await ui.press({ key: 'reload' })
+  expect(await ui.find({ type: 'Text', text: '推移 4' })).toBeDefined()
+  world.repo = 'many'
+  await ui.press({ key: 'reload' })
+  expect(await ui.find({ type: 'Text', text: /^推移 4 → 6/ })).toBeDefined()
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 名前や本文の制御文字を落として描く`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    mockGit(on, { repo: 'odd', calls: [] })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'reload' })
+    if (surface === 'vscode') {
+      const svg = await ui.find({ type: 'Svg' })
+      expect(String(svg?.props.source)).not.toMatch(CTRL)
+      expect(String(svg?.props.alt)).not.toMatch(CTRL)
+      expect(String(svg?.props.source)).toMatch(/src\/ab\.ts/)
+    } else expect(await ui.find({ type: 'Text', text: '   1  src/ab.ts' })).toBeDefined()
+    const item = await ui.find({ key: 'item:src/ab.ts:7' })
+    expect(item?.text).not.toMatch(CTRL)
+    await ui.press({ key: 'item:src/ab.ts:7' })
+    expect(await ui.find({ type: 'Text', text: '// TODO 改ページ 鳴る' })).toBeDefined()
+  })
+}
+
+test('/todos が拒まれて /todo-board にした時は、/todos を横取りしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockGit(on, { repo: 'many', calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.register', (_$, e) => (e.name === 'todos' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
+  on('command.run', { command: 'todos' }, () => ({ text: '組み込みの todos' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'todos', ...run })).toMatchObject({ text: '組み込みの todos' })
+  expect(await $.command.run({ command: 'todo-board', ...run })).toMatchObject({ text: 'TODO のペインを開きました。' })
 })

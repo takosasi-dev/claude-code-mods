@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ModHubCommand } from '../types'
-import { headerSvg, isGui, launchers } from './hub'
+import { clean, headerSvg, launchers, noteMod } from './hub'
 
 const PANE = 'mod-hub'
 const TITLE = 'mod'
@@ -15,7 +15,7 @@ async function loadCommands($: EngineInterface) {
   const list = await $.command.list()
   const mine: ModHubCommand[] = list
     .filter(c => c.source === 'plugin' && c.plugin !== undefined)
-    .map(c => ({ name: c.name, description: c.description, plugin: c.plugin ?? '' }))
+    .map(c => ({ name: c.name, description: clean(c.description), plugin: c.plugin ?? '' }))
   await update($, COMMANDS, () => mine)
 }
 
@@ -37,24 +37,31 @@ async function openPane($: EngineInterface) {
 
 const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
+// /mod を持てたか。session.start で決まる(リロードでも session.start が来るのでモジュール変数で足りる)
+let ownsMain = false
+
 export const register: Register = on => {
   // 自分より後に読み込まれる mod を 1 本ずつ見て、画面を持つかを覚える (止めはしない)
+  // 後ろの mod に拒まれた mod は並べない(next(e) の結果が allow の時だけ記録)
   on('plugin.register', async ($, e, next) => {
-    const mod = { name: e.name, version: e.version ?? '', isGui: isGui(e.uses.events, e.uses.calls) }
-    await update($, MODS, list => [...list.filter(m => m.name !== e.name), mod]).catch(() => {})
-    return next(e)
+    const result = await next(e)
+    const mod = noteMod(e, result)
+    await update($, MODS, list => [...list.filter(m => m.name !== e.name), ...(mod ? [mod] : [])]).catch(() => {})
+    return result
   })
 
   on('session.start', async ($, e, next) => {
     // /mod が拒まれたら (組み込みと被ったら) /mod-hub にする
     const description = '画面のある mod を開くボタンを並べる'
     const got = await $.command.register({ name: 'mod', description }).catch(() => undefined)
-    if (got?.command !== 'mod') await $.command.register({ name: 'mod-hub', description }).catch(() => {})
+    ownsMain = got?.command === 'mod'
+    if (!ownsMain) await $.command.register({ name: 'mod-hub', description }).catch(() => {})
     await loadCommands($).catch(() => {})
     return next(e)
   })
 
-  on('command.run', { command: 'mod' }, openPane)
+  // /mod を持てなかった時は元の /mod を横取りしない
+  on('command.run', { command: 'mod' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'mod-hub' }, openPane)
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

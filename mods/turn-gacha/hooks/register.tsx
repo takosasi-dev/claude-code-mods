@@ -16,30 +16,63 @@ const ERRORS = atom({ plugin: 'turn-gacha', key: 'turnErrors' } as const, 0)
 
 type $ = EngineInterface
 
-/**
- * 1 枚引いて store と state に書く。SR 以上だけトースト。
- * store を毎回読み直すので、state が空のまま (session.start 前) でも数が戻らない
- */
-async function draw($: $, flags: { isClean: boolean; isManual: boolean }) {
-  const now = await $.clock.now()
-  const saved = fromSaved(await $.store.get(STORE_KEY))
-  if (flags.isManual && manualLeft(saved, now) <= 0) {
-    await update($, SAVE, () => saved)
-    await update($, NOTE, () => '今日の手動はおしまいです(また明日。ターンが終わるたびには引けます)')
-    return
+const BROKEN = '記録を読めなかったので、引いた分を残せません(上書きしないよう止めています)'
+
+let ownsMain = false
+
+// store に書く物は 1 本ずつ流す。ボタンの連打やターン終わりと重なると、同じ値を読んで 1 枚消える
+let chain: Promise<unknown> = Promise.resolve()
+const serial = (f: () => Promise<unknown>) => (chain = chain.then(f, f))
+
+/** store の値。キーが無ければ空、読めない時 (例外・形が違う) は undefined */
+async function readStore($: $): Promise<GachaSave | undefined> {
+  try {
+    const raw = await $.store.get(STORE_KEY)
+    if (raw === undefined) return EMPTY
+    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? fromSaved(raw) : undefined
+  } catch {
+    return undefined
   }
-  const card = pull(Math.random(), Math.random(), flags.isClean)
-  const next = addDraw(saved, card, now, flags)
-  await $.store.set(STORE_KEY, next)
-  await update($, SAVE, () => next)
-  await update($, VIEW, () => 'card')
-  await update($, NOTE, () => '')
-  if (card.rarity === 'SR' || card.rarity === 'SSR') $.ui.toast(`${card.rarity}!${card.name}`)
 }
 
+/** store を state に写す。読めなければ知らせるだけ */
+async function load($: $) {
+  const saved = await readStore($)
+  if (saved) await update($, SAVE, () => saved)
+  else await update($, NOTE, () => BROKEN)
+}
+
+/**
+ * 1 枚引いて store と state に書く。SR 以上だけトースト。
+ * 書く直前に store を読み直し、1 枚分だけ足す (別のセッションの分を消さない)
+ */
+const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
+  serial(async () => {
+    const now = await $.clock.now()
+    const saved = await readStore($)
+    if (!saved) {
+      await update($, NOTE, () => BROKEN)
+      return
+    }
+    if (flags.isManual && manualLeft(saved, now) <= 0) {
+      await update($, SAVE, () => saved)
+      await update($, NOTE, () => '今日の手動はおしまいです(また明日。ターンが終わるたびには引けます)')
+      return
+    }
+    const card = pull(Math.random(), Math.random(), flags.isClean)
+    const next = addDraw(saved, card, now, flags)
+    const isSaved = await $.store.set(STORE_KEY, next).then(
+      () => true,
+      () => false,
+    )
+    await update($, SAVE, () => next)
+    await update($, VIEW, () => 'card')
+    await update($, NOTE, () => (isSaved ? '' : '引いたカードを保存できませんでした'))
+    if (card.rarity === 'SR' || card.rarity === 'SSR') $.ui.toast(`${card.rarity}!${card.name}`)
+  })
+
 const openPane = async ($: $) => {
-  const saved = fromSaved(await $.store.get(STORE_KEY))
-  await update($, SAVE, () => saved)
+  await load($)
   await $.ui.open({ id: PANE, title: TITLE })
   return { text: 'ガチャを開きました。' }
 }
@@ -49,13 +82,14 @@ export const register: Register = on => {
     const started = await next(e)
     // /gacha が拒まれたら (組み込みと被ったら) /turn-gacha にする
     const got = await $.command.register({ name: 'gacha', description: DESCRIPTION }).catch(() => undefined)
-    if (got?.command !== 'gacha') await $.command.register({ name: 'turn-gacha', description: DESCRIPTION }).catch(() => {})
-    const saved = fromSaved(await $.store.get(STORE_KEY))
-    await update($, SAVE, () => saved)
+    ownsMain = got?.command === 'gacha'
+    if (!ownsMain) await $.command.register({ name: 'turn-gacha', description: DESCRIPTION }).catch(() => {})
+    await load($)
     return started
   })
 
-  on('command.run', { command: 'gacha' }, openPane)
+  // /gacha を持てなかった時は、元の /gacha に回す
+  on('command.run', { command: 'gacha' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'turn-gacha' }, openPane)
 
   // メインのターンだけ数える (サブエージェントの分は agentId 付き)
@@ -64,20 +98,20 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 中断したターンは引かない
+  // 答えて終わったターンだけ引く (中断・エラー・拒否では引かない)
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined && !e.isAborted) {
+    if (e.agentId === undefined && e.reason === 'answer') {
       const isClean = (await read($, ERRORS)) === 0
       await draw($, { isClean, isManual: false })
     }
     return done
   }).catch(($, e, next) => next(e))
 
-  // 見るだけ。メインのターンで失敗したツールを数える
+  // 見るだけ。メインのターンで失敗したツールを数える。断られた呼び出し (deny) は数えない
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId === undefined && (ran.deny !== undefined || ran.isError === true)) await update($, ERRORS, n => n + 1)
+    if (e.agentId === undefined && !('deny' in ran && ran.deny !== undefined) && ran.isError === true) await update($, ERRORS, n => n + 1)
     return ran
   }).catch(($, e, next) => next(e))
 

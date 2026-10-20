@@ -16,6 +16,7 @@ import {
   toSaved,
   viewAt,
 } from './tank'
+import type { Saved } from './tank'
 
 const PANE = 'aqua-pet'
 const TITLE = '水槽'
@@ -24,18 +25,50 @@ const tank = atom({ plugin: 'aqua-pet', key: 'tank' } as const, INITIAL)
 
 type $ = EngineInterface
 
-const save = ($: $, t: AquaTank) => $.store.set(STORE_KEY, toSaved(t))
+// 同じ store を同時に開いた別のセッション (VS Code とターミナルなど) と分け合う。
+// 書く直前に読み直し、その値に今回の操作 (ターン +1・濁り +1・掃除・えさ・名前) だけを当てて書く
 
-/** 変える → 段を計算し直す → 残す。書くのは 1 回 */
-const change = async ($: $, fn: (t: AquaTank, now: number) => AquaTank) => {
-  const now = await $.clock.now()
-  const t = await update($, tank, x => {
-    const y = fn(x, now)
-    return { ...y, view: viewAt(y, now) }
-  })
-  await save($, t)
-  return t
+/** store の今の育ち具合と生の値。キーが無ければ既定値、読めない・形が違う時は undefined */
+const readSaved = async ($: $, now: number): Promise<{ saved: Saved; raw: unknown } | undefined> => {
+  try {
+    const raw = await $.store.get(STORE_KEY)
+    if (raw !== undefined && (typeof raw !== 'object' || raw === null || Array.isArray(raw))) return undefined
+    return { saved: fromSaved(raw, now), raw }
+  } catch {
+    return undefined
+  }
 }
+
+// 1 セッションの中の書き込み (ターン終わりとボタンが重なる等) は 1 本ずつ流す
+let chain: Promise<unknown> = Promise.resolve()
+const serial = <T,>(f: () => Promise<T>): Promise<T> => {
+  const p = chain.then(f, f)
+  chain = p.catch(() => {})
+  return p
+}
+
+// 読めない・書けないの知らせはセッションで 1 回 (ターンのたびに出さない)
+let isWarned = false
+const warn = ($: $, text: string) => {
+  if (isWarned) return
+  isWarned = true
+  $.ui.toast(text, { timeoutMs: 8000 })
+}
+
+/** store の今の値に変える → 段を計算し直す → 変わっていれば残す。読めなければ state だけ変える */
+const change = ($: $, fn: (t: AquaTank, now: number) => AquaTank) =>
+  serial(async () => {
+    const now = await $.clock.now()
+    const fresh = await readSaved($, now)
+    const t = await update($, tank, x => {
+      const y = fn(fresh ? { ...x, ...fresh.saved } : x, now)
+      return { ...y, view: viewAt(y, now) }
+    })
+    // 初めて (キーが無い) なら生まれた時刻を残すために書く
+    if (!fresh) warn($, '水槽の記録を読めなかったので保存していません')
+    else if (JSON.stringify(toSaved(t)) !== JSON.stringify(fresh.raw)) await $.store.set(STORE_KEY, toSaved(t)).catch(() => warn($, '水槽の記録を保存できませんでした'))
+    return t
+  })
 
 /** 時間で変わる段 (満腹度・時刻帯・放置・一回限りのアニメ) が変わった時だけ書く */
 const refresh = async ($: $) => {
@@ -58,14 +91,9 @@ const feed = async ($: $) => {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'aquarium', description: '水槽のペインを開く' }).catch(() => {})
-    const now = await $.clock.now()
-    const saved = fromSaved(await $.store.get(STORE_KEY), now)
+    isWarned = false
     // リロード時は実行中などの一時的な値を残し、育ち具合だけ store から戻す
-    const t = await update($, tank, x => {
-      const y = { ...x, ...saved }
-      return { ...y, view: viewAt(y, now) }
-    })
-    await save($, t)
+    await change($, t => t)
     $.clock.every(60_000, () => refresh($))
 
     return next(e)
@@ -92,6 +120,8 @@ export const register: Register = on => {
 
   // 見るだけ。エラーの時だけ書く (成功では描き直さない)
   on('tool.call', async ($, e, next) => {
+    // サブエージェントの分は数えない
+    if (e.agentId !== undefined) return next(e)
     const ran = await next(e)
     if ('isError' in ran && ran.isError) {
       await change($, (t, now) => ({ ...t, upsetUntil: now + UPSET_MS, murk: Math.min(MAX_MURK, t.murk + 1) }))

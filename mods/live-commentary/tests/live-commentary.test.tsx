@@ -344,3 +344,52 @@ test('/jikkyo で開き、拒まれたら /live-commentary にする', async ($,
   expect(r.text).toBe('実況席を開きました。')
   expect(opened).toBe('live-commentary')
 })
+
+test('/jikkyo が取れなかった時は、元の /jikkyo を横取りしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('store.get', () => ({ value: undefined }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => (e.name === 'jikkyo' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
+  const opened: string[] = []
+  on('ui.open', (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true as const } }
+  })
+  on('command.run', { command: 'jikkyo' }, () => ({ text: '組み込みの jikkyo' }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'jikkyo', ...run })).toMatchObject({ text: '組み込みの jikkyo' })
+  expect(opened).toEqual([])
+})
+
+test('前のターンのエラーは持ち越さない (次のターンの最初の成功は「反撃」にしない)', async ($, on) => {
+  const { last, world } = await boot($, on)
+  await start($)
+  world.fail = true
+  await bash($)
+  world.fail = false
+  await complete($, 1000)
+  await start($)
+  await bash($)
+  expect(isFrom('熱血', 'comeback', last())).toBe(false)
+  expect(isFrom('熱血', 'shell', last())).toBe(true)
+})
+
+test('エラーや拒否で終わったターンは「試合終了」と言わない', async ($, on) => {
+  const { last } = await boot($, on)
+  for (const reason of ['error', 'refusal'] as const) {
+    await start($)
+    await $.turn.complete({ answer: '', durationMs: 3000, isAborted: false, turnId: 't1', reason, ...(reason === 'refusal' ? { refusal: {} } : {}) } as never)
+    expect(isFrom('熱血', 'end', last())).toBe(false)
+    expect(isFrom('熱血', 'fail', last())).toBe(true)
+  }
+})
+
+test('ファイル名の制御文字は実況に入れない', async ($, on) => {
+  const { last } = await boot($, on)
+  await $.tool.call({ tool: 'Edit', file_path: '/tmp/demo/a\u0007b\u001b[31m.ts', old_string: 'a', new_string: 'b' })
+  expect(last()).toContain('ab[31m.ts')
+  expect(last()).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect((await svgs(ui))[2]).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/)
+})

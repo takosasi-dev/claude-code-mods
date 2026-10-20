@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.1] - 2026-10-20
+
+レビューで見つかった不具合と安全面の直し。
+
+### Fixed
+
+- 複数のセッションを同時に開いた時に、記録を上書きして消さないようにした(dev-rpg・prompt-book・turn-gacha・focus-timer・aqua-pet)。書く直前に読み直し、増えた分だけを足す
+- コマンドの名前が取れずに予備の名前にした時、元の名前のコマンドを横取りしないようにした
+- 外から来る文字列の制御文字でペインが閉じないようにした(git-pane・session-recap・edit-log・todo-board ほか)
+- git-pane・edit-log: `.git/index` を書き直さない読み方にした(`diff-files` / `diff-index`、`GIT_OPTIONAL_LOCKS=0`)。edit-log は `--no-textconv` と `--literal-pathspecs` を付け、ファイルのあるフォルダで git を走らせる
+- danger-frame: `git -C <パス> push --force` などのすり抜け、改行をまたぐ誤検知、`docker run --rm` の誤検知を直した。判定する物を足した
+- project-board: メモが多い時にペインが出ない不具合。設定のパスは絶対パスだけ受け付ける
+- code-omikuji: 日付をまたいでも昨日の運勢のままだった
+- session-recap: コマンドの後の依頼にコマンド名が付く、リロードで要約できなくなる
+- todo-board: 読み込みが重なると古い件数が残る。追跡していないファイルの TODO も数える
+- 入力欄に文を入れるボタンが下書きを消さないようにした(`insert`)
+- エラーや拒否で終わったターンを、正常に終わったターンとして数えないようにした(dev-rpg・turn-gacha・live-commentary)
+- cc-dash・usage-pane: 描画の中でファイルを読まないようにした
+- test-runner: 出力によって集計が長く止まる不具合。時間の上限は 3600 秒まで
+
 ## [0.3.0] - 2026-10-20
 
 ### Added

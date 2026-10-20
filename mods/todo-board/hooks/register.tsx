@@ -20,18 +20,24 @@ const FILTER = atom({ plugin: 'todo-board', key: 'filter' } as const, 'ALL')
 const SELECTED = atom({ plugin: 'todo-board', key: 'selected' } as const, '')
 const NOTE = atom({ plugin: 'todo-board', key: 'note' } as const, '')
 
+// ponytail: 読み込みの連番はモジュール変数。リロードをまたいだ読み込みの前後は見ない
+let loads = 0
+let ownsMain = false
+
 // git は読むだけ。書き込む操作は呼ばない
 const git = ($: EngineInterface, cwd: string, args: string[]) =>
   $.process.run(['git', '-c', 'core.quotePath=false', ...args], { cwd, timeoutMs: 15_000 })
 
 async function load($: EngineInterface) {
+  const mine = ++loads
   const cwd = await $.session.cwd()
   let snap: TodoSnapshot
   try {
     const inside = await git($, cwd, ['rev-parse', '--is-inside-work-tree'])
     if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') snap = { kind: 'not-repo', cwd }
     else {
-      const r = await git($, cwd, ['grep', '-n', '-I', '-z', '--no-color', '-E', PATTERN])
+      // --untracked: 追跡していない新しいファイルも見る (.gitignore の物は見ない)
+      const r = await git($, cwd, ['grep', '-n', '-I', '-z', '--no-color', '--untracked', '-E', PATTERN])
       // 1 は「見つからない」。それより大きいのが失敗
       if (r.exitCode > 1) throw new Error(r.stderr.trim() || 'git grep が失敗しました')
       const at = await $.clock.now()
@@ -40,17 +46,23 @@ async function load($: EngineInterface) {
   } catch (err) {
     snap = { kind: 'error', cwd, message: err instanceof Error ? err.message : String(err) }
   }
+  // 後から始めた読み込みがあれば、その結果が新しいので書かない
+  if (mine !== loads) return
+  const prev = await read($, SNAP)
   await update($, SNAP, () => snap)
-  if (snap.kind === 'repo') {
-    const point = { at: snap.loadedAt, total: snap.total }
-    await update($, HISTORY, h => [...h, point].slice(-HISTORY_MAX))
-  }
+  // 推移は同じフォルダの中だけ。フォルダが変わったら消す
+  const isSameDir = prev.kind === 'idle' || prev.cwd === snap.cwd
+  const point = snap.kind === 'repo' ? { at: snap.loadedAt, total: snap.total } : undefined
+  await update($, HISTORY, h => {
+    const kept = isSameDir ? h : []
+    return point ? [...kept, point].slice(-HISTORY_MAX) : kept
+  })
 }
 
 const isOpen = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE)
 
 async function fill($: EngineInterface, text: string) {
-  const r = await $.prompt.fill({ text, mode: 'replace' }).catch(() => ({ isFilled: false, refusal: undefined }))
+  const r = await $.prompt.fill({ text, mode: 'insert' }).catch(() => ({ isFilled: false, refusal: undefined }))
   const why = r.refusal === 'dialog' ? '(ダイアログが開いています)' : r.refusal === 'no_composer' ? '(この画面には入力欄がありません)' : ''
   await update($, NOTE, () => (r.isFilled ? '入力欄に入れました(送信はしていません)' : `入力欄に入れられませんでした${why}`))
 }
@@ -94,12 +106,14 @@ export const register: Register = on => {
     const started = await next(e)
     // /todos が拒まれたら (組み込みと被ったら) /todo-board にする
     const got = await $.command.register({ name: 'todos', description: DESCRIPTION }).catch(() => undefined)
-    if (got?.command !== 'todos') await $.command.register({ name: 'todo-board', description: DESCRIPTION }).catch(() => {})
+    ownsMain = got?.command === 'todos'
+    if (!ownsMain) await $.command.register({ name: 'todo-board', description: DESCRIPTION }).catch(() => {})
     if (await isOpen($)) void load($).catch(() => {})
     return started
   })
 
-  on('command.run', { command: 'todos' }, async $ => openPane($))
+  // /todos を持てなかった時は、その名前の持ち主 (組み込みなど) に回す
+  on('command.run', { command: 'todos' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'todo-board' }, async $ => openPane($))
 
   on('tool.call', async ($, e, next) => {

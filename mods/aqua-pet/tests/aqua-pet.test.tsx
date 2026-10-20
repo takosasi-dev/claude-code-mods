@@ -223,3 +223,77 @@ test('store の値はセッションをまたいで読み込まれ、壊れた�
   expect(t.murk).toBe(10)
   expect(t.view.days).toBe(2)
 })
+
+// ---- 0.1.1 で直した物 ----
+
+test('別のセッションが進めた turns・濁り・名前を、このセッションの古い写しで巻き戻さない', async ($, on) => {
+  const m = new Map<string, unknown>([['tank', { turns: 4, murk: 0, name: '', fullness: 70, fedAt: NOW, bornAt: NOW }]])
+  mock.clock(on, { now: NOW })
+  on('store.get', ($, e) => ({ value: m.get(e.key) }))
+  on('store.set', ($, e) => {
+    m.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  // 別の窓が 36 ターン進め、濁らせ、名前を付けた
+  m.set('tank', { ...(m.get('tank') as object), turns: 40, murk: 3, name: 'べつ' })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const saved = () => m.get('tank') as Partial<AquaTank>
+  expect(saved()).toMatchObject({ turns: 41, murk: 3, name: 'べつ' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await infoOf(ui)).toContain('べつ / 育てた日数 1日 / 累計 41ターン / 濁り 3')
+  // 掃除は 0 にする操作なので、その時の値に関わらず 0
+  await ui.press({ key: 'clean' })
+  expect(saved()).toMatchObject({ turns: 41, murk: 0, name: 'べつ' })
+})
+
+test('store を読めない時は書かない', async ($, on) => {
+  const m = new Map<string, unknown>([['tank', { turns: 30, murk: 2, name: 'たま', fullness: 70, fedAt: NOW, bornAt: NOW }]])
+  let failGet = false
+  mock.clock(on, { now: NOW })
+  on('store.get', ($, e) => (failGet ? { deny: '読めない' } : { value: m.get(e.key) }))
+  on('store.set', ($, e) => {
+    m.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('ui.toast', () => ({ value: undefined }))
+  failGet = true
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(m.get('tank')).toMatchObject({ turns: 30, murk: 2, name: 'たま' })
+  // 形の違う値 (配列) も読めない扱いで、既定値で上書きしない
+  failGet = false
+  m.set('tank', [1, 2])
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  expect(m.get('tank')).toEqual([1, 2])
+})
+
+test('サブエージェントのツールのエラーでは濁らない', async ($, on) => {
+  const { tank, writes } = await boot($, on, undefined, { failTool: () => true })
+  const before = writes()
+  // agentId はエンジンが付ける値なので、型の上では広げて渡す (session-recap のテストと同じ形)
+  const sub = { agentId: 'sub' }
+  await $.tool.call({ tool: 'Read', file_path: '/tmp/demo/a.ts', ...sub })
+  expect(writes()).toBe(before)
+  expect((await tank()).murk).toBe(0)
+})
+
+test('同時に来たエラー 2 回は濁り 2 (書き込みを 1 本ずつ流す)', async ($, on) => {
+  const { store } = await boot($, on, undefined, { failTool: () => true })
+  await Promise.all([$.tool.call({ tool: 'Read', file_path: '/tmp/demo/a.ts' }), $.tool.call({ tool: 'Read', file_path: '/tmp/demo/b.ts' })])
+  expect(store.saved()?.murk).toBe(2)
+})
+
+test('初めて開いた時に生まれた時刻を store に残す', async ($, on) => {
+  const { store } = await boot($, on)
+  expect(store.saved()).toMatchObject({ turns: 0, bornAt: NOW })
+})

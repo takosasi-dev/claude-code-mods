@@ -135,7 +135,7 @@ for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'use:seed2' })
     await ui.press({ key: 'use:seed2' })
-    expect(filled).toEqual(['replace:テストを走らせて結果を教えて', 'replace:テストを走らせて結果を教えて'])
+    expect(filled).toEqual(['insert:テストを走らせて結果を教えて', 'insert:テストを走らせて結果を教えて'])
     expect(submitted()).toBe(0)
     expect(saved().find(p => p.id === 'seed2')).toMatchObject({ uses: 2, lastUsedAt: NOW })
     expect(await noticeOf(ui)).toBe('「テストを走らせる」を入力欄に入れました(送信はしていません)')
@@ -252,4 +252,139 @@ test('/prompts で開き、拒まれたら /prompt-book にする', async ($, on
   const r = await $.command.run({ command: 'prompt-book', ...run })
   expect(r.text).toBe('プロンプト帳を開きました。')
   expect(opened).toBe('prompt-book')
+})
+
+// ---- 0.1.1 で直した物 ----
+
+const mine = (n: number) => Array.from({ length: n }, (_, i) => item(`m${i}`, `t${i}`, 0, i))
+
+/** store を手元の Map で答える。get / set を落とす切り替え付き */
+const sharedStore = (on: On, init: Record<string, unknown>) => {
+  const m = new Map<string, unknown>(Object.entries(init))
+  const fail = { get: 0, set: 0 }
+  on('store.get', (_$, e) => {
+    if (fail.get > 0) {
+      fail.get--
+      return { deny: '読めない' }
+    }
+    return { value: m.get(e.key) }
+  })
+  on('store.set', (_$, e) => {
+    if (fail.set > 0) {
+      fail.set--
+      return { deny: '書けない' }
+    }
+    m.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('prompt.fill', () => ({ isFilled: true }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  return { m, fail }
+}
+
+test('別のセッションが足した依頼文は、このセッションで「使う」「保存」「消す」をしても消えない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { m } = sharedStore(on, { items: mine(2) })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  // 窓 B が保存した (store に直接足す)
+  const other = item('other', '別の窓', 3, 5)
+  m.set('items', [...(m.get('items') as PromptBookItem[]), other])
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'use:m0' })
+  const ids = () => (m.get('items') as PromptBookItem[]).map(x => x.id)
+  expect(ids()).toEqual(['m0', 'm1', 'other'])
+  expect((m.get('items') as PromptBookItem[]).find(x => x.id === 'other')?.uses).toBe(3)
+  // 画面にも B の分が出る
+  expect(await ui.find({ key: 'use:other' })).toBeDefined()
+  // B がさらに使った回数を、A の写しで巻き戻さない
+  m.set('items', (m.get('items') as PromptBookItem[]).map(x => (x.id === 'm0' ? { ...x, uses: 10 } : x)))
+  await ui.press({ key: 'use:m0' })
+  expect((m.get('items') as PromptBookItem[]).find(x => x.id === 'm0')?.uses).toBe(11)
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  expect(ids()).toHaveLength(4)
+  await ui.press({ key: 'del:m1' })
+  await ui.press({ key: 'del:m1' })
+  expect(ids()).toEqual(['m0', 'other', ids()[2]!])
+})
+
+test('同じ依頼文を続けて 2 回押すと 2 回と数える (書き込みを 1 本ずつ流す)', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { m } = sharedStore(on, { items: mine(1) })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await Promise.all([ui.press({ key: 'use:m0' }), ui.press({ key: 'use:m0' })])
+  for (let n = 0; n < 200; n++) await Promise.resolve()
+  expect((m.get('items') as PromptBookItem[])[0]?.uses).toBe(2)
+})
+
+test('起動時に store を読めなくても、次の保存で保存済みを上書きしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { m, fail } = sharedStore(on, { items: mine(10) })
+  fail.get = 1
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await noticeOf(ui)).toMatch(/読めませんでした/)
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  expect(m.get('items') as PromptBookItem[]).toHaveLength(11)
+})
+
+test('書く直前に store を読めなければ書かずに知らせる', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { m, fail } = sharedStore(on, { items: mine(3) })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  fail.get = 1
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  expect(m.get('items') as PromptBookItem[]).toHaveLength(3)
+  expect(await noticeOf(ui)).toMatch(/読めなかったので保存しませんでした/)
+  // 下書きは消さない
+  expect((await ui.find({ key: 'body' }))?.props.value).toBe('新しい依頼')
+})
+
+test('store の値が配列でない時は例で上書きせず、書かない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const broken = { items: mine(10) }
+  const { m } = sharedStore(on, { items: broken })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  expect(m.get('items')).toEqual(broken)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await noticeOf(ui)).toMatch(/読めませんでした/)
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  expect(m.get('items')).toEqual(broken)
+})
+
+test('store への書き込みが失敗したら知らせる', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { fail } = sharedStore(on, { items: mine(1) })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  fail.set = 1
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  expect(await noticeOf(ui)).toMatch(/保存できませんでした/)
+})
+
+test('/prompts が拒まれた時は /prompts を組み込みに任せる (横取りしない)', async ($, on) => {
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => (e.name === 'prompts' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
+  on('command.run', (_$, e) => ({ text: `builtin ${e.command}` }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'prompts', ...run })).toMatchObject({ text: 'builtin prompts' })
+  expect(await $.command.run({ command: 'prompt-book', ...run })).toMatchObject({ text: 'プロンプト帳を開きました。' })
+})
+
+test('タグのチップは 30 個まで、残りは「ほか N」', () => {
+  const many = Array.from({ length: 40 }, (_, i) => item(`i${i}`, `t${i}`, 0, i, [`tag${String(i).padStart(2, '0')}`]))
+  const svg = chartSvg(many, '', false)
+  expect((svg.match(/>tag\d\d 1</g) ?? []).length).toBe(30)
+  expect(svg).toContain('ほか 10')
 })

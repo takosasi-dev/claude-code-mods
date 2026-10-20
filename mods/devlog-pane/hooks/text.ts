@@ -1,4 +1,5 @@
-const MAX = 10000
+// Markdown は 1 回の描画で全体 10 万字まで描ける
+const MAX = 100000
 export const HEAD = '…(前略)\n\n'
 
 // 日本時間(UTC+9)の日付 YYYY-MM-DD

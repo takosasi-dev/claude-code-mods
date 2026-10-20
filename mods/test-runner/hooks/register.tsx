@@ -9,6 +9,8 @@ const TITLE = 'テスト'
 const DESCRIPTION = 'テストを走らせて結果を見るペインを開く'
 // 出力はこの長さの末尾だけ持つ (数を拾うのも末尾 60 行もここから)
 const KEEP = 200_000
+/** 時間の上限の上限 (1 時間) */
+const MAX_TIMEOUT_SECONDS = 3600
 
 const RUN = atom({ plugin: 'test-runner', key: 'run' } as const, { kind: 'idle' })
 const HIST = atom({ plugin: 'test-runner', key: 'history' } as const, [])
@@ -97,7 +99,7 @@ async function runTests($: $) {
 async function fixIt($: $) {
   const run = await read($, RUN)
   if (run.kind !== 'done') return
-  const filled = await $.prompt.fill({ text: fixPrompt(run.result), mode: 'replace' }).then(
+  const filled = await $.prompt.fill({ text: fixPrompt(run.result), mode: 'insert' }).then(
     r => (r.isFilled ? '' : r.refusal === 'dialog' ? '(ダイアログが開いています)' : r.refusal === 'no_composer' ? '(入力欄がありません)' : '(断られました)'),
     (err: unknown) => `(${err instanceof Error ? err.message : String(err)})`,
   )
@@ -110,9 +112,10 @@ const openPane = async ($: $) => {
 }
 
 export const register: Register = (on, options) => {
-  cfg.command = String(options.testCommand ?? '').trim()
-  cfg.argv = splitCommand(cfg.command)
-  cfg.timeoutMs = Math.max(1, Number(options.timeoutSeconds) || 300) * 1000
+  cfg.argv = splitCommand(String(options.testCommand ?? ''))
+  // 見せるのは実際に起動する argv。長い空白の後ろの引数が … に隠れないように
+  cfg.command = cfg.argv.join(' ')
+  cfg.timeoutMs = Math.min(MAX_TIMEOUT_SECONDS, Math.max(1, Number(options.timeoutSeconds) || 300)) * 1000
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)

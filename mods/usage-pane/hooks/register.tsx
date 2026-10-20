@@ -1,17 +1,9 @@
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
+
+import type { UsagePaneData } from '../types/index'
 
 const PANE = 'usage-pane'
-
-type Usage = {
-  sessionPct: number
-  weeklyPct: number
-  sessionResetAt?: unknown
-  weeklyResetAt?: unknown
-  modelName?: unknown
-  modelPct?: unknown
-  modelResetAt?: unknown
-  fetchedAt?: unknown
-}
+const usageKey = { plugin: 'usage-pane', key: 'usage' } as const
 
 // リセットまでの残り。1日以上は「日+時間」、それ未満は「時間+分」
 const left = (iso: unknown, now: number) => {
@@ -26,19 +18,45 @@ const left = (iso: unknown, now: number) => {
   return d > 0 ? `あと${d}日${h}時間` : h > 0 ? `あと${h}時間${m}分` : `あと${m}分`
 }
 
+// 絶対パス(/x、\x、C:\x、C:/x)だけを受け付ける。相対パスは今のフォルダから読まれてしまう
+const isAbsolute = (path: string) => /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path)
+
+// Text に入れる前に制御文字を落とす(エンジンは制御文字を含む Text を拒む)
+const clean = (s: string) => s.replace(/[\x00-\x1f\x7f]/g, '')
+
+// ファイルを読んで $.state に置く(描画フックの外で呼ぶ)
+async function refresh($: EngineInterface, file: string) {
+  if (file === '') return
+  let data: UsagePaneData | null = null
+  try {
+    const o = JSON.parse(await $.fs.read(file)) as Partial<UsagePaneData> | null
+    if (o && typeof o.sessionPct === 'number' && typeof o.weeklyPct === 'number') data = o as UsagePaneData
+  } catch {
+    data = null
+  }
+  await $.state.set(usageKey, { data })
+}
+
 export const register: Register = (on, options) => {
-  const file = String(options.usageFile ?? '').trim()
+  const raw = String(options.usageFile ?? '').trim()
+  // 絶対パスでなければ未設定と同じ扱い
+  const file = isAbsolute(raw) ? raw : ''
 
   on('session.start', async ($, e, next) => {
     // 組み込みの /usage とぶつけないよう別名にする
     await $.command.register({ name: 'usage-pane', description: '使用量をペインに表示' }).catch(() => {})
-    // 閉じているときの invalidate は何も描かないので常時回す
-    $.clock.every(30_000, () => $.ui.invalidate('ui.render'))
+    await refresh($, file)
+    // 読むのはここ(30 秒ごと)とコマンドだけ。残り時間の表示も進めるため描き直しも頼む
+    $.clock.every(30_000, async () => {
+      await refresh($, file)
+      $.ui.invalidate('ui.render')
+    })
 
     return next(e)
   })
 
   on('command.run', { command: 'usage-pane' }, async $ => {
+    await refresh($, file)
     await $.ui.open({ id: PANE, title: '使用量' })
 
     return { text: '使用量ペインを開きました。' }
@@ -48,16 +66,13 @@ export const register: Register = (on, options) => {
     const { Box, Text } = $.ui.resolve(e)
     const now = await $.clock.now()
 
-    // 空なら読まない (空を今のフォルダと読ませない)
+    // 空(か相対パス)なら読まない (空を今のフォルダと読ませない)
     if (file === '') return <Text dimColor>使用量ファイルが未設定です。/config で usage-pane の usageFile に JSON の絶対パスを入れてください</Text>
 
-    let u: Usage
-    try {
-      u = JSON.parse(await $.fs.read(file))
-      if (typeof u.sessionPct !== 'number' || typeof u.weeklyPct !== 'number') throw new Error('bad')
-    } catch {
-      return <Text dimColor>{`使用量ファイルを読めません: ${file}`}</Text>
-    }
+    const { value } = await $.state.get(usageKey)
+    if (!value) return <Text dimColor>読み込み中…</Text>
+    const u = value.data
+    if (!u) return <Text dimColor>{`使用量ファイルを読めません: ${clean(file)}`}</Text>
 
     const width = Math.max(5, Math.min(20, e.props.bodyColumns - 34))
     const row = (label: string, pct: number, resetAt: unknown) => {
@@ -82,7 +97,7 @@ export const register: Register = (on, options) => {
         {row('週', u.weeklyPct, u.weeklyResetAt)}
         {typeof u.modelName === 'string' &&
           typeof u.modelPct === 'number' &&
-          row(`${u.modelName} 週`, u.modelPct, u.modelResetAt)}
+          row(`${clean(u.modelName)} 週`, u.modelPct, u.modelResetAt)}
         {typeof u.fetchedAt === 'number' && (
           <Text dimColor>{`取得: ${Math.max(0, Math.floor((now - u.fetchedAt) / 60_000))}分前`}</Text>
         )}
