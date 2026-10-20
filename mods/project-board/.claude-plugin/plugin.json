@@ -1,0 +1,27 @@
+{
+  "name": "project-board",
+  "version": "0.1.0",
+  "description": "/projects で引き継ぎメモを一覧するプロジェクト横断ボードをペインに開く",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "memoDir": {
+      "type": "string",
+      "title": "Memo folder",
+      "description": "引き継ぎメモ(*.md)が並ぶフォルダの絶対パス。空なら未設定と出る",
+      "default": ""
+    },
+    "vaultRoot": {
+      "type": "string",
+      "title": "Vault root",
+      "description": "Obsidian の vault の根。この下のメモだけ obsidian:// で開ける。空なら作らない",
+      "default": ""
+    },
+    "vaultName": {
+      "type": "string",
+      "title": "Vault name",
+      "description": "obsidian://open の vault= に渡す名前。空なら作らない",
+      "default": ""
+    }
+  }
+}

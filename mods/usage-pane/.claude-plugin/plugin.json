@@ -1,0 +1,14 @@
+{
+  "name": "usage-pane",
+  "version": "0.2.0",
+  "description": "/usage-pane で Claude の使用量(5時間枠・週・モデル別週枠)をペインに表示する",
+  "author": { "name": "takosasi-dev" },
+  "userConfig": {
+    "usageFile": {
+      "type": "string",
+      "title": "Usage file",
+      "description": "使用量の JSON ({sessionPct, weeklyPct, sessionResetAt, weeklyResetAt, ...}) の絶対パス。空なら未設定と出る",
+      "default": ""
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "reply-frame",
+  "version": "0.2.0",
+  "description": "Claude の返答をオレンジ、自分のプロンプトを青の角の丸い枠で囲む（ターミナル/VS Code/デスクトップ/モバイル共通）",
+  "author": { "name": "takosasi-dev", "url": "https://github.com/takosasi-dev" },
+  "homepage": "https://github.com/takosasi-dev/reply-frame",
+  "license": "MIT"
+}

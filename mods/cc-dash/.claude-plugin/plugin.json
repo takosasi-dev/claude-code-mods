@@ -1,0 +1,15 @@
+{
+  "name": "cc-dash",
+  "version": "0.1.0",
+  "description": "/dash でセッションの計器盤(経過・ターン・ツール・使用量)をペインに SVG で表示する",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "usageFile": {
+      "type": "string",
+      "title": "Usage file",
+      "description": "使用量の JSON ({sessionPct, weeklyPct, sessionResetAt, weeklyResetAt, ...}) の絶対パス。空なら使用量タブは未設定と出る",
+      "default": ""
+    }
+  }
+}

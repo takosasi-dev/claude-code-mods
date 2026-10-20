@@ -1,0 +1,15 @@
+{
+  "name": "devlog-pane",
+  "version": "0.2.0",
+  "description": "/devlog で今日の開発ログ (YYYY-MM-DD.md) をペインに表示する",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "logDir": {
+      "type": "string",
+      "title": "Log folder",
+      "description": "YYYY-MM-DD.md (日付は日本時間) が並ぶフォルダの絶対パス。空なら未設定と出る",
+      "default": ""
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "danger-frame",
+  "version": "0.1.0",
+  "description": "Bash / PowerShell の危ないコマンドの行を赤い枠で目立たせる（見た目だけ、実行は止めない）",
+  "author": { "name": "takosasi-dev" }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "mod-hub",
+  "version": "0.1.0",
+  "description": "/mod で入っている mod の一覧・コマンドの起動・次の起動からのオン/オフをペインで扱う",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

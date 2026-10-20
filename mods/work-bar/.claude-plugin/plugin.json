@@ -1,0 +1,15 @@
+{
+  "name": "work-bar",
+  "version": "0.1.1",
+  "description": "入力欄の上に作業バー(経過時間・実行中のツール・前のターンの要約・定型プロンプトのボタン)を出す",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "presets": {
+      "type": "string",
+      "title": "Presets",
+      "description": "定型プロンプト。| 区切りで 表示名=送る文",
+      "default": "続けて=続けて|テスト=テストを走らせて結果を教えて|レビュー=今の変更をレビューして|要約=ここまでの作業を3行で要約して"
+    }
+  }
+}

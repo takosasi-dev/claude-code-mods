@@ -1,0 +1,6 @@
+# エンジンが mod を読み込むたびに書く型
+.claude-plugin/types/
+mods/*/.claude-plugin/types/
+node_modules/
+.DS_Store
+*.log

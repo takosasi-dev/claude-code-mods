@@ -1,0 +1,21 @@
+{
+  "name": "claude-code-mods",
+  "owner": { "name": "takosasi-dev" },
+  "description": "VS Code でも凝った見た目で動く Claude Code の関数フック mod 集",
+  "plugins": [
+    { "name": "mod-hub", "source": "./mods/mod-hub", "description": "/mod で入っている mod の一覧・起動・オン/オフ" },
+    { "name": "cc-dash", "source": "./mods/cc-dash", "description": "/dash でセッションの計器盤" },
+    { "name": "work-bar", "source": "./mods/work-bar", "description": "入力欄の上の作業バー" },
+    { "name": "aqua-pet", "source": "./mods/aqua-pet", "description": "/aquarium で作業に反応する水槽" },
+    { "name": "project-board", "source": "./mods/project-board", "description": "/projects で引き継ぎメモの一覧" },
+    { "name": "git-pane", "source": "./mods/git-pane", "description": "/git で今のフォルダの git の様子" },
+    { "name": "token-meter", "source": "./mods/token-meter", "description": "/tokens でトークンとキャッシュの当たり率" },
+    { "name": "focus-timer", "source": "./mods/focus-timer", "description": "/focus-timer でポモドーロ" },
+    { "name": "session-recap", "source": "./mods/session-recap", "description": "/session-recap でセッションのふりかえりと要約" },
+    { "name": "reply-frame", "source": "./mods/reply-frame", "description": "返答と自分の発言を色付きの枠で囲む" },
+    { "name": "danger-frame", "source": "./mods/danger-frame", "description": "危ないコマンドの行を赤枠で囲む" },
+    { "name": "long-turn-toast", "source": "./mods/long-turn-toast", "description": "長くかかったターンをトーストで知らせる" },
+    { "name": "usage-pane", "source": "./mods/usage-pane", "description": "/usage-pane で使用量の JSON をバーで表示" },
+    { "name": "devlog-pane", "source": "./mods/devlog-pane", "description": "/devlog で今日の開発ログを表示" }
+  ]
+}

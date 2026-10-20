@@ -1,0 +1,15 @@
+{
+  "name": "long-turn-toast",
+  "version": "0.1.0",
+  "description": "時間のかかった応答が終わったらトーストで知らせる（音は鳴らさない）",
+  "author": { "name": "takosasi-dev" },
+  "userConfig": {
+    "thresholdSeconds": {
+      "type": "number",
+      "title": "通知する所要時間（秒）",
+      "description": "1 回の応答がこの秒数を超えて終わったら知らせる",
+      "default": 120,
+      "min": 1
+    }
+  }
+}
