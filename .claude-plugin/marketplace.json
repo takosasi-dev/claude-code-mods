@@ -3,7 +3,7 @@
   "owner": { "name": "takosasi-dev" },
   "description": "VS Code でも凝った見た目で動く Claude Code の関数フック mod 集",
   "plugins": [
-    { "name": "mod-hub", "source": "./mods/mod-hub", "description": "/mod で入っている mod の一覧・起動・オン/オフ" },
+    { "name": "mod-hub", "source": "./mods/mod-hub", "description": "/mod で画面のある mod を開くボタンを並べる" },
     { "name": "cc-dash", "source": "./mods/cc-dash", "description": "/dash でセッションの計器盤" },
     { "name": "work-bar", "source": "./mods/work-bar", "description": "入力欄の上の作業バー" },
     { "name": "aqua-pet", "source": "./mods/aqua-pet", "description": "/aquarium で作業に反応する水槽" },
