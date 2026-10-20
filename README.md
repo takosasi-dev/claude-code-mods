@@ -10,7 +10,7 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 
 | mod | 呼び方 | 何をするか |
 |---|---|---|
-| mod-hub | `/mod` | 画面のある mod(ペインや帯を出す物)を開くボタンを並べる |
+| mod-hub | `/mod` | 画面のある mod(ペインや帯を出す物)を開くボタンを、カテゴリー別(開発・状況・道具・遊び)か名前順で並べる |
 | cc-dash | `/dash` | セッションの計器盤。経過・ターン・ツール・エラーのタイル、ターンの所要時間の棒グラフ、ツールのタイムライン、使用量のリング型ゲージ |
 | work-bar | 入力欄の上に自動で出る | 作業中は経過時間・今のツール・流れる光の帯。待ち中は前のターンのまとめと定型文のボタン |
 | aqua-pet | `/aquarium` | 作業に反応する水槽。ターンを重ねると魚が増え、エラーで赤く震える。えさ・名前・掃除のボタン。日本時間の時刻で水の色と光が、季節で飾り(花びら・泡・落ち葉・雪)が変わる |
@@ -123,7 +123,7 @@ claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
 
 デスクトップアプリでは、入力欄の横の + → Plugins → Add marketplace に `takosasi-dev/claude-code-mods` を入れ、Add plugin で選びます。
 
-mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけです。mod-hub を最初に入れてください。
+mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけです。mod-hub を最初に入れてください。カテゴリーはこのリポジトリの mod だけに付いていて、ほかの mod は「その他」に入ります。
 
 コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub`・`/canvas-pane`・`/rule-switch`・`/wait-games`・`/spec-board`・`/ci-pane`・`/port-watch`・`/pre-check`・`/face-band`・`/done-chime`・`/turn-haiku` のように mod の名前のコマンドになります。
 

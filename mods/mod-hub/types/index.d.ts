@@ -16,6 +16,9 @@ export type ModHubCommand = {
   plugin: string
 }
 
+/** カテゴリー別か名前順か */
+export type ModHubSort = 'category' | 'name'
+
 declare module 'claude-code' {
   interface PluginState {
     'mod-hub': {
@@ -23,6 +26,8 @@ declare module 'claude-code' {
       commands: ModHubCommand[]
       /** 最後の操作の結果 (空なら出さない) */
       notice: string
+      /** 並べ方。$.store の 'sort' にも残す */
+      sort: ModHubSort
     }
   }
 }

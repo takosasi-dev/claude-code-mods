@@ -18,7 +18,23 @@ export function noteMod(
   return { name: e.name, version: clean(e.version ?? ''), isGui: isGui(e.uses.events, e.uses.calls) }
 }
 
-export type Launcher ={ name: string; version: string; commands: ModHubCommand[] }
+/** 並べるカテゴリーの順。表に無い mod (よそで作られた物) は最後の「その他」 */
+export const CATEGORIES = ['開発', '状況', '道具', '遊び', 'その他'] as const
+export type Category = (typeof CATEGORIES)[number]
+
+// ponytail: このリポジトリの mod だけを名前で引く。よその mod にも分けたくなったら plugin.json から読む
+const CATEGORY: Record<string, Category> = {
+  'git-pane': '開発', 'edit-log': '開発', 'todo-board': '開発', 'test-runner': '開発', 'pre-check': '開発',
+  'ci-pane': '開発', 'port-watch': '開発', 'spec-board': '開発', 'project-board': '開発',
+  'cc-dash': '状況', 'token-meter': '状況', 'usage-pane': '状況', 'agent-watch': '状況', 'session-recap': '状況',
+  'devlog-pane': '状況', 'work-bar': '状況',
+  'focus-timer': '道具', 'prompt-book': '道具', 'rule-switch': '道具', 'canvas-pane': '道具', 'done-chime': '道具',
+  'aqua-pet': '遊び', 'face-band': '遊び', 'turn-haiku': '遊び', 'live-commentary': '遊び', 'turn-gacha': '遊び',
+  'dev-rpg': '遊び', 'code-omikuji': '遊び', 'wait-games': '遊び',
+}
+export const categoryOf = (name: string): Category => CATEGORY[name] ?? 'その他'
+
+export type Launcher = { name: string; version: string; category: Category; commands: ModHubCommand[] }
 
 const baseName = (plugin: string) => plugin.split('@')[0] ?? plugin
 
@@ -26,10 +42,19 @@ const baseName = (plugin: string) => plugin.split('@')[0] ?? plugin
 export function launchers(mods: readonly ModHubMod[], commands: readonly ModHubCommand[]): Launcher[] {
   return mods
     .filter(m => m.isGui && m.name !== SELF)
-    .map(m => ({ name: m.name, version: m.version, commands: commands.filter(c => baseName(c.plugin) === m.name) }))
+    .map(m => ({
+      name: m.name,
+      version: m.version,
+      category: categoryOf(m.name),
+      commands: commands.filter(c => baseName(c.plugin) === m.name),
+    }))
     .filter(l => l.commands.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name))
 }
+
+/** カテゴリーの順に分ける (中は名前順のまま)。空のカテゴリーは出さない */
+export const byCategory = (list: readonly Launcher[]) =>
+  CATEGORIES.map(category => ({ category, items: list.filter(l => l.category === category) })).filter(g => g.items.length > 0)
 
 const BG = '#0d1117'
 const FG = '#c9d1d9'

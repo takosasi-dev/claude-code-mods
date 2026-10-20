@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ModHubCommand } from '../types'
-import { clean, headerSvg, launchers, noteMod } from './hub'
+import type { ModHubCommand, ModHubSort } from '../types'
+import { byCategory, clean, headerSvg, launchers, noteMod } from './hub'
+import type { Launcher } from './hub'
 
 const PANE = 'mod-hub'
 const TITLE = 'mod'
@@ -10,6 +11,14 @@ const TITLE = 'mod'
 const MODS = atom({ plugin: 'mod-hub', key: 'mods' } as const, [])
 const COMMANDS = atom({ plugin: 'mod-hub', key: 'commands' } as const, [])
 const NOTICE = atom({ plugin: 'mod-hub', key: 'notice' } as const, '')
+const SORT = atom({ plugin: 'mod-hub', key: 'sort' } as const, 'category' as ModHubSort)
+
+// 並べ方を切り替え、次のセッションにも残す(残せなくてもこのセッションでは効く)
+async function toggleSort($: EngineInterface) {
+  let next: ModHubSort = 'category'
+  await update($, SORT, s => (next = s === 'category' ? 'name' : 'category'))
+  await $.store.set('sort', next).catch(() => {})
+}
 
 async function loadCommands($: EngineInterface) {
   const list = await $.command.list()
@@ -57,6 +66,8 @@ export const register: Register = on => {
     ownsMain = got?.command === 'mod'
     if (!ownsMain) await $.command.register({ name: 'mod-hub', description }).catch(() => {})
     await loadCommands($).catch(() => {})
+    const saved = await $.store.get('sort').catch(() => undefined)
+    if (saved === 'category' || saved === 'name') await update($, SORT, () => saved)
     return next(e)
   })
 
@@ -72,6 +83,18 @@ export const register: Register = on => {
 
     const list = launchers(await read($, MODS), await read($, COMMANDS))
     const notice = await read($, NOTICE)
+    const sort = await read($, SORT)
+
+    const card = (l: Launcher) => (
+      <Box key={`card:${l.name}`} flexDirection="column">
+        <Text bold>{l.version === '' ? l.name : `${l.name} v${l.version}`}</Text>
+        {l.commands.map(c => (
+          <Button key={`run:${l.name}:${c.name}`} onPress={() => void runCommand($, c.name)}>
+            {`/${c.name}`} <Text dimColor>{short(c.description, 22)}</Text>
+          </Button>
+        ))}
+      </Box>
+    )
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -82,16 +105,19 @@ export const register: Register = on => {
         )}
         {notice !== '' && <Text color="#d29922">{notice}</Text>}
         {list.length === 0 && <Text dimColor>開ける mod が見つかりません(mod-hub より後に読み込まれる mod だけが並びます)</Text>}
-        {list.map(l => (
-          <Box key={`card:${l.name}`} flexDirection="column">
-            <Text bold>{l.version === '' ? l.name : `${l.name} v${l.version}`}</Text>
-            {l.commands.map(c => (
-              <Button key={`run:${l.name}:${c.name}`} onPress={() => void runCommand($, c.name)}>
-                {`/${c.name}`} <Text dimColor>{short(c.description, 22)}</Text>
-              </Button>
+        {list.length > 0 && (
+          <Button key="sort" onPress={() => void toggleSort($)}>
+            <Text>{sort === 'category' ? '並び: カテゴリー別' : '並び: 名前順'}</Text> <Text dimColor>押して切り替え</Text>
+          </Button>
+        )}
+        {sort === 'name'
+          ? list.map(card)
+          : byCategory(list).map(g => (
+              <Box key={`group:${g.category}`} flexDirection="column" gap={1}>
+                <Text bold color="#58a6ff">{`${g.category} (${g.items.length})`}</Text>
+                {g.items.map(card)}
+              </Box>
             ))}
-          </Box>
-        ))}
       </Box>
     )
   })

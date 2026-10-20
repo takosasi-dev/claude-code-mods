@@ -2,7 +2,7 @@ import type { On, Register } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { clean, headerSvg, isGui, launchers, noteMod } from '../hooks/hub'
+import { byCategory, categoryOf, clean, headerSvg, isGui, launchers, noteMod } from '../hooks/hub'
 
 const SURFACES = ['vscode', 'terminal'] as const
 const PANE = {
@@ -168,4 +168,40 @@ test('/mod を持てなかった時は /mod を横取りしない', async ($, on
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect((await $.command.run({ command: 'mod', ...RUN })).text).toBe('組み込みの /mod')
   expect((await $.command.run({ command: 'mod-hub', ...RUN })).text).toBe('mod の一覧を開きました。')
+})
+
+test('カテゴリーの順に分け、表に無い mod は「その他」', () => {
+  const mods = ['wait-games', 'zz-other', 'git-pane', 'cc-dash', 'aqua-pet'].map(name => ({ name, version: '', isGui: true }))
+  const cmds = mods.map(m => ({ name: m.name, description: '', plugin: m.name }))
+  const groups = byCategory(launchers(mods, cmds))
+  expect(groups.map(g => g.category)).toEqual(['開発', '状況', '遊び', 'その他'])
+  expect(groups.find(g => g.category === '遊び')?.items.map(l => l.name)).toEqual(['aqua-pet', 'wait-games'])
+  expect(categoryOf('zz-other')).toBe('その他')
+})
+
+test('並びのボタンで名前順とカテゴリー別を切り替え、次のセッションにも残す', PLUGINS, async ($, on) => {
+  on('command.list', () => ({ value: COMMANDS.map(c => ({ ...c })) }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const saved: Record<string, unknown> = {}
+  on('store.get', (_$, e) => ({ value: saved[e.key] }))
+  on('store.set', (_$, e) => {
+    saved[e.key] = e.value
+    return { value: undefined }
+  })
+  await start($, on)
+  await $.command.run({ command: 'mod', ...RUN })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await ui.find({ key: 'group:その他' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /並び: カテゴリー別/ })).toBeDefined()
+
+  await ui.press({ key: 'sort' })
+  expect(await ui.find({ key: 'group:その他' })).toBeUndefined()
+  expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
+  expect(saved.sort).toBe('name')
+  await ui.unmount()
+
+  // 次のセッションは残した並びで始まる
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const again = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await again.find({ type: 'Text', text: /並び: 名前順/ })).toBeDefined()
 })
