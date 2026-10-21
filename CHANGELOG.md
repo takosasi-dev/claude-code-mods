@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- 冒険の書(dev-rpg)とガチャ(turn-gacha)だけを入れた単体版のリポジトリ [claude-code-dev-rpg](https://github.com/takosasi-dev/claude-code-dev-rpg) を作った。写すのは `tools/export_standalone.mts`
+
 ## [0.6.3] - 2026-10-21
 
 ### Changed

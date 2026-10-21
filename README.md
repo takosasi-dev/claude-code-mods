@@ -131,7 +131,7 @@ Claude Code の `/config` で theme を明るい物(light で始まる物)にす
 
 ## 入れ方
 
-好きな mod だけ入れられます。ターミナルの Claude Code の入力欄で:
+好きな mod だけ入れられます。冒険の書(dev-rpg)とガチャ(turn-gacha)の 2 本だけが欲しい時は、単体版の [claude-code-dev-rpg](https://github.com/takosasi-dev/claude-code-dev-rpg) からも入れられます(中身は同じなので、どちらか片方から入れてください)。ターミナルの Claude Code の入力欄で:
 
 ```
 /plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
@@ -207,6 +207,8 @@ mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけで�
 [docs/mod-guide.md](docs/mod-guide.md) に、VS Code でも凝った見た目を出すための約束ごとをまとめています。VS Code で使える部品と Svg の性質(アニメは動くが hover とクリックは効かない)、入力欄の上の帯の罠、値の持ち方、共通の見た目と明るいテーマ、テストの書き方などです。
 
 全 mod で共通の色・見出し・動きは `shared/style.ts` に 1 枚だけあり、各 mod の `hooks/style.ts` はその写しです。直したら `node tools/copy_shared.mts` で写します。
+
+dev-rpg と turn-gacha は単体版のリポジトリにも写しています。リリースの時に `node tools/export_standalone.mts` で隣のフォルダの claude-code-dev-rpg へ写し、`--check` でずれていないかを確かめます。
 
 各 mod のフォルダで確かめられます。
 
