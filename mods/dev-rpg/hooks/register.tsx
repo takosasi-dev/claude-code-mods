@@ -38,6 +38,7 @@ import {
   statusLines,
   statusSvg,
   toSaved,
+  upgradeHero,
   wear,
   wornOf,
 } from './rpg'
@@ -81,12 +82,20 @@ async function readStore($: $): Promise<RpgSaved | undefined> {
 
 /** state が空なら (新しいセッション・/clear の後) store から読み戻して冒険の回数を足す。リロードなら state の方が新しいのでそのまま */
 async function ensureLoaded($: $) {
-  if ((await read($, HERO)).s.startedAt !== 0) return
+  const cur = await read($, HERO)
+  if (cur.s.startedAt !== 0) {
+    // 0.2 の勇者が state に残っていたら (開いたまま /reload-plugins した時) 新しい値を足す
+    if (upgradeHero(cur) !== cur) await update($, HERO, upgradeHero)
+    return
+  }
   const saved = await readStore($)
   if (!saved) await update($, NEWS, () => BROKEN)
   const now = await $.clock.now()
   await update($, HERO, x => (x.s.startedAt === 0 ? startSession(saved ?? INITIAL_SAVED, now) : x))
 }
+
+/** 描く時と戦いの手で読む勇者 (0.2 の形のままでも 0.3.0 の値を足して読む。書くのは ensureLoaded) */
+const readHero = async ($: $) => upgradeHero(await read($, HERO))
 
 /** 今の store を読み直し、前に合わせた時から増えた分だけを足して書く。画面も store に合わせる */
 const save = ($: $) =>
@@ -98,8 +107,9 @@ const save = ($: $) =>
     }
     // $.state.get は 1 つの dispatch の中では同じ時点を読むので、差分は update の中 (最新の値) で取る
     let written: RpgSaved | undefined
-    await update($, HERO, x => {
-      if (x.s.startedAt === 0) return x
+    await update($, HERO, x0 => {
+      if (x0.s.startedAt === 0) return x0
+      const x = upgradeHero(x0)
       written = mergeSaved(store, x.synced, toSaved(x))
       return { ...x, ...written, synced: written }
     })
@@ -173,7 +183,7 @@ async function fight($: $, isBoss: boolean) {
   if ((await read($, BATTLE))?.result === 'fight') return
   await ensureLoaded($)
   const now = await $.clock.now()
-  const hero = wear(await read($, HERO), await readOwned($))
+  const hero = wear(await readHero($), await readOwned($))
   if (hero.encounters <= 0) {
     await update($, NEWS, () => 'まだ魔物の気配がない。ターンを終えると現れる')
     return
@@ -188,7 +198,7 @@ async function fight($: $, isBoss: boolean) {
 
 /** 1 手。勝ったら経験値と勝ち数を入れて残す */
 async function command($: $, cmd: Command) {
-  const { learned } = await read($, HERO)
+  const { learned } = await readHero($)
   let ended: RpgBattle | undefined
   await update($, BATTLE, b => {
     if (!b || b.result !== 'fight') return b
@@ -199,7 +209,7 @@ async function command($: $, cmd: Command) {
   if (!ended || ended.result !== 'won') return
   const won = ended
   const lead = [`${won.enemy.name}に勝った! 経験値 ${won.gainedXp}`]
-  if (won.enemy.isBoss && (await read($, HERO)).defeated[won.enemy.id] === undefined) lead.push(`ボスを初めて倒した! SP +${SP_RULE.boss}`)
+  if (won.enemy.isBoss && (await readHero($)).defeated[won.enemy.id] === undefined) lead.push(`ボスを初めて倒した! SP +${SP_RULE.boss}`)
   await change($, (h, now) => winBattle(h, won, now), false, lead)
   await save($)
 }
@@ -316,7 +326,7 @@ export const register: Register = on => {
     const Svg = e.surface !== 'terminal' && 'Svg' in t ? t.Svg : undefined
     const owned = await readOwned($)
     // 持っていない装備は外した姿で見せる (store の装備はそのまま)
-    const hero = wear(await read($, HERO), owned)
+    const hero = wear(await readHero($), owned)
     const tab = await read($, TAB)
     const isConfirming = await read($, CONFIRM)
     const news = await read($, NEWS)

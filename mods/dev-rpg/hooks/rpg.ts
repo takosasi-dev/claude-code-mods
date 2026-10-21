@@ -386,6 +386,13 @@ export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): Rpg
   return out
 }
 
+/**
+ * 0.2 のまま state に残っている勇者 (開いたまま /reload-plugins した時) に、0.3.0 の値を足す。
+ * 今の値 (s・HP・経験値バー) はそのまま。もう新しい形ならそのまま返す
+ */
+export const upgradeHero = (h: RpgHero): RpgHero =>
+  (h as Partial<RpgHero>).alloc !== undefined ? h : { ...h, ...fromSaved(h), synced: fromSaved(h.synced) }
+
 /** その時刻の日付 (この環境の時刻帯で YYYY-MM-DD) */
 export const dayKey = (ms: number) => {
   const d = new Date(ms)

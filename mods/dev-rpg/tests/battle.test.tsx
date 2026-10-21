@@ -313,3 +313,31 @@ test('冒険をやり直すと戦いも成長も消える', async ($, on) => {
   expect(battle()).toBeNull()
   expect(stored()).toMatchObject({ xp: 0, alloc: { str: 0, vit: 0, int: 0, agi: 0 }, learned: {}, wins: 0, encounters: 0 })
 })
+
+test('0.2 の勇者が state に残ったまま読み直しても (/reload-plugins) 落ちずに新しい値を足す', async ($, on) => {
+  // 0.2.0 の形: 戦いと成長の値が無い。セッションは始まっている
+  const old = { xp: 940, turns: 5, tools: 9, edits: 1, reads: 1, shells: 7, recoveries: 0, errors: 0, sessions: 5, achievements: { 'first-bash': NOW }, day: '2026-10-21', dayTurns: 5, equip: {} }
+  const stale = { ...old, s: { ...startSession(INITIAL_SAVED, NOW - 60_000).s }, hpPct: 100, xpFrom: 0, synced: old }
+  // 前のモジュールが書いた値の代わり: 新しいモジュールが書くまでは古い勇者を読ませる
+  let isWritten = false
+  on('state.get', { plugin: 'dev-rpg', key: 'hero' }, async (_$, e, next) => {
+    const r = await next(e)
+    return isWritten ? r : { value: { value: stale as never, version: r.value?.version ?? 0 } }
+  })
+  on('state.set', { plugin: 'dev-rpg', key: 'hero' }, async (_$, e, next) => {
+    const r = await next(e)
+    if (r.value?.isSet) isWritten = true
+    return r
+  })
+  const { stored } = await boot($, on, old)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Lv 8: レベルで 14、実績 2 個 (読み直した時に「初めての一太刀」も付く) で 2
+  expect((await ui.find({ type: 'Button', key: 'growth' }))?.text).toBe('成長 (SP 16)')
+  expect((await ui.find({ type: 'Button', key: 'battle' }))?.text).toBe('戦う (気配 3)')
+  await turn($)
+  // セッションの回数は足し直さない (state の方を続ける)。経験値はターンの分だけ
+  expect(stored()).toMatchObject({ xp: 950, sessions: 5, turns: 6, encounters: 4, alloc: { str: 0, vit: 0, int: 0, agi: 0 } })
+  await ui.press({ key: 'battle' })
+  await ui.press({ key: 'find' })
+  expect(stored()).toMatchObject({ encounters: 3, battles: 1 })
+})
