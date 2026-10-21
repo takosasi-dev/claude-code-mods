@@ -49,6 +49,8 @@ export type RpgSaved = {
   learned: Record<string, number>
   /** 倒したボスの id → 初めて倒した時刻 (ms) */
   defeated: Record<string, number>
+  /** ここから 0.4.0。湧いたボスの気配 (0 か 1)。あれば気配を使わずにボスに挑めて、経験値が 1.5 倍 */
+  bossSign: number
 }
 
 /** このセッションの間だけの値 */

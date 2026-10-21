@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { RpgBattle, RpgGachaCard, RpgHero, RpgSaved, RpgSlot, RpgStat, RpgTab } from '../types'
-import { act, battleLines, battleSvg, canUse, endBattle, growthLines, growthSvg, nextBoss, startBattle } from './battle'
+import { act, battleLines, battleSvg, canUse, endBattle, growthLines, growthSvg, nextBoss, spawnBoss, startBattle } from './battle'
 import type { Command } from './battle'
 import {
   INITIAL,
@@ -178,18 +178,19 @@ async function equip($: $, slot: RpgSlot, id: string) {
 
 // ---------------------------------------------------------------- 戦い
 
-/** 魔物を探す (isBoss ならボスに挑む)。遭遇を 1 つ使う。戦っている間は何もしない */
+/** 魔物を探す (isBoss ならボスに挑む)。遭遇を 1 つ使う。ボスが湧いていれば、遭遇の代わりにその気配を使う。戦っている間は何もしない */
 async function fight($: $, isBoss: boolean) {
   if ((await read($, BATTLE))?.result === 'fight') return
   await ensureLoaded($)
   const now = await $.clock.now()
   const hero = wear(await readHero($), await readOwned($))
-  if (hero.encounters <= 0) {
+  const isSpawned = isBoss && hero.bossSign > 0
+  if (!isSpawned && hero.encounters <= 0) {
     await update($, NEWS, () => 'まだ魔物の気配がない。ターンを終えると現れる')
     return
   }
   // 種は時刻と戦った回数から (同じ時刻に 2 回押しても別の敵)
-  const battle = startBattle(hero, (now ^ Math.imul(hero.battles + 1, 2654435761)) >>> 0, isBoss)
+  const battle = startBattle(hero, (now ^ Math.imul(hero.battles + 1, 2654435761)) >>> 0, isBoss, isSpawned)
   // 続けて押された時は、先に置いた戦いを残す (気配も 1 つだけ使う)。update は先を越されるとやり直すので、印も毎回付け直す
   let isPlaced = false
   await update($, BATTLE, b => {
@@ -198,7 +199,9 @@ async function fight($: $, isBoss: boolean) {
   })
   if (!isPlaced) return
   await update($, NEWS, () => '')
-  await change($, h => ({ ...h, encounters: Math.max(0, h.encounters - 1), battles: h.battles + 1 }))
+  await change($, h =>
+    isSpawned ? { ...h, bossSign: 0, battles: h.battles + 1 } : { ...h, encounters: Math.max(0, h.encounters - 1), battles: h.battles + 1 },
+  )
   await save($)
 }
 
@@ -308,10 +311,20 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 答えて終わったターンだけ数える (中断・エラー・拒否は数えない)。保存はどのターンの終わりでも
+  // 答えて終わったターンだけ数える (中断・エラー・拒否は数えない)。ボスが湧くのもここ。保存はどのターンの終わりでも
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId) {
-      if (e.reason === 'answer') await change($, onTurnEnd, true)
+      if (e.reason === 'answer') {
+        const lead: string[] = []
+        const fn = (h: RpgHero, now: number) => {
+          const after = spawnBoss(onTurnEnd(h, now), now)
+          lead.length = 0
+          if (after.bossSign > h.bossSign) lead.push(`ボスの気配! ${nextBoss(after).name}が待っている (気配を使わずに挑めて、経験値 1.5 倍)`)
+          return after
+        }
+        await change($, fn, true, lead)
+        if (lead.length > 0) $.ui.toast(`ボスの気配! ${nextBoss(await readHero($)).name}が湧いた`)
+      }
       await save($)
     }
     return next(e)
@@ -431,7 +444,13 @@ export const register: Register = on => {
               onPress={() => void fight($, false)}
             />
             {level >= boss.level && (
-              <Button key="boss" label={`ボスに挑む: ${boss.name}`} dimColor={hero.encounters <= 0} onPress={() => void fight($, true)} />
+              <Button
+                key="boss"
+                label={hero.bossSign > 0 ? `湧いたボスに挑む: ${boss.name} (経験値 1.5 倍)` : `ボスに挑む: ${boss.name}`}
+                variant={hero.bossSign > 0 ? 'primary' : undefined}
+                dimColor={hero.bossSign <= 0 && hero.encounters <= 0}
+                onPress={() => void fight($, true)}
+              />
             )}
             {battle && <Button key="close" label="戦いを終える" onPress={() => void closeBattle($)} />}
           </Box>
@@ -451,7 +470,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           <Button
             key="battle"
-            label={tab === 'battle' ? 'ステータスに戻る' : isFighting ? '戦う (戦闘中)' : `戦う (気配 ${hero.encounters})`}
+            label={tab === 'battle' ? 'ステータスに戻る' : isFighting ? '戦う (戦闘中)' : `戦う (気配 ${hero.encounters}${hero.bossSign > 0 ? '・ボス出現' : ''})`}
             variant={tab === 'battle' ? undefined : 'primary'}
             onPress={() => toggle('battle')}
           />

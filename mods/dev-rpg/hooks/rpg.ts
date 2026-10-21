@@ -271,6 +271,7 @@ export const INITIAL_SAVED: RpgSaved = {
   alloc: { str: 0, vit: 0, int: 0, agi: 0 },
   learned: {},
   defeated: {},
+  bossSign: 0,
 }
 
 /** 遭遇はここまでためられる */
@@ -296,7 +297,7 @@ export const freshSession = (now: number): RpgSession => ({
 
 export const INITIAL: RpgHero = { ...INITIAL_SAVED, s: freshSession(0), hpPct: 100, xpFrom: 0, synced: INITIAL_SAVED }
 
-const SAVED_KEYS = ['xp', 'turns', 'tools', 'edits', 'reads', 'shells', 'recoveries', 'errors', 'sessions', 'dayTurns', 'battles', 'wins', 'encounters'] as const
+const SAVED_KEYS = ['xp', 'turns', 'tools', 'edits', 'reads', 'shells', 'recoveries', 'errors', 'sessions', 'dayTurns', 'battles', 'wins', 'encounters', 'bossSign'] as const
 
 export const toSaved = (h: RpgHero): RpgSaved => {
   const out = {
@@ -343,6 +344,7 @@ export function fromSaved(raw: unknown): RpgSaved {
   // 戦いと成長は 0.3.0 から。無い (古い store) なら遭遇を少し持たせて始める
   if (o.encounters === undefined) out.encounters = FIRST_ENCOUNTERS
   out.encounters = Math.min(MAX_ENCOUNTERS, out.encounters)
+  out.bossSign = Math.min(1, out.bossSign)
   const al = typeof o.alloc === 'object' && o.alloc !== null ? (o.alloc as Record<string, unknown>) : {}
   out.alloc = { str: 0, vit: 0, int: 0, agi: 0 }
   for (const k of STATS) {
@@ -378,6 +380,7 @@ export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): Rpg
   }
   for (const k of SAVED_KEYS) out[k] = Math.max(0, store[k] + mine[k] - base[k])
   out.encounters = Math.min(MAX_ENCOUNTERS, out.encounters)
+  out.bossSign = Math.min(1, out.bossSign)
   // 振った数も差分で足す (振り直しは減る差分)
   for (const k of STATS) out.alloc[k] = Math.max(0, store.alloc[k] + mine.alloc[k] - base.alloc[k])
   const day = mine.day > store.day ? mine.day : store.day
@@ -388,11 +391,13 @@ export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): Rpg
 }
 
 /**
- * 0.2 のまま state に残っている勇者 (開いたまま /reload-plugins した時) に、0.3.0 の値を足す。
+ * 古い版のまま state に残っている勇者 (開いたまま /reload-plugins した時) に、新しい値 (0.3.0 の戦いと成長・0.4.0 のボスの気配) を足す。
  * 今の値 (s・HP・経験値バー) はそのまま。もう新しい形ならそのまま返す
  */
 export const upgradeHero = (h: RpgHero): RpgHero =>
-  (h as Partial<RpgHero>).alloc !== undefined ? h : { ...h, ...fromSaved(h), synced: fromSaved(h.synced) }
+  (h as Partial<RpgHero>).alloc !== undefined && (h as Partial<RpgHero>).bossSign !== undefined
+    ? h
+    : { ...h, ...fromSaved(h), synced: fromSaved(h.synced) }
 
 /** その時刻の日付 (この環境の時刻帯で YYYY-MM-DD) */
 export const dayKey = (ms: number) => {

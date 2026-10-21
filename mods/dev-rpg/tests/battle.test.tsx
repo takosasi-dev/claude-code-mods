@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
 import type { RpgBattle, RpgHero, RpgSaved } from '../types'
-import { BOSSES, ENEMIES, act, battleSvg, canUse, endBattle, enemyOf, growthSvg, nextBoss, startBattle, winBattle } from '../hooks/battle'
+import { BOSSES, ENEMIES, act, battleSvg, canUse, endBattle, enemyOf, growthSvg, nextBoss, spawnBoss, startBattle, winBattle } from '../hooks/battle'
 import {
   ACHIEVEMENTS,
   BOSS_IDS,
@@ -170,6 +170,39 @@ test('同じ種なら同じ敵と同じ結果。勝つと経験値・勝ち数�
   expect(winBattle(hb, bw, NOW + 1).defeated.loop).toBe(NOW)
   expect(nextBoss(hb).id).toBe('outage')
   expect(nextBoss({ ...hb, defeated: { loop: 1, outage: 1, legacy: 1 } }).id).toBe('legacy')
+})
+
+test('ボスはレベルが届けば、20 ターンごとと 5% で湧く。湧いたボスは経験値 1.5 倍', () => {
+  // Lv 9 では湧かない (次のボスは Lv 10)
+  expect(spawnBoss(heroAt(9, { turns: 20 }), NOW).bossSign).toBe(0)
+  // 20 ターンごとに必ず。もう湧いていればそのまま
+  const h = heroAt(10, { turns: 20 })
+  expect(spawnBoss(h, NOW).bossSign).toBe(1)
+  const up = { ...h, bossSign: 1 }
+  expect(spawnBoss(up, NOW)).toBe(up)
+  // 20 の倍数でない時は 5% 前後 (時刻とターン数で決まる)
+  let n = 0
+  let tries = 0
+  for (let t = 1; t <= 4000; t++) {
+    if (t % 20 === 0) continue
+    tries++
+    if (spawnBoss(heroAt(10, { turns: t }), NOW + t * 61_000).bossSign > 0) n++
+  }
+  expect(n / tries).toBeGreaterThan(0.03)
+  expect(n / tries).toBeLessThan(0.07)
+  // 全部倒した後も、最後のボスが湧く
+  expect(spawnBoss(heroAt(45, { turns: 40, defeated: { loop: NOW, outage: NOW, legacy: NOW } }), NOW).bossSign).toBe(1)
+  // 湧いたボスは経験値 1.5 倍
+  const normal = startBattle(h, 1, true)
+  const spawned = startBattle(h, 1, true, true)
+  expect(spawned.enemy.xp).toBe(Math.round(normal.enemy.xp * 1.5))
+  expect(spawned.log[0]).toBe('無限ループ・ドラゴンが立ちはだかった! (経験値 1.5 倍)')
+  // 保存は 0 か 1。2 つのセッションで湧いても 1、片方で挑めば 0
+  expect(fromSaved({}).bossSign).toBe(0)
+  expect(fromSaved({ bossSign: 5 }).bossSign).toBe(1)
+  const one = { ...INITIAL_SAVED, bossSign: 1 }
+  expect(mergeSaved(one, INITIAL_SAVED, one).bossSign).toBe(1)
+  expect(mergeSaved(one, one, INITIAL_SAVED).bossSign).toBe(0)
 })
 
 test('弱い勇者はボスに負ける。経験値は減らない', () => {
@@ -395,6 +428,27 @@ test('ボスに負けると HP が減ったまま残る', async ($, on) => {
   await ui.press({ key: 'battle' })
   // Lv 10 の最大 HP は 140。負けると 10%
   expect(await ui.find({ type: 'Text', text: /^HP 14\/140 / })).toBeDefined()
+})
+
+test('ターンを終えてボスが湧くと、魔物の気配を使わずに挑める', async ($, on) => {
+  const { stored, battle } = await boot($, on, { xp: xpToReach(10), turns: 19, encounters: 0 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // 20 ターン目で必ず湧く
+  await turn($)
+  expect(stored()).toMatchObject({ turns: 20, bossSign: 1, encounters: 1 })
+  expect(await ui.find({ type: 'Text', text: /^ボスの気配! 無限ループ・ドラゴンが待っている/ })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'battle' }))?.text).toBe('戦う (気配 1・ボス出現)')
+  await ui.press({ key: 'battle' })
+  expect(await ui.find({ type: 'Text', text: 'ボスの気配! 気配を使わずに挑めて、経験値 1.5 倍' })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'boss' }))?.text).toBe('湧いたボスに挑む: 無限ループ・ドラゴン (経験値 1.5 倍)')
+  await ui.press({ key: 'boss' })
+  expect(battle()?.enemy).toMatchObject({ id: 'loop', xp: Math.round(enemyOf(BOSSES[0]!, 10, true).xp * 1.5) })
+  expect(stored()).toMatchObject({ bossSign: 0, encounters: 1, battles: 1 })
+  // 終われば、湧いていない時のボタン (魔物の気配を使う) に戻る
+  for (let i = 0; i < 60 && battle()?.result === 'fight'; i++) await ui.press({ key: 'act:attack' })
+  await ui.press({ key: 'close' })
+  expect((await ui.find({ type: 'Button', key: 'boss' }))?.text).toBe('ボスに挑む: 無限ループ・ドラゴン')
+  expect(await ui.find({ type: 'Text', text: /^ボスは時々湧く/ })).toBeDefined()
 })
 
 test('冒険をやり直すと戦いも成長も消える', async ($, on) => {

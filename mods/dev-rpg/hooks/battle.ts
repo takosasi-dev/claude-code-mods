@@ -96,6 +96,9 @@ export function enemyOf(kind: Kind, level: number, isBoss: boolean): RpgEnemy {
 export const nextBoss = (h: RpgHero) => BOSSES.find(b => h.defeated[b.id] === undefined) ?? BOSSES[BOSSES.length - 1]!
 export const isAllBossesDown = (h: RpgHero) => BOSS_IDS.every(id => h.defeated[id] !== undefined)
 
+/** ボスが湧く: 次のボスのレベルに届いていれば、ターンを終えるたびに 5%、それと 20 ターンごとに必ず。湧いたボスは経験値 1.5 倍 */
+export const BOSS_SPAWN = { chance: 0.05, every: 20, xp: 1.5 } as const
+
 // ---------------------------------------------------------------- 乱数 (種から決まる)
 
 /** mulberry32。同じ種なら同じ並び。戦いの種は 1 手ごとに進めて state に置く */
@@ -109,6 +112,19 @@ function rngOf(seed: number) {
     return ((x ^ (x >>> 14)) >>> 0) / 4294967296
   }
   return { next, seed: () => t }
+}
+
+// ---------------------------------------------------------------- ボスが湧く
+
+/**
+ * ターンを終えた後に呼ぶ (turns は数え終わった値)。気配が無く、次のボスのレベルに届いていれば、
+ * 20 ターンごとか 5% でボスの気配を出す。5% の乱数は時刻とターン数から決まる
+ */
+export function spawnBoss(h: RpgHero, now: number): RpgHero {
+  if (h.bossSign > 0 || levelInfo(h.xp).level < nextBoss(h).level) return h
+  const isDue = h.turns > 0 && h.turns % BOSS_SPAWN.every === 0
+  const isLucky = rngOf((now ^ Math.imul(h.turns, 2654435761)) >>> 0).next() < BOSS_SPAWN.chance
+  return isDue || isLucky ? { ...h, bossSign: 1 } : h
 }
 
 // ---------------------------------------------------------------- 戦いを始める
@@ -130,14 +146,15 @@ export function fighterOf(h: RpgHero): RpgFighter {
   }
 }
 
-/** 魔物を探す (boss なら次のボスに挑む)。seed で敵の種類とレベルが決まる */
-export function startBattle(h: RpgHero, seed: number, isBoss: boolean): RpgBattle {
+/** 魔物を探す (boss なら次のボスに挑む。isSpawned なら湧いたボスで経験値 1.5 倍)。seed で敵の種類とレベルが決まる */
+export function startBattle(h: RpgHero, seed: number, isBoss: boolean, isSpawned = false): RpgBattle {
   const r = rngOf(seed)
   const L = levelInfo(h.xp).level
   let enemy: RpgEnemy
   if (isBoss) {
     const kind = nextBoss(h)
     enemy = enemyOf(kind, kind.level, true)
+    if (isSpawned) enemy = { ...enemy, xp: Math.round(enemy.xp * BOSS_SPAWN.xp) }
   } else {
     const pool = ENEMIES.filter(k => k.level <= L)
     const kind = pool[Math.floor(r.next() * pool.length)] ?? ENEMIES[0]!
@@ -155,7 +172,7 @@ export function startBattle(h: RpgHero, seed: number, isBoss: boolean): RpgBattl
     isCharging: false,
     usedRollback: false,
     seed: r.seed(),
-    log: [isBoss ? `${enemy.name}が立ちはだかった!` : `${enemy.name}があらわれた!`],
+    log: [isBoss ? `${enemy.name}が立ちはだかった!${isSpawned ? ' (経験値 1.5 倍)' : ''}` : `${enemy.name}があらわれた!`],
     result: 'fight',
     gainedXp: 0,
     hitEnemy: 0,
@@ -563,7 +580,7 @@ function lobbySvg(h: RpgHero) {
   s += `<text x="24" y="112" font-size="12" fill="${K.weak}">戦うと 1 つ使う。勝つと経験値、${SP_RULE.winsPer} 勝ごとに SP +1</text>`
 
   // ── ボス
-  s += win(8, 128, 364, 148)
+  s += win(8, 128, 364, 172)
   s += `<text x="24" y="154" font-size="14" font-weight="bold" fill="${K.text}">ボス</text>`
   s += `<text x="358" y="154" font-size="12" fill="${K.weak}" text-anchor="end">初めて倒すと SP +${SP_RULE.boss}</text>`
   BOSSES.forEach((b, i) => {
@@ -573,10 +590,15 @@ function lobbySvg(h: RpgHero) {
     const col = isDown ? K.yellow : isNext ? K.text : K.offText
     s += `<text x="24" y="${y}" font-size="13" font-family="${MONO}" fill="${col}">Lv${String(b.level).padStart(3, ' ')}</text>`
     s += `<text x="80" y="${y}" font-size="13"${isNext ? ' font-weight="bold"' : ''} fill="${col}">${esc(b.name)}</text>`
-    s += `<text x="358" y="${y}" font-size="12" fill="${col}" text-anchor="end">${isDown ? '撃破' : isNext ? (L >= b.level ? '挑める' : `Lv ${b.level} 推奨`) : 'まだ'}</text>`
+    s += `<text x="358" y="${y}" font-size="12" fill="${col}" text-anchor="end">${isDown ? '撃破' : isNext ? (h.bossSign > 0 ? '湧いた!' : L >= b.level ? '挑める' : `Lv ${b.level} 推奨`) : 'まだ'}</text>`
   })
-  s += `<text x="24" y="${178 + BOSSES.length * 28}" font-size="12" fill="${K.weak}">ボスからは逃げられない。スキルと SP で備えよう</text>`
-  return svgDoc(284, s)
+  const signY = 178 + BOSSES.length * 28
+  s +=
+    h.bossSign > 0
+      ? `<text x="24" y="${signY}" font-size="13" font-weight="bold" fill="${K.purple}">ボスの気配! 気配を使わずに挑めて、経験値 1.5 倍</text>`
+      : `<text x="24" y="${signY}" font-size="12" fill="${K.weak}">${L >= boss.level ? 'ボスは時々湧く' : `Lv ${boss.level} から湧く`} (毎ターン 5%・${BOSS_SPAWN.every} ターンごとに必ず)</text>`
+  s += `<text x="24" y="${signY + 20}" font-size="12" fill="${K.weak}">ボスからは逃げられない。スキルと SP で備えよう</text>`
+  return svgDoc(308, s)
 }
 
 /** 戦いのタブの行 (terminal と Svg の alt) */
@@ -590,6 +612,9 @@ export function battleLines(h: RpgHero, b: RpgBattle | null): Line[] {
         text: isAllBossesDown(h) ? `ボスは全部倒した (もう一度: ${boss.name})` : `次のボス: Lv ${boss.level} ${boss.name}`,
         color: 'magenta',
       },
+      h.bossSign > 0
+        ? { text: 'ボスの気配! 気配を使わずに挑めて、経験値 1.5 倍', isBold: true, color: 'magenta' }
+        : { text: `ボスは時々湧く (毎ターン 5%・${BOSS_SPAWN.every} ターンごとに必ず)`, isDim: true },
     ]
   }
   const en = b.enemy
