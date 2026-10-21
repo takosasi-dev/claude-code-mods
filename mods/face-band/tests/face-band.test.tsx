@@ -28,7 +28,8 @@ type Opts = { denyFace?: boolean; below?: Below; stored?: Record<string, unknown
 // エンジンの代役を下に置く (下の hook はテストの最初の $ より前に全部登録する)
 const setup = (on: On, opts: Opts = {}) => {
   const clock = mock.clock(on, { now: NOW })
-  const saved: Record<string, unknown> = { ...opts.stored }
+  // 何も渡さなければ、/face で出した後の人 (store に false) として始める
+  const saved: Record<string, unknown> = { ...(opts.stored ?? { isHidden: false }) }
   const registered: string[] = []
   const invalidated: string[] = []
   const toolSeen: (() => Promise<void>)[] = []
@@ -210,6 +211,18 @@ test('/face で隠すと下の mod の帯だけが残り、もう一度で戻る
   expect(saved.isHidden).toBe(true)
   const back = await $.command.run({ command: 'face', args: '', origin: { kind: 'composer' }, presentation })
   expect(back).toMatchObject({ text: '顔の帯を出しました。' })
+  expect(await ui.find({ key: 'face' })).toBeDefined()
+  expect(saved.isHidden).toBe(false)
+})
+
+test('入れただけでは帯を出さず、下の mod の帯だけ。/face で出すと store に残る', async ($, on) => {
+  const { saved } = setup(on, { stored: {}, below: 'text' })
+  await begin($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ key: 'face' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '作業バー' })).toBeDefined()
+  const on1 = await $.command.run({ command: 'face', args: '', origin: { kind: 'composer' }, presentation })
+  expect(on1).toMatchObject({ text: '顔の帯を出しました。' })
   expect(await ui.find({ key: 'face' })).toBeDefined()
   expect(saved.isHidden).toBe(false)
 })

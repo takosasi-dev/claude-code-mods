@@ -1,7 +1,7 @@
 {
   "name": "face-band",
-  "version": "0.2.0",
-  "description": "入力欄の上の帯に、Claude の状態(待ち・考え中・ツール実行中・できた・しょんぼり)で変わる顔を出す。/face でオン/オフ",
+  "version": "0.3.0",
+  "description": "入力欄の上の帯に、Claude の状態(待ち・考え中・ツール実行中・できた・しょんぼり)で変わる顔を出す。最初は隠れていて、/face でオン/オフ",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"
 }

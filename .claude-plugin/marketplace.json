@@ -29,7 +29,7 @@
     { "name": "ci-pane", "source": "./mods/ci-pane", "description": "/ci で今のブランチの PR と GitHub Actions の結果" },
     { "name": "port-watch", "source": "./mods/port-watch", "description": "/ports で待ち受け中のポートと開発サーバーを止めるボタン" },
     { "name": "pre-check", "source": "./mods/pre-check", "description": "/precheck でコミット前に差分・秘密情報・衝突の印・テストを確かめる" },
-    { "name": "face-band", "source": "./mods/face-band", "description": "入力欄の上に状態で変わる Claude の顔" },
+    { "name": "face-band", "source": "./mods/face-band", "description": "入力欄の上に状態で変わる Claude の顔 (/face で出す)" },
     { "name": "done-chime", "source": "./mods/done-chime", "description": "/chime 長いターンが終わったら音で知らせる" },
     { "name": "turn-haiku", "source": "./mods/turn-haiku", "description": "/haiku でターンでやった事を五七五の短冊に" },
     { "name": "session-timeline", "source": "./mods/session-timeline", "description": "/timeline でターンとツールの年表" },

@@ -6,7 +6,8 @@ import { followTheme, readTheme } from './style'
 import { FACE_TEXT, IDLE, clean, endWord, faceAlt, faceSvg, subLine } from './face'
 
 const NOW = atom({ plugin: 'face-band', key: 'now' } as const, IDLE)
-const HIDDEN = atom({ plugin: 'face-band', key: 'isHidden' } as const, false)
+// 最初は隠しておく (0.3.0 から)。/face で出すと store に false が残り、次からも出る
+const HIDDEN = atom({ plugin: 'face-band', key: 'isHidden' } as const, true)
 const STORE_KEY = 'isHidden'
 const DESCRIPTION = '入力欄の上の顔の帯をオン/オフする'
 /** にっこり/しょんぼりを見せる長さ */
@@ -44,7 +45,7 @@ export const register: Register = on => {
     ownsMain = got?.command === 'face'
     if (!ownsMain) await $.command.register({ name: 'face-band', description: DESCRIPTION }).catch(() => {})
     const stored = await $.store.get(STORE_KEY).catch(() => undefined)
-    await update($, HIDDEN, () => stored === true)
+    await update($, HIDDEN, () => stored !== false)
     // リロードがにっこり/しょんぼりの途中だったら、戻す時計は消えているので待ちに戻す
     await update($, NOW, n => (n.mood === 'happy' || n.mood === 'sad' ? { ...IDLE, tool: n.tool, seq: n.seq + 1 } : n))
     // VS Code は帯を「フック無し」と 2 回見ると聞きに来なくなる。後から読み込まれた時のために描き直しを頼む
