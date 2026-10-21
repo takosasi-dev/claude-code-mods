@@ -7,7 +7,7 @@ import { clean, esc, isLight, short } from './style'
 export const XP = { turn: 10, recovery: 15, edit: 5, shell: 4, read: 2, agent: 6, other: 2 } as const
 /** これだけ間が空いたら「休んだ」として HP が戻る */
 export const REST_MS = 15 * 60_000
-/** HP は休んでから 2 分ごとに 1% 減る。10% より下には減らない */
+/** HP は休んでから 2 分ごとに 1% 減る (戦いの傷はその上に減る)。10% より下には減らない */
 const HP_STEP_MS = 2 * 60_000
 const HP_MIN = 10
 export const MAX_LEVEL = 99
@@ -291,6 +291,7 @@ export const freshSession = (now: number): RpgSession => ({
   turnTools: 0,
   turnErrors: 0,
   isErrorPending: false,
+  wound: 0,
 })
 
 export const INITIAL: RpgHero = { ...INITIAL_SAVED, s: freshSession(0), hpPct: 100, xpFrom: 0, synced: INITIAL_SAVED }
@@ -399,11 +400,14 @@ export const dayKey = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export const hpPctAt = (h: RpgHero, now: number) => Math.max(HP_MIN, 100 - Math.floor(Math.max(0, now - h.s.restedAt) / HP_STEP_MS))
+/** 休んでからの疲れ (HP の減った %、下限なし) */
+export const fatigueAt = (h: RpgHero, now: number) => Math.floor(Math.max(0, now - h.s.restedAt) / HP_STEP_MS)
 
-/** 間が空いていたら休んだことにする */
+export const hpPctAt = (h: RpgHero, now: number) => Math.max(HP_MIN, 100 - fatigueAt(h, now) - (h.s.wound ?? 0))
+
+/** 間が空いていたら休んだことにする (戦いの傷も治る) */
 const touch = (s: RpgSession, now: number): RpgSession =>
-  now - s.lastActiveAt >= REST_MS ? { ...s, restedAt: now, lastActiveAt: now } : { ...s, lastActiveAt: now }
+  now - s.lastActiveAt >= REST_MS ? { ...s, restedAt: now, lastActiveAt: now, wound: 0 } : { ...s, lastActiveAt: now }
 
 export const gain = (h: RpgHero, xp: number): RpgHero => ({ ...h, xp: h.xp + xp, xpFrom: levelInfo(h.xp).frac })
 

@@ -68,6 +68,8 @@ export type RpgSession = {
   turnErrors: number
   /** 今のターンでエラーが出て、まだ成功していない */
   isErrorPending: boolean
+  /** 戦いで減った HP (%)。休むと 0 に戻る (0.3.1 から。無ければ 0) */
+  wound?: number
 }
 
 export type RpgHero = RpgSaved & {

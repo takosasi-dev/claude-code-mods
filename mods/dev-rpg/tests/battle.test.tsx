@@ -3,18 +3,20 @@ import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
 import type { RpgBattle, RpgHero, RpgSaved } from '../types'
-import { BOSSES, ENEMIES, act, battleSvg, enemyOf, growthSvg, nextBoss, startBattle, winBattle } from '../hooks/battle'
+import { BOSSES, ENEMIES, act, battleSvg, canUse, endBattle, enemyOf, growthSvg, nextBoss, startBattle, winBattle } from '../hooks/battle'
 import {
   ACHIEVEMENTS,
   BOSS_IDS,
   INITIAL_SAVED,
   MAX_ENCOUNTERS,
+  REST_MS,
   SKILLS,
   fromSaved,
   learnSkill,
   levelInfo,
   mergeSaved,
   onTurnEnd,
+  onTurnStart,
   raiseStat,
   respec,
   spOf,
@@ -196,8 +198,6 @@ test('スキル: MP が要り、覚えていないと使えない。回復・盾
   const healed = act(hurt, { kind: 'skill', id: 'heal' }, all)
   expect(healed.me.mp).toBe(hurt.me.mp - 6)
   expect(healed.log.some(t => t.startsWith('HP が') && t.endsWith('回復した'))).toBe(true)
-  // 盾は 3 ラウンド (1 ラウンド終わって 2)
-  expect(act(hurt, { kind: 'skill', id: 'guard' }, all).guard).toBe(2)
   // ロールバックは 1 回の戦いで 1 度
   const rb = act(hurt, { kind: 'skill', id: 'rollback' }, all)
   expect(rb.usedRollback).toBe(true)
@@ -209,6 +209,66 @@ test('スキル: MP が要り、覚えていないと使えない。回復・盾
   // CI: ラウンドの終わりに HP が戻る
   const ci = act({ ...hurt, me: { ...hurt.me, regen: 5 } }, { kind: 'defend' }, all)
   expect(ci.log.some(t => t.startsWith('CI が回って'))).toBe(true)
+})
+
+test('盾は勇者と敵のどちらが先でも 3 回分効く', () => {
+  const all = Object.fromEntries(SKILLS.map(s => [s.id, NOW]))
+  const b0 = startBattle(heroAt(20), 99, false)
+  // 盾が無い時の傷は 850〜1150、盾があると 425〜575
+  const base: RpgBattle = {
+    ...b0,
+    enemy: { ...b0.enemy, hp: 99999, maxHp: 99999, atk: 1000, spd: 500, trait: 'none' },
+    me: { ...b0.me, def: 0, hp: 999999, maxHp: 999999, mp: 99, crit: 0 },
+  }
+  for (const spd of [999, 0]) {
+    let b = act({ ...base, me: { ...base.me, spd } }, { kind: 'skill', id: 'guard' }, all)
+    const hits = [b.hitMe]
+    for (let i = 0; i < 5; i++) {
+      b = act(b, { kind: 'attack' }, all)
+      hits.push(b.hitMe)
+    }
+    expect(hits.filter(n => n > 0 && n < 700).length).toBe(3)
+  }
+})
+
+test('HP が満タンなら回復とロールバックは使えない。ボスから逃げようとしてもラウンドは進まない', () => {
+  const all = Object.fromEntries(SKILLS.map(s => [s.id, NOW]))
+  const b0 = startBattle(heroAt(20), 99, false)
+  const full: RpgBattle = { ...b0, me: { ...b0.me, hp: b0.me.maxHp, mp: 99 } }
+  for (const id of ['heal', 'rollback']) {
+    expect(canUse(full, id, all)).toBe(false)
+    expect(canUse({ ...full, me: { ...full.me, hp: 1 } }, id, all)).toBe(true)
+    const nope = act(full, { kind: 'skill', id }, all)
+    expect(nope).toMatchObject({ round: full.round, me: full.me, usedRollback: false })
+    expect(nope.log.at(-1)).toBe('HP は減っていない')
+  }
+  const boss = startBattle(heroAt(10), 1, true)
+  const stay = act(boss, { kind: 'flee' }, {})
+  expect(stay).toMatchObject({ round: boss.round, me: boss.me, seed: boss.seed, result: 'fight' })
+  expect(stay.log.at(-1)).toBe('ボスからは逃げられない!')
+})
+
+test('戦いで減った HP は終わった後も残り、休むと戻る。負けると一番下まで減る', () => {
+  const h = heroAt(8)
+  const b = startBattle(h, 5, false)
+  const half: RpgBattle = { ...b, me: { ...b.me, hp: Math.round(b.me.maxHp / 2) }, result: 'fled' }
+  const after = endBattle(h, half, NOW)
+  expect(after).toMatchObject({ hpPct: 50, xp: h.xp, wins: 0 })
+  // 次の戦いはその HP から
+  expect(startBattle(after, 6, false).me.hp).toBe(Math.round(b.me.maxHp / 2))
+  // 戦いの中で回復して終われば戻る
+  expect(endBattle(after, { ...half, me: { ...half.me, hp: half.me.maxHp } }, NOW).hpPct).toBe(100)
+  // 戦っている間の疲れ (10 分で 5) は二重に数えない
+  expect(endBattle(h, half, NOW + 10 * 60_000).hpPct).toBe(50)
+  // 負けると一番下 (10%)。経験値は減らない
+  const lost = endBattle(h, { ...b, me: { ...b.me, hp: 0 }, result: 'lost' }, NOW)
+  expect(lost).toMatchObject({ hpPct: 10, xp: h.xp })
+  // 勝てば経験値と勝ち数も
+  expect(endBattle(h, { ...b, result: 'won', gainedXp: 30 }, NOW)).toMatchObject({ xp: h.xp + 30, wins: 1, hpPct: 100 })
+  // 休む (15 分あく) と傷は消える
+  expect(onTurnStart(lost, NOW + REST_MS).hpPct).toBe(100)
+  // 戦いの途中は何もしない
+  expect(endBattle(h, b, NOW)).toBe(h)
 })
 
 test('絵: 戦い・気配・成長の SVG は幅と上限を守る', () => {
@@ -301,6 +361,41 @@ for (const surface of SURFACES) {
     expect(await ui.find({ type: 'Button', key: 'skill:heal' })).toBeUndefined()
   })
 }
+
+test('「魔物を探す」を続けて押しても戦いは 1 つで、気配も 1 つだけ減る', async ($, on) => {
+  const { stored, battle } = await boot($, on, { xp: xpToReach(8), encounters: 3 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'battle' })
+  await Promise.all([ui.press({ key: 'find' }), ui.press({ key: 'find' })])
+  expect(stored()).toMatchObject({ encounters: 2, battles: 1 })
+  expect(battle()?.result).toBe('fight')
+})
+
+test('とどめの「攻撃」を続けて押しても、勝ちは 1 回分だけ入る', async ($, on) => {
+  const { stored, battle } = await boot($, on, { xp: xpToReach(10), encounters: 3 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'battle' })
+  await ui.press({ key: 'find' })
+  const xp = (stored() as { xp: number }).xp
+  for (let i = 0; i < 60 && battle()?.result === 'fight'; i++) {
+    await Promise.all([ui.press({ key: 'act:attack' }), ui.press({ key: 'act:attack' })])
+  }
+  expect(battle()?.result).toBe('won')
+  expect(stored()).toMatchObject({ wins: 1, xp: xp + (battle()?.gainedXp ?? 0) })
+})
+
+test('ボスに負けると HP が減ったまま残る', async ($, on) => {
+  const { battle } = await boot($, on, { xp: xpToReach(10), encounters: 1 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'battle' })
+  await ui.press({ key: 'boss' })
+  for (let i = 0; i < 60 && battle()?.result === 'fight'; i++) await ui.press({ key: 'act:attack' })
+  expect(battle()?.result).toBe('lost')
+  expect(await ui.find({ type: 'Text', text: /しばらく休むと HP が戻る/ })).toBeDefined()
+  await ui.press({ key: 'battle' })
+  // Lv 10 の最大 HP は 140。負けると 10%
+  expect(await ui.find({ type: 'Text', text: /^HP 14\/140 / })).toBeDefined()
+})
 
 test('冒険をやり直すと戦いも成長も消える', async ($, on) => {
   const { stored, battle } = await boot($, on, { xp: xpToReach(10), encounters: 3, alloc: { str: 3, vit: 0, int: 0, agi: 0 }, learned: { slash: NOW } })

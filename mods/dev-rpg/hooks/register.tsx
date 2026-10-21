@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { RpgBattle, RpgGachaCard, RpgHero, RpgSaved, RpgSlot, RpgStat, RpgTab } from '../types'
-import { act, battleLines, battleSvg, canUse, growthLines, growthSvg, nextBoss, startBattle, winBattle } from './battle'
+import { act, battleLines, battleSvg, canUse, endBattle, growthLines, growthSvg, nextBoss, startBattle } from './battle'
 import type { Command } from './battle'
 import {
   INITIAL,
@@ -190,27 +190,37 @@ async function fight($: $, isBoss: boolean) {
   }
   // 種は時刻と戦った回数から (同じ時刻に 2 回押しても別の敵)
   const battle = startBattle(hero, (now ^ Math.imul(hero.battles + 1, 2654435761)) >>> 0, isBoss)
-  await update($, BATTLE, () => battle)
+  // 続けて押された時は、先に置いた戦いを残す (気配も 1 つだけ使う)。update は先を越されるとやり直すので、印も毎回付け直す
+  let isPlaced = false
+  await update($, BATTLE, b => {
+    isPlaced = b?.result !== 'fight'
+    return isPlaced ? battle : b
+  })
+  if (!isPlaced) return
   await update($, NEWS, () => '')
   await change($, h => ({ ...h, encounters: Math.max(0, h.encounters - 1), battles: h.battles + 1 }))
   await save($)
 }
 
-/** 1 手。勝ったら経験値と勝ち数を入れて残す */
+/** 1 手。終わったら戦いの後の HP を残し、勝っていれば経験値と勝ち数も入れて残す */
 async function command($: $, cmd: Command) {
   const { learned } = await readHero($)
   let ended: RpgBattle | undefined
   await update($, BATTLE, b => {
+    ended = undefined // update はやり直すことがある。前の試みの印を残さない
     if (!b || b.result !== 'fight') return b
     const next = act(b, cmd, learned)
     if (next.result !== 'fight') ended = next
     return next
   })
-  if (!ended || ended.result !== 'won') return
-  const won = ended
-  const lead = [`${won.enemy.name}に勝った! 経験値 ${won.gainedXp}`]
-  if (won.enemy.isBoss && (await readHero($)).defeated[won.enemy.id] === undefined) lead.push(`ボスを初めて倒した! SP +${SP_RULE.boss}`)
-  await change($, (h, now) => winBattle(h, won, now), false, lead)
+  if (!ended) return
+  const done = ended
+  const lead: string[] = []
+  if (done.result === 'won') {
+    lead.push(`${done.enemy.name}に勝った! 経験値 ${done.gainedXp}`)
+    if (done.enemy.isBoss && (await readHero($)).defeated[done.enemy.id] === undefined) lead.push(`ボスを初めて倒した! SP +${SP_RULE.boss}`)
+  } else if (done.result === 'lost') lead.push('力尽きた… しばらく休むと HP が戻る')
+  await change($, (h, now) => endBattle(h, done, now), false, lead)
   await save($)
 }
 

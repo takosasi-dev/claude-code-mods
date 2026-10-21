@@ -11,7 +11,9 @@ import {
   STAT_LABEL,
   STAT_NOTE,
   bar,
+  fatigueAt,
   gain,
+  hpPctAt,
   levelInfo,
   paint,
   skillOf,
@@ -167,31 +169,40 @@ export type Command = { kind: 'attack' } | { kind: 'skill'; id: string } | { kin
 
 const LOG_MAX = 6
 
-/** 使えるスキルか (覚えていて、常に効く物でなく、MP が足りて、ロールバックは 1 度だけ) */
+/** HP を戻すスキル (HP が満タンなら使えない) */
+const HEALS: readonly string[] = ['heal', 'rollback']
+
+/** 使えるスキルか (覚えていて、常に効く物でなく、ロールバックは 1 度だけ、回復は HP が減っている時、MP が足りる) */
 export function canUse(b: RpgBattle, id: string, learned: Record<string, number>) {
   const sk = skillOf(id)
   if (!sk || sk.isPassive || learned[id] === undefined) return false
   if (id === 'rollback' && b.usedRollback) return false
+  if (HEALS.includes(id) && b.me.hp >= b.me.maxHp) return false
   return b.me.mp >= sk.mp
 }
 
 /**
  * 1 ラウンド進める: 素早い方から動く (同じなら勇者)。
- * 勝った・負けた・逃げたら result が変わる。終わった戦いと使えないスキルは何もしない (使えない時はログに一言)
+ * 勝った・負けた・逃げたら result が変わる。
+ * 終わった戦い・使えないスキル・ボスから逃げる手は、ラウンドを進めない (できない時はログに一言)
  */
 export function act(b0: RpgBattle, cmd: Command, learned: Record<string, number>): RpgBattle {
   if (b0.result !== 'fight') return b0
+  const refuse = (why: string): RpgBattle => ({ ...b0, log: [...b0.log, why].slice(-LOG_MAX), hitEnemy: 0, hitMe: 0 })
+  if (cmd.kind === 'flee' && b0.enemy.isBoss) return refuse('ボスからは逃げられない!')
   if (cmd.kind === 'skill' && !canUse(b0, cmd.id, learned)) {
     const sk = skillOf(cmd.id)
-    const why =
+    return refuse(
       !sk || learned[cmd.id] === undefined
         ? 'そのスキルは覚えていない'
         : sk.isPassive
           ? `${sk.name}は常に効いている`
           : cmd.id === 'rollback' && b0.usedRollback
             ? 'ロールバックはもう使った'
-            : 'MP が足りない'
-    return { ...b0, log: [...b0.log, why].slice(-LOG_MAX), hitEnemy: 0, hitMe: 0 }
+            : HEALS.includes(cmd.id) && b0.me.hp >= b0.me.maxHp
+              ? 'HP は減っていない'
+              : 'MP が足りない',
+    )
   }
   const r = rngOf(b0.seed)
   const b: RpgBattle = { ...b0, me: { ...b0.me }, enemy: { ...b0.enemy }, log: [...b0.log], hitEnemy: 0, hitMe: 0 }
@@ -200,6 +211,7 @@ export function act(b0: RpgBattle, cmd: Command, learned: Record<string, number>
   const say = (t: string) => b.log.push(t)
   const spread = () => 0.85 + r.next() * 0.3
   const isDefending = cmd.kind === 'defend'
+  const isHeroFirst = me.spd >= en.spd
 
   /** 物理で 1 回。守りは半分だけ効く。ログ解読の後は守りを 4 割下げる */
   const physical = (mult: number) => {
@@ -235,10 +247,6 @@ export function act(b0: RpgBattle, cmd: Command, learned: Record<string, number>
         return
       }
       case 'flee': {
-        if (en.isBoss) {
-          say('ボスからは逃げられない!')
-          return
-        }
         const chance = Math.min(0.95, Math.max(0.2, 0.5 + (me.spd - en.spd) * 0.05))
         if (r.next() < chance) {
           say('勇者は逃げ出した')
@@ -264,7 +272,8 @@ export function act(b0: RpgBattle, cmd: Command, learned: Record<string, number>
           b.usedRollback = true
           say(`HP が全部戻った (+${n})`)
         } else if (sk.id === 'guard') {
-          b.guard = 3
+          // 盾はラウンドの終わりに 1 減る。敵が先に動いた回は守れていないので 1 つ多く持たせる
+          b.guard = isHeroFirst ? 3 : 4
           say('3 ラウンドの間、受ける傷が半分になる')
         } else if (sk.id === 'scan') {
           b.isExposed = true
@@ -299,7 +308,7 @@ export function act(b0: RpgBattle, cmd: Command, learned: Record<string, number>
   }
 
   const isOver = () => b.result !== 'fight' || en.hp <= 0 || me.hp <= 0
-  const order = me.spd >= en.spd ? [heroTurn, enemyTurn] : [enemyTurn, heroTurn]
+  const order = isHeroFirst ? [heroTurn, enemyTurn] : [enemyTurn, heroTurn]
   for (const step of order) {
     if (isOver()) break
     step()
@@ -332,6 +341,17 @@ export function winBattle(h: RpgHero, b: RpgBattle, now: number): RpgHero {
   const next = gain(h, b.gainedXp)
   const defeated = b.enemy.isBoss && h.defeated[b.enemy.id] === undefined ? { ...h.defeated, [b.enemy.id]: now } : h.defeated
   return { ...next, wins: h.wins + 1, defeated }
+}
+
+/**
+ * 終わった戦い (勝ち・負け・逃げ) を勇者に入れる。戦いの後の HP を傷として残し (休むと治る)、勝っていれば winBattle。
+ * 傷は「今の疲れ」を引いた残りなので、戦っている間に増えた疲れは二重に数えない
+ */
+export function endBattle(h: RpgHero, b: RpgBattle, now: number): RpgHero {
+  if (b.result === 'fight') return h
+  const endPct = Math.round((b.me.hp / Math.max(1, b.me.maxHp)) * 100)
+  const s = { ...h.s, wound: Math.max(0, 100 - fatigueAt(h, now) - endPct) }
+  return winBattle({ ...h, s, hpPct: hpPctAt({ ...h, s }, now) }, b, now)
 }
 
 // ---------------------------------------------------------------- ドット絵
