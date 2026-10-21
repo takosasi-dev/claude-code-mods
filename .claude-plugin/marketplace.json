@@ -19,7 +19,7 @@
     { "name": "prompt-book", "source": "./mods/prompt-book", "description": "/prompts でよく使う依頼文を保存して入力欄へ" },
     { "name": "live-commentary", "source": "./mods/live-commentary", "description": "/jikkyo で Claude の動きをスポーツ実況風に" },
     { "name": "turn-gacha", "source": "./mods/turn-gacha", "description": "/gacha でターンが終わるたびにガチャ" },
-    { "name": "dev-rpg", "source": "./mods/dev-rpg", "description": "/rpg で作業すると育つ RPG" },
+    { "name": "dev-rpg", "source": "./mods/dev-rpg", "description": "/rpg で作業すると育つ RPG。魔物と戦い、SP で能力とスキルを育てる" },
     { "name": "code-omikuji", "source": "./mods/code-omikuji", "description": "/omikuji で今日のコード運勢" },
     { "name": "agent-watch", "source": "./mods/agent-watch", "description": "/agent-watch でサブエージェントの様子と会話への切り替え" },
     { "name": "canvas-pane", "source": "./mods/canvas-pane", "description": "Claude がグラフ・表・図をペインに描けるツール" },

@@ -252,8 +252,15 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
       const c = owned.find((x: any) => x.id === id)
       h = m.setGear(h, c.slot, c)
     }
-    // 装備の画面 (gearSvg) も載せると重くなるので、装備が写るステータスだけ
-    return [m.statusSvg(m.wear(h, owned))]
+    // 0.3.0 の成長と戦い: SP を振ってスキルを覚え、魔物と 2 ラウンド戦ったところ
+    h = { ...h, alloc: { str: 4, vit: 3, int: 1, agi: 0 }, learned: { slash: NOW, heal: NOW, scan: NOW }, wins: 7, battles: 9, encounters: 3 }
+    const bt = await load('dev-rpg/hooks/battle.ts')
+    const worn = m.wear(h, owned)
+    let b = bt.startBattle(worn, 20261021, false)
+    b = bt.act(b, { kind: 'skill', id: 'scan' }, h.learned)
+    b = bt.act(b, { kind: 'skill', id: 'slash' }, h.learned)
+    // 装備の画面 (gearSvg) と成長の画面 (growthSvg) も載せると重くなるので、ステータスと戦いだけ
+    return [m.statusSvg(worn), bt.battleSvg(worn, b)]
   },
 
   'code-omikuji': async () => {

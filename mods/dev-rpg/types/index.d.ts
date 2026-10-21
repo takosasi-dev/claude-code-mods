@@ -1,6 +1,9 @@
 /** 装備の枠: 武器・防具・お守り */
 export type RpgSlot = 'weapon' | 'armor' | 'charm'
 
+/** SP を振る能力: 力・体力・知恵・素早さ */
+export type RpgStat = 'str' | 'vit' | 'int' | 'agi'
+
 /**
  * turn-gacha のカード 1 種類。turn-gacha の契約 (types/index.d.ts の GachaCard) の写し。
  * plugin.json の dependencies は使わない (dev-rpg は turn-gacha が無くても動く)。読んだ値は rpg.ts の gachaCards で確かめる
@@ -35,6 +38,17 @@ export type RpgSaved = {
   dayTurns: number
   /** 装備 (0.2.0 から。古い store には無い) */
   equip: RpgEquip
+  /** ここから 0.3.0。戦った回数と勝った回数 */
+  battles: number
+  wins: number
+  /** たまっている遭遇 (ターンを終えるたびに 1 つ、5 つまで)。戦うと 1 つ減る */
+  encounters: number
+  /** SP を振った数 (能力ごと) */
+  alloc: Record<RpgStat, number>
+  /** 覚えたスキルの id → 覚えた時刻 (ms) */
+  learned: Record<string, number>
+  /** 倒したボスの id → 初めて倒した時刻 (ms) */
+  defeated: Record<string, number>
 }
 
 /** このセッションの間だけの値 */
@@ -71,15 +85,81 @@ export type RpgHero = RpgSaved & {
   worn?: RpgEquip
 }
 
+/** 敵の癖: なし・MP を吸う・2 回動く・物理をかわす・力をためて大技 */
+export type RpgTrait = 'none' | 'drain' | 'double' | 'evade' | 'heavy'
+
+/** 戦っている敵 */
+export type RpgEnemy = {
+  id: string
+  name: string
+  level: number
+  isBoss: boolean
+  maxHp: number
+  hp: number
+  atk: number
+  def: number
+  spd: number
+  /** 倒した時の経験値 */
+  xp: number
+  trait: RpgTrait
+  /** ドット絵の形と色 */
+  shape: string
+  color: string
+}
+
+/** 戦いの始めに写した勇者の強さ (戦いの間の HP と MP はここで減る) */
+export type RpgFighter = {
+  maxHp: number
+  hp: number
+  maxMp: number
+  mp: number
+  atk: number
+  def: number
+  mag: number
+  spd: number
+  /** 会心の確率 (%) */
+  crit: number
+  /** 毎ラウンドの終わりに戻す HP (最大 HP に対する %) */
+  regen: number
+}
+
+/** 戦い 1 回。セッションの間だけ ($.state)。store には書かない */
+export type RpgBattle = {
+  enemy: RpgEnemy
+  me: RpgFighter
+  round: number
+  /** テストの盾の残りラウンド */
+  guard: number
+  /** ログ解読で敵の守りを下げた */
+  isExposed: boolean
+  /** 敵が力をためている (次の攻撃が 2 倍) */
+  isCharging: boolean
+  usedRollback: boolean
+  /** 乱数の種。1 手ごとに進める (同じ種なら同じ結果) */
+  seed: number
+  /** 新しい物が後ろ。6 行まで */
+  log: string[]
+  result: 'fight' | 'won' | 'lost' | 'fled'
+  /** 勝った時の経験値 */
+  gainedXp: number
+  /** 最後の一手で敵と勇者が受けた量 (絵の揺れと数字に使う) */
+  hitEnemy: number
+  hitMe: number
+}
+
+export type RpgTab = 'status' | 'gear' | 'achievements' | 'battle' | 'growth'
+
 declare module 'claude-code' {
   interface PluginState {
     'dev-rpg': {
       hero: RpgHero
-      tab: 'status' | 'gear' | 'achievements'
+      tab: RpgTab
       /** 「冒険をやり直す」を 1 回押して確認待ち */
       isConfirmingReset: boolean
       /** 最後の出来事の一言 (実績・レベルアップ)。空なら出さない */
       news: string
+      /** 今の戦い。戦っていなければ null */
+      battle: RpgBattle | null
     }
     /** turn-gacha が他の mod に見せている物のうち、dev-rpg が読む分だけ (書くのは turn-gacha) */
     'turn-gacha': {

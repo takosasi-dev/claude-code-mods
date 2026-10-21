@@ -1,12 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { RpgGachaCard, RpgHero, RpgSaved, RpgSlot } from '../types'
+import type { RpgBattle, RpgGachaCard, RpgHero, RpgSaved, RpgSlot, RpgStat, RpgTab } from '../types'
+import { act, battleLines, battleSvg, canUse, growthLines, growthSvg, nextBoss, startBattle, winBattle } from './battle'
+import type { Command } from './battle'
 import {
   INITIAL,
   INITIAL_SAVED,
+  SKILLS,
   SLOTS,
   SLOT_LABEL,
+  STATS,
+  STAT_LABEL,
+  STAT_NOTE,
+  SP_RULE,
   achievementLines,
   achievementsSvg,
   fromSaved,
@@ -14,6 +21,11 @@ import {
   gearSvg,
   grant,
   hpPctAt,
+  learnSkill,
+  raiseStat,
+  respec,
+  skillOf,
+  spOf,
   levelInfo,
   levelUpText,
   mergeSaved,
@@ -34,13 +46,14 @@ import { followTheme, readTheme } from './style'
 
 const PANE = 'dev-rpg'
 const TITLE = '冒険の書'
-const DESCRIPTION = '作業が経験値になる RPG のステータス窓を開く'
+const DESCRIPTION = '作業が経験値になる RPG。魔物と戦い、SP で能力とスキルを育てる'
 const STORE_KEY = 'hero'
 
 const HERO = atom({ plugin: 'dev-rpg', key: 'hero' } as const, INITIAL)
-const TAB = atom({ plugin: 'dev-rpg', key: 'tab' } as const, 'status')
+const TAB = atom({ plugin: 'dev-rpg', key: 'tab' } as const, 'status' as RpgTab)
 const CONFIRM = atom({ plugin: 'dev-rpg', key: 'isConfirmingReset' } as const, false)
 const NEWS = atom({ plugin: 'dev-rpg', key: 'news' } as const, '')
+const BATTLE = atom({ plugin: 'dev-rpg', key: 'battle' } as const, null as RpgBattle | null)
 // turn-gacha の state (読むだけ。turn-gacha が無ければ undefined のまま)
 const GACHA_SAVE = { plugin: 'turn-gacha', key: 'save' } as const
 const GACHA_CARDS = { plugin: 'turn-gacha', key: 'cards' } as const
@@ -111,7 +124,7 @@ async function readOwned($: $): Promise<RpgGachaCard[] | undefined> {
 }
 
 /** 変える → 実績を見る。レベルが上がった時だけトーストを出す (store に書くのは save) */
-async function change($: $, fn: (h: RpgHero, now: number) => RpgHero, isTurnEnd = false) {
+async function change($: $, fn: (h: RpgHero, now: number) => RpgHero, isTurnEnd = false, lead: string[] = []) {
   await ensureLoaded($)
   const now = await $.clock.now()
   const owned = await readOwned($)
@@ -124,7 +137,7 @@ async function change($: $, fn: (h: RpgHero, now: number) => RpgHero, isTurnEnd 
     return r.hero
   })
   const after = levelInfo(hero.xp).level
-  const news: string[] = []
+  const news: string[] = [...lead]
   if (after > before) {
     $.ui.toast(levelUpText(after))
     news.push(levelUpText(after))
@@ -153,6 +166,78 @@ async function equip($: $, slot: RpgSlot, id: string) {
   await save($)
 }
 
+// ---------------------------------------------------------------- 戦い
+
+/** 魔物を探す (isBoss ならボスに挑む)。遭遇を 1 つ使う。戦っている間は何もしない */
+async function fight($: $, isBoss: boolean) {
+  if ((await read($, BATTLE))?.result === 'fight') return
+  await ensureLoaded($)
+  const now = await $.clock.now()
+  const hero = wear(await read($, HERO), await readOwned($))
+  if (hero.encounters <= 0) {
+    await update($, NEWS, () => 'まだ魔物の気配がない。ターンを終えると現れる')
+    return
+  }
+  // 種は時刻と戦った回数から (同じ時刻に 2 回押しても別の敵)
+  const battle = startBattle(hero, (now ^ Math.imul(hero.battles + 1, 2654435761)) >>> 0, isBoss)
+  await update($, BATTLE, () => battle)
+  await update($, NEWS, () => '')
+  await change($, h => ({ ...h, encounters: Math.max(0, h.encounters - 1), battles: h.battles + 1 }))
+  await save($)
+}
+
+/** 1 手。勝ったら経験値と勝ち数を入れて残す */
+async function command($: $, cmd: Command) {
+  const { learned } = await read($, HERO)
+  let ended: RpgBattle | undefined
+  await update($, BATTLE, b => {
+    if (!b || b.result !== 'fight') return b
+    const next = act(b, cmd, learned)
+    if (next.result !== 'fight') ended = next
+    return next
+  })
+  if (!ended || ended.result !== 'won') return
+  const won = ended
+  const lead = [`${won.enemy.name}に勝った! 経験値 ${won.gainedXp}`]
+  if (won.enemy.isBoss && (await read($, HERO)).defeated[won.enemy.id] === undefined) lead.push(`ボスを初めて倒した! SP +${SP_RULE.boss}`)
+  await change($, (h, now) => winBattle(h, won, now), false, lead)
+  await save($)
+}
+
+/** 終わった戦いを片付けて、魔物の気配の画面に戻る */
+const closeBattle = ($: $) => update($, BATTLE, b => (b?.result === 'fight' ? b : null))
+
+// ---------------------------------------------------------------- 成長
+
+async function raise($: $, stat: RpgStat) {
+  const lead: string[] = []
+  const fn = (h: RpgHero) => {
+    const next = raiseStat(h, stat)
+    lead.length = 0
+    lead.push(next ? `${STAT_LABEL[stat]}が 1 上がった (${STAT_NOTE[stat]})` : 'SP が足りません')
+    return next ?? h
+  }
+  await change($, fn, false, lead)
+  await save($)
+}
+
+async function learn($: $, id: string) {
+  const lead: string[] = []
+  const fn = (h: RpgHero, now: number) => {
+    const next = learnSkill(h, id, now)
+    lead.length = 0
+    lead.push(typeof next === 'string' ? next : `「${skillOf(id)?.name ?? id}」を覚えた!`)
+    return typeof next === 'string' ? h : next
+  }
+  await change($, fn, false, lead)
+  await save($)
+}
+
+async function unspend($: $) {
+  await change($, respec, false, ['振った SP を全部戻した'])
+  await save($)
+}
+
 /** やり直しは消す操作なので、store を丸ごと書き替える */
 const reset = ($: $) =>
   serial(async () => {
@@ -161,6 +246,7 @@ const reset = ($: $) =>
     const hero = { ...fresh, synced: toSaved(fresh) }
     await $.store.set(STORE_KEY, hero.synced)
     await update($, HERO, () => hero)
+    await update($, BATTLE, () => null)
     await update($, CONFIRM, () => false)
     await update($, TAB, () => 'status' as const)
     await update($, NEWS, () => '冒険をやり直しました。Lv 1 から')
@@ -234,14 +320,39 @@ export const register: Register = on => {
     const tab = await read($, TAB)
     const isConfirming = await read($, CONFIRM)
     const news = await read($, NEWS)
-    const lines = tab === 'status' ? statusLines(hero) : tab === 'gear' ? gearLines(hero, owned) : achievementLines(hero)
-    const source = tab === 'status' ? statusSvg(hero) : tab === 'gear' ? gearSvg(hero, owned) : achievementsSvg(hero)
+    const battle = await read($, BATTLE)
+    const isFighting = battle?.result === 'fight'
+    const sp = spOf(hero)
+    const level = levelInfo(hero.xp).level
+    const boss = nextBoss(hero)
+    const lines =
+      tab === 'status'
+        ? statusLines(hero)
+        : tab === 'gear'
+          ? gearLines(hero, owned)
+          : tab === 'battle'
+            ? battleLines(hero, battle)
+            : tab === 'growth'
+              ? growthLines(hero)
+              : achievementLines(hero)
+    const source =
+      tab === 'status'
+        ? statusSvg(hero)
+        : tab === 'gear'
+          ? gearSvg(hero, owned)
+          : tab === 'battle'
+            ? battleSvg(hero, battle)
+            : tab === 'growth'
+              ? growthSvg(hero)
+              : achievementsSvg(hero)
     const worn = wornOf(hero.equip, owned)
-    const go = (to: 'status' | 'gear' | 'achievements') =>
+    const go = (to: RpgTab) =>
       void (async () => {
         await update($, CONFIRM, () => false)
         await update($, TAB, () => to)
       })()
+    /** そのタブなら「ステータスに戻る」、違えば開く */
+    const toggle = (to: RpgTab) => go(tab === to ? 'status' : to)
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -275,15 +386,58 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
+        {tab === 'battle' && battle && isFighting && (
+          <Box key="commands" flexDirection="column">
+            <Button key="act:attack" label="攻撃" variant="primary" onPress={() => void command($, { kind: 'attack' })} />
+            {SKILLS.filter(sk => !sk.isPassive && hero.learned[sk.id] !== undefined).map(sk => (
+              <Button
+                key={`skill:${sk.id}`}
+                label={`${sk.name} (MP ${sk.mp})`}
+                dimColor={!canUse(battle, sk.id, hero.learned)}
+                onPress={() => void command($, { kind: 'skill', id: sk.id })}
+              />
+            ))}
+            <Button key="act:defend" label="防御 (MP 少し回復)" onPress={() => void command($, { kind: 'defend' })} />
+            <Button key="act:flee" label="逃げる" dimColor={battle.enemy.isBoss} onPress={() => void command($, { kind: 'flee' })} />
+          </Box>
+        )}
+        {tab === 'battle' && !isFighting && (
+          <Box key="lobby" flexDirection="column">
+            <Button
+              key="find"
+              label={`魔物を探す (気配 ${hero.encounters})`}
+              variant="primary"
+              dimColor={hero.encounters <= 0}
+              onPress={() => void fight($, false)}
+            />
+            {level >= boss.level && (
+              <Button key="boss" label={`ボスに挑む: ${boss.name}`} dimColor={hero.encounters <= 0} onPress={() => void fight($, true)} />
+            )}
+            {battle && <Button key="close" label="戦いを終える" onPress={() => void closeBattle($)} />}
+          </Box>
+        )}
+        {tab === 'growth' && (
+          <Box key="growth" flexDirection="column">
+            {STATS.map(k => (
+              <Button key={`up:${k}`} label={`${STAT_LABEL[k]} +1 (${STAT_NOTE[k]})`} dimColor={sp.free < 1} onPress={() => void raise($, k)} />
+            ))}
+            {SKILLS.filter(sk => hero.learned[sk.id] === undefined && level >= sk.level).map(sk => (
+              <Button key={`learn:${sk.id}`} label={`覚える: ${sk.name} (${sk.sp} SP)`} dimColor={sp.free < sk.sp} onPress={() => void learn($, sk.id)} />
+            ))}
+            {STATS.some(k => hero.alloc[k] > 0) && <Button key="respec" label="能力の振り分けを戻す" onPress={() => void unspend($)} />}
+          </Box>
+        )}
         {news !== '' && <Text color="yellow">{news}</Text>}
         <Box flexDirection="column">
           <Button
-            key="tab"
-            label={tab === 'achievements' ? 'ステータスに戻る' : '実績を見る'}
-            variant="primary"
-            onPress={() => go(tab === 'achievements' ? 'status' : 'achievements')}
+            key="battle"
+            label={tab === 'battle' ? 'ステータスに戻る' : isFighting ? '戦う (戦闘中)' : `戦う (気配 ${hero.encounters})`}
+            variant={tab === 'battle' ? undefined : 'primary'}
+            onPress={() => toggle('battle')}
           />
-          <Button key="gear" label={tab === 'gear' ? 'ステータスに戻る' : '装備'} onPress={() => go(tab === 'gear' ? 'status' : 'gear')} />
+          <Button key="growth" label={tab === 'growth' ? 'ステータスに戻る' : `成長 (SP ${sp.free})`} onPress={() => toggle('growth')} />
+          <Button key="tab" label={tab === 'achievements' ? 'ステータスに戻る' : '実績を見る'} onPress={() => toggle('achievements')} />
+          <Button key="gear" label={tab === 'gear' ? 'ステータスに戻る' : '装備'} onPress={() => toggle('gear')} />
           <Button
             key="reset"
             label={isConfirming ? '本当にやり直す(すべて消えます)' : '冒険をやり直す'}

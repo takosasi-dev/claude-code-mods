@@ -1,5 +1,5 @@
-// 経験値・レベル・実績の計算と、ステータス窓の SVG / terminal 用の行。どれも純関数
-import type { RpgEquip, RpgGachaCard, RpgHero, RpgSaved, RpgSession, RpgSlot } from '../types'
+// 経験値・レベル・実績・成長 (SP) の計算と、ステータス窓の SVG / terminal 用の行。どれも純関数
+import type { RpgEquip, RpgGachaCard, RpgHero, RpgSaved, RpgSession, RpgSlot, RpgStat } from '../types'
 import { clean, esc, isLight, short } from './style'
 
 // ---------------------------------------------------------------- 決まりごと
@@ -132,6 +132,52 @@ export const gearEffect = (slot: RpgSlot, rarity: Rarity) => {
 
 const sameEquip = (a: RpgEquip, b: RpgEquip) => SLOTS.every(k => a[k]?.id === b[k]?.id)
 
+// ---------------------------------------------------------------- 成長 (SP で能力とスキル)
+
+export const STATS: readonly RpgStat[] = ['str', 'vit', 'int', 'agi']
+export const STAT_LABEL: Record<RpgStat, string> = { str: '力', vit: '体力', int: '知恵', agi: '敏捷' }
+/** 1 振りで上がる分 */
+export const STAT_NOTE: Record<RpgStat, string> = {
+  str: '攻撃力 +2',
+  vit: '最大HP +10 防御力 +2',
+  int: '魔力 +2 最大MP +4',
+  agi: '素早さ +2 会心 +1%',
+}
+
+export type Skill = {
+  id: string
+  name: string
+  /** 覚えられるレベル */
+  level: number
+  /** 覚えるのに要る SP */
+  sp: number
+  /** 戦いで使う時の MP (常に効くスキルは 0) */
+  mp: number
+  isPassive?: true
+  note: string
+}
+
+export const SKILLS: readonly Skill[] = [
+  { id: 'slash', name: 'リファクタ斬り', level: 2, sp: 2, mp: 4, note: '攻撃力の 1.7 倍で斬る' },
+  { id: 'heal', name: 'デバッグの光', level: 3, sp: 2, mp: 6, note: '最大 HP の 35% と魔力の分だけ回復' },
+  { id: 'scan', name: 'ログ解読', level: 4, sp: 1, mp: 3, note: '弱点を見抜き、敵の守りを 4 割下げる' },
+  { id: 'lint', name: '静的解析', level: 5, sp: 3, mp: 7, note: '魔力の 1.6 倍。守りも回避も効かない' },
+  { id: 'review', name: 'コードレビュー', level: 6, sp: 3, mp: 0, isPassive: true, note: '常に会心の確率 +10%' },
+  { id: 'guard', name: 'テストの盾', level: 7, sp: 3, mp: 5, note: '3 ラウンドの間、受ける傷が半分' },
+  { id: 'ci', name: '継続的インテグレーション', level: 10, sp: 4, mp: 0, isPassive: true, note: '常に毎ラウンド最大 HP の 5% 回復' },
+  { id: 'multi', name: '並列実行', level: 12, sp: 4, mp: 10, note: '攻撃力の 0.7 倍で 3 回斬る' },
+  { id: 'rollback', name: 'ロールバック', level: 18, sp: 5, mp: 15, note: 'HP を全部戻す (1 回の戦いで 1 度)' },
+  { id: 'deploy', name: '本番デプロイ', level: 25, sp: 6, mp: 24, note: '魔力の 3 倍。守りも回避も効かない' },
+]
+export const skillOf = (id: string) => SKILLS.find(s => s.id === id)
+
+/** ボスの id (並びは battle.ts の BOSSES と同じ)。倒すと SP がもらえる */
+export const BOSS_IDS = ['loop', 'outage', 'legacy'] as const
+/** SP の入り方: レベル 1 つで 2、実績 1 つで 1、3 勝ごとに 1、ボスを初めて倒すと 3 */
+export const SP_RULE = { level: 2, achievement: 1, winsPer: 3, boss: 3 } as const
+
+const allocSum = (h: Pick<RpgSaved, 'alloc'>) => STATS.reduce((n, k) => n + h.alloc[k], 0)
+
 // ---------------------------------------------------------------- 実績
 
 /** owned: ガチャで持っているカード (turn-gacha が無ければ undefined) */
@@ -163,7 +209,45 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'gear-full', name: '完全武装', glyph: '鎧', hint: '武器・防具・お守りを全部着ける', isGacha: true, test: c => worn(c).length >= SLOTS.length },
   { id: 'gear-ssr', name: '虹の装備', glyph: '虹', hint: 'SSR のカードを装備する', isGacha: true, test: c => worn(c).some(x => x.rarity === 'SSR') },
   { id: 'book-20', name: '収集家', glyph: '集', hint: 'ガチャの図鑑を 20 種集める', isGacha: true, test: c => (c.owned?.length ?? 0) >= 20 },
+  // ここから戦いと成長 (0.3.0)
+  { id: 'battle-first', name: '初陣', glyph: '陣', hint: '魔物に初めて勝つ', test: c => c.h.wins >= 1 },
+  { id: 'battle-30', name: '歴戦の剣', glyph: '剣', hint: '魔物に 30 回勝つ', test: c => c.h.wins >= 30 },
+  { id: 'boss-first', name: '竜殺し', glyph: '竜', hint: 'ボスを初めて倒す', test: c => Object.keys(c.h.defeated).length >= 1 },
+  { id: 'boss-all', name: '世界を救う', glyph: '救', hint: 'ボスを全部倒す', test: c => BOSS_IDS.every(id => c.h.defeated[id] !== undefined) },
+  { id: 'skill-first', name: '新しい技', glyph: '技', hint: 'スキルを初めて覚える', test: c => Object.keys(c.h.learned).length >= 1 },
+  { id: 'train-10', name: '鍛錬の成果', glyph: '錬', hint: '能力に SP を 10 振る', test: c => allocSum(c.h) >= 10 },
 ]
+
+/** SP: もらった分 (内訳つき)・使った分・残り。使った分がもらった分を超えても (別のセッションと同時に使った時) 残りは 0 */
+export function spOf(h: RpgSaved) {
+  const level = levelInfo(h.xp).level
+  const fromLevel = (level - 1) * SP_RULE.level
+  const fromAchievements = ACHIEVEMENTS.filter(a => h.achievements[a.id] !== undefined).length * SP_RULE.achievement
+  const fromWins = Math.floor(h.wins / SP_RULE.winsPer)
+  const fromBosses = BOSS_IDS.filter(id => h.defeated[id] !== undefined).length * SP_RULE.boss
+  const earned = fromLevel + fromAchievements + fromWins + fromBosses
+  const used = allocSum(h) + SKILLS.reduce((n, s) => n + (h.learned[s.id] !== undefined ? s.sp : 0), 0)
+  return { earned, used, free: Math.max(0, earned - used), fromLevel, fromAchievements, fromWins, fromBosses }
+}
+
+/** 能力に 1 振る。SP が無ければそのまま */
+export function raiseStat(h: RpgHero, stat: RpgStat): RpgHero | undefined {
+  if (spOf(h).free < 1) return undefined
+  return { ...h, alloc: { ...h.alloc, [stat]: h.alloc[stat] + 1 } }
+}
+
+/** スキルを覚える。覚えられない理由があれば文字で返す */
+export function learnSkill(h: RpgHero, id: string, now: number): RpgHero | string {
+  const sk = skillOf(id)
+  if (!sk) return 'そのスキルはありません'
+  if (h.learned[id] !== undefined) return `「${sk.name}」はもう覚えています`
+  if (levelInfo(h.xp).level < sk.level) return `「${sk.name}」は Lv ${sk.level} で覚えられます`
+  if (spOf(h).free < sk.sp) return `SP が足りません (「${sk.name}」は ${sk.sp} SP)`
+  return { ...h, learned: { ...h.learned, [id]: now } }
+}
+
+/** 振った SP を全部戻す (覚えたスキルはそのまま) */
+export const respec = (h: RpgHero): RpgHero => ({ ...h, alloc: { str: 0, vit: 0, int: 0, agi: 0 } })
 
 // ---------------------------------------------------------------- 値
 
@@ -181,7 +265,18 @@ export const INITIAL_SAVED: RpgSaved = {
   day: '',
   dayTurns: 0,
   equip: {},
+  battles: 0,
+  wins: 0,
+  encounters: 0,
+  alloc: { str: 0, vit: 0, int: 0, agi: 0 },
+  learned: {},
+  defeated: {},
 }
+
+/** 遭遇はここまでためられる */
+export const MAX_ENCOUNTERS = 5
+/** 0.3.0 より前の store から来た時の遭遇 (すぐ戦えるように) */
+const FIRST_ENCOUNTERS = 3
 
 export const freshSession = (now: number): RpgSession => ({
   startedAt: now,
@@ -200,11 +295,37 @@ export const freshSession = (now: number): RpgSession => ({
 
 export const INITIAL: RpgHero = { ...INITIAL_SAVED, s: freshSession(0), hpPct: 100, xpFrom: 0, synced: INITIAL_SAVED }
 
-const SAVED_KEYS = ['xp', 'turns', 'tools', 'edits', 'reads', 'shells', 'recoveries', 'errors', 'sessions', 'dayTurns'] as const
+const SAVED_KEYS = ['xp', 'turns', 'tools', 'edits', 'reads', 'shells', 'recoveries', 'errors', 'sessions', 'dayTurns', 'battles', 'wins', 'encounters'] as const
 
 export const toSaved = (h: RpgHero): RpgSaved => {
-  const out = { ...INITIAL_SAVED, achievements: { ...h.achievements }, day: h.day, equip: { ...h.equip } }
+  const out = {
+    ...INITIAL_SAVED,
+    achievements: { ...h.achievements },
+    day: h.day,
+    equip: { ...h.equip },
+    alloc: { ...h.alloc },
+    learned: { ...h.learned },
+    defeated: { ...h.defeated },
+  }
   for (const k of SAVED_KEYS) out[k] = h[k]
+  return out
+}
+
+/** id → 時刻 の表を、知っている id の数だけ拾う */
+function stamps(v: unknown, ids: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (typeof v !== 'object' || v === null) return out
+  for (const id of ids) {
+    const at = (v as Record<string, unknown>)[id]
+    if (typeof at === 'number' && Number.isFinite(at)) out[id] = at
+  }
+  return out
+}
+
+/** 2 つの id → 時刻 の表を合わせる (早い方の時刻) */
+const unionStamps = (a: Record<string, number>, b: Record<string, number>) => {
+  const out = { ...a }
+  for (const [id, at] of Object.entries(b)) out[id] = Math.min(at, a[id] ?? at)
   return out
 }
 
@@ -217,13 +338,18 @@ export function fromSaved(raw: unknown): RpgSaved {
     out[k] = typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0
   }
   out.day = typeof o.day === 'string' ? o.day.slice(0, 10) : ''
-  const a = o.achievements
-  if (typeof a === 'object' && a !== null) {
-    for (const { id } of ACHIEVEMENTS) {
-      const at = (a as Record<string, unknown>)[id]
-      if (typeof at === 'number' && Number.isFinite(at)) out.achievements[id] = at
-    }
+  out.achievements = stamps(o.achievements, ACHIEVEMENTS.map(a => a.id))
+  // 戦いと成長は 0.3.0 から。無い (古い store) なら遭遇を少し持たせて始める
+  if (o.encounters === undefined) out.encounters = FIRST_ENCOUNTERS
+  out.encounters = Math.min(MAX_ENCOUNTERS, out.encounters)
+  const al = typeof o.alloc === 'object' && o.alloc !== null ? (o.alloc as Record<string, unknown>) : {}
+  out.alloc = { str: 0, vit: 0, int: 0, agi: 0 }
+  for (const k of STATS) {
+    const v = al[k]
+    out.alloc[k] = typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0
   }
+  out.learned = stamps(o.learned, SKILLS.map(s => s.id))
+  out.defeated = stamps(o.defeated, BOSS_IDS)
   // 装備は 0.2.0 から。無い (古い store) なら何も着けていない
   const eq = o.equip
   if (typeof eq === 'object' && eq !== null) {
@@ -241,9 +367,18 @@ export function fromSaved(raw: unknown): RpgSaved {
  * 装備はこのセッションで変えた時だけ mine を書く (最後に書いた方が勝つ)
  */
 export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): RpgSaved {
-  const out = { ...store, achievements: { ...store.achievements }, equip: { ...(sameEquip(mine.equip, base.equip) ? store.equip : mine.equip) } }
+  const out = {
+    ...store,
+    achievements: unionStamps(store.achievements, mine.achievements),
+    learned: unionStamps(store.learned, mine.learned),
+    defeated: unionStamps(store.defeated, mine.defeated),
+    equip: { ...(sameEquip(mine.equip, base.equip) ? store.equip : mine.equip) },
+    alloc: { ...store.alloc },
+  }
   for (const k of SAVED_KEYS) out[k] = Math.max(0, store[k] + mine[k] - base[k])
-  for (const [id, at] of Object.entries(mine.achievements)) out.achievements[id] = Math.min(at, store.achievements[id] ?? at)
+  out.encounters = Math.min(MAX_ENCOUNTERS, out.encounters)
+  // 振った数も差分で足す (振り直しは減る差分)
+  for (const k of STATS) out.alloc[k] = Math.max(0, store.alloc[k] + mine.alloc[k] - base.alloc[k])
   const day = mine.day > store.day ? mine.day : store.day
   const mineToday = mine.day === day ? mine.dayTurns - (base.day === day ? base.dayTurns : 0) : 0
   out.day = day
@@ -263,7 +398,7 @@ export const hpPctAt = (h: RpgHero, now: number) => Math.max(HP_MIN, 100 - Math.
 const touch = (s: RpgSession, now: number): RpgSession =>
   now - s.lastActiveAt >= REST_MS ? { ...s, restedAt: now, lastActiveAt: now } : { ...s, lastActiveAt: now }
 
-const gain = (h: RpgHero, xp: number): RpgHero => ({ ...h, xp: h.xp + xp, xpFrom: levelInfo(h.xp).frac })
+export const gain = (h: RpgHero, xp: number): RpgHero => ({ ...h, xp: h.xp + xp, xpFrom: levelInfo(h.xp).frac })
 
 /** セッションの始まり: 冒険の回数を 1 つ増やす */
 export const startSession = (saved: RpgSaved, now: number): RpgHero => ({
@@ -283,7 +418,15 @@ export const onTurnStart = (h: RpgHero, now: number): RpgHero => {
 export function onTurnEnd(h: RpgHero, now: number): RpgHero {
   const day = dayKey(now)
   const s = touch(h.s, now)
-  const next = { ...gain(h, XP.turn), s, turns: h.turns + 1, day, dayTurns: (h.day === day ? h.dayTurns : 0) + 1 }
+  // ターンを終えるたびに魔物の気配が 1 つたまる
+  const next = {
+    ...gain(h, XP.turn),
+    s,
+    turns: h.turns + 1,
+    day,
+    dayTurns: (h.day === day ? h.dayTurns : 0) + 1,
+    encounters: Math.min(MAX_ENCOUNTERS, h.encounters + 1),
+  }
   return { ...next, hpPct: hpPctAt(next, now) }
 }
 
@@ -326,26 +469,41 @@ export function grant(h: RpgHero, now: number, isTurnEnd: boolean, owned?: RpgGa
   return { hero: { ...h, achievements }, gained }
 }
 
-/** 強さ。worn (画面用に持っている物だけにした装備) があればそれ、無ければ equip の分を足す */
+/** このセッションの作業で上がる分 (編集・調べ物・コマンドの回数) の上限 */
+export const WORK_CAP = 10
+
+/**
+ * 強さ。Lv・振った SP・装備・このセッションの作業 (上限 WORK_CAP) を足す。
+ * worn (画面用に持っている物だけにした装備) があればそれ、無ければ equip の分を足す
+ */
 export function statsOf(h: RpgHero) {
   const info = levelInfo(h.xp)
+  const L = info.level
+  const a = h.alloc
   const bonus = gearBonus(h.worn ?? h.equip)
-  const maxHp = 40 + info.level * 10 + bonus.hp
-  const maxMp = 20 + info.level * 5 + bonus.mp
+  const maxHp = 40 + L * 10 + bonus.hp + a.vit * 10
+  const maxMp = 20 + L * 5 + bonus.mp + a.int * 4
   const tries = h.s.toolOk + h.s.toolErr
+  const work = { attack: Math.min(WORK_CAP, h.s.edits), magic: Math.min(WORK_CAP, h.s.reads), speed: Math.min(WORK_CAP, h.s.shells) }
+  const grit = h.s.recoveries
   return {
     ...info,
-    title: titleOf(info.level),
+    title: titleOf(L),
     maxHp,
     hp: Math.max(1, Math.round((maxHp * h.hpPct) / 100)),
     maxMp,
     mp: tries === 0 ? maxMp : Math.round((maxMp * h.s.toolOk) / tries),
-    attack: h.s.edits + bonus.attack,
-    magic: h.s.reads + bonus.magic,
+    attack: 6 + 2 * L + 2 * a.str + bonus.attack + work.attack,
+    defense: 1 + L + 2 * a.vit + bonus.hp / 5,
+    magic: 4 + 2 * L + 2 * a.int + bonus.magic + work.magic,
+    speed: 2 + L + 2 * a.agi + work.speed,
+    grit,
+    /** 会心の確率 (%): 5 + 根性 + 敏捷 (+ コードレビュー 10)。40 まで */
+    crit: Math.min(40, 5 + grit + a.agi + (h.learned.review !== undefined ? 10 : 0)),
     bonus,
-    speed: h.s.shells,
-    grit: h.s.recoveries,
-    earned: ACHIEVEMENTS.filter(a => h.achievements[a.id] !== undefined).length,
+    work,
+    sp: spOf(h),
+    earned: ACHIEVEMENTS.filter(x => h.achievements[x.id] !== undefined).length,
   }
 }
 
@@ -395,18 +553,18 @@ const LIGHT_K: typeof DARK_K = {
   gear: '#0e7c86',
 }
 // ponytail: 今の色はモジュールの変数。SVG を作る関数の頭で paint() を呼んで、テーマに合わせる
-const K = { ...DARK_K }
-const paint = () => Object.assign(K, isLight() ? LIGHT_K : DARK_K)
-const MONO = 'ui-monospace, Consolas, monospace'
+export const K = { ...DARK_K }
+export const paint = () => Object.assign(K, isLight() ? LIGHT_K : DARK_K)
+export const MONO = 'ui-monospace, Consolas, monospace'
 const rarityColor = (r: Rarity) => ({ N: K.offText, R: K.blue, SR: K.yellow, SSR: K.purple })[r]
 
-const svgDoc = (h: number, body: string) =>
+export const svgDoc = (h: number, body: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h}" font-family="sans-serif">` +
   `<defs><linearGradient id="win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${K.winTop}"/><stop offset="1" stop-color="${K.win}"/></linearGradient></defs>` +
   `<rect width="${W}" height="${h}" fill="${K.bg}"/>${body}</svg>`
 
 /** 昔の RPG の窓: 青い地に白い二重の枠 */
-const win = (x: number, y: number, w: number, h: number) =>
+export const win = (x: number, y: number, w: number, h: number) =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="url(#win)" stroke="${K.frame}" stroke-width="3"/>` +
   `<rect x="${x + 5}" y="${y + 5}" width="${w - 10}" height="${h - 10}" rx="5" fill="none" stroke="${K.frame}" stroke-opacity="0.45" stroke-width="1"/>`
 
@@ -427,7 +585,7 @@ const SPRITE = [
 ]
 const SPRITE_COLORS: Record<string, string> = { h: '#f78166', s: '#f2cc8f', e: '#0d1117', b: '#58a6ff', g: '#c9d1d9' }
 
-function sprite(x: number, y: number, px: number) {
+export function sprite(x: number, y: number, px: number) {
   let s = ''
   SPRITE.forEach((row, r) => {
     ;[...row].forEach((ch, c) => {
@@ -440,7 +598,7 @@ function sprite(x: number, y: number, px: number) {
 }
 
 /** 横棒。経験値は from から伸びる */
-function bar(x: number, y: number, w: number, frac: number, color: string, from?: number) {
+export function bar(x: number, y: number, w: number, frac: number, color: string, from?: number) {
   const fw = Math.max(0, Math.min(1, frac)) * w
   const anim =
     from !== undefined && Math.abs(from - frac) > 0.001
@@ -521,29 +679,32 @@ export function statusSvg(h: RpgHero) {
     (st.level >= MAX_LEVEL ? 'これ以上は上がりません' : `つぎのレベルまで ${st.need - st.into}`) +
     `</text><text x="358" y="222" font-size="12" fill="${K.weak}" text-anchor="end">HP は休むと戻る</text>`
 
-  // ── 強さ (装備の分は下の説明の右に色を変えて出す)
-  s += win(8, 244, 364, 92)
-  const cell = (x: number, y: number, label: string, value: number, note: string, bonus: number) =>
+  // ── 強さ (Lv・振った SP・装備・今回の作業を足した値。装備の分は下の説明の右に色を変えて出す)
+  s += win(8, 244, 364, 134)
+  const cell = (x: number, y: number, label: string, value: number, note: string, bonus: number, color?: string) =>
     `<text x="${x}" y="${y}" font-size="13" fill="${K.text}">${label}</text>` +
-    `<text x="${x + 150}" y="${y}" font-size="15" font-weight="bold" font-family="${MONO}" fill="${bonus > 0 ? K.gear : K.text}" text-anchor="end">${value}</text>` +
+    `<text x="${x + 150}" y="${y}" font-size="15" font-weight="bold" font-family="${MONO}" fill="${color ?? (bonus > 0 ? K.gear : K.text)}" text-anchor="end">${value}</text>` +
     `<text x="${x}" y="${y + 16}" font-size="12" fill="${K.weak}">${note}</text>` +
     (bonus > 0 ? `<text x="${x + 150}" y="${y + 16}" font-size="12" fill="${K.gear}" text-anchor="end">装備で +${bonus}</text>` : '')
-  s += cell(24, 270, '攻撃力', st.attack, '編集した回数', st.bonus.attack)
-  s += cell(204, 270, '魔力', st.magic, '調べた回数', st.bonus.magic)
-  s += cell(24, 312, '素早さ', st.speed, 'コマンドの回数', 0)
-  s += cell(204, 312, '根性', st.grit, '立ち直った回数', 0)
+  s += cell(24, 270, '攻撃力', st.attack, '力と編集', st.bonus.attack)
+  s += cell(204, 270, '防御力', st.defense, '体力と防具', st.bonus.hp / 5)
+  s += cell(24, 312, '魔力', st.magic, '知恵と調べ物', st.bonus.magic)
+  s += cell(204, 312, '素早さ', st.speed, '敏捷とコマンド', 0)
+  s += cell(24, 354, '根性', st.grit, `立ち直り (会心 ${st.crit}%)`, 0)
+  s += cell(204, 354, 'SP', st.sp.free, '「成長」で使う', 0, st.sp.free > 0 ? K.yellow : undefined)
 
   // ── 実績のバッジ (6 個ずつ並べる)
   const rows = Math.ceil(ACHIEVEMENTS.length / 6)
-  s += win(8, 344, 364, 34 + rows * 46)
-  s += `<text x="24" y="368" font-size="13" font-weight="bold" fill="${K.text}">実績</text>`
-  s += `<text x="358" y="368" font-size="12" fill="${K.weak}" text-anchor="end">${st.earned} / ${ACHIEVEMENTS.length}</text>`
+  const top = 386
+  s += win(8, top, 364, 34 + rows * 46)
+  s += `<text x="24" y="${top + 24}" font-size="13" font-weight="bold" fill="${K.text}">実績</text>`
+  s += `<text x="358" y="${top + 24}" font-size="12" fill="${K.weak}" text-anchor="end">${st.earned} / ${ACHIEVEMENTS.length}</text>`
   ACHIEVEMENTS.forEach((a, i) => {
     const cx = 44 + (i % 6) * 58
-    const cy = 398 + Math.floor(i / 6) * 46
+    const cy = top + 54 + Math.floor(i / 6) * 46
     s += badge(cx, cy, a, h.achievements[a.id] !== undefined)
   })
-  return svgDoc(344 + 34 + rows * 46 + 8, s)
+  return svgDoc(top + 34 + rows * 46 + 8, s)
 }
 
 const SLOT_NOTE: Record<RpgSlot, string> = { weapon: '攻撃力が上がる', armor: '最大 HP が上がる', charm: '魔力と最大 MP が上がる' }
@@ -686,7 +847,8 @@ export function statusLines(h: RpgHero): Line[] {
     { text: `勇者 Lv ${st.level} ${st.title}`, isBold: true },
     { text: `HP ${st.hp}/${st.maxHp}  MP ${st.mp}/${st.maxMp}`, color: h.hpPct > 25 ? undefined : 'red' },
     { text: st.level >= MAX_LEVEL ? '経験値 MAX' : `経験値 ${st.into}/${st.need} (つぎまで ${st.need - st.into})`, color: 'magenta' },
-    { text: `攻撃力 ${st.attack}  魔力 ${st.magic}  素早さ ${st.speed}  根性 ${st.grit}` },
+    { text: `攻撃力 ${st.attack}  防御力 ${st.defense}  魔力 ${st.magic}  素早さ ${st.speed}  根性 ${st.grit}` },
+    { text: `SP ${st.sp.free} (「成長」で使う)  会心 ${st.crit}%`, color: st.sp.free > 0 ? 'yellow' : undefined, isDim: st.sp.free === 0 },
     ...(worn.length > 0
       ? [{ text: `装備で 攻撃力 +${b.attack} 最大HP +${b.hp} 魔力 +${b.magic} 最大MP +${b.mp} (${worn.join(' / ')})`, color: 'cyan' }]
       : []),

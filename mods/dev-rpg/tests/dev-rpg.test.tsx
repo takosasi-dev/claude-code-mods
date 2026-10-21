@@ -244,7 +244,8 @@ test('作業で経験値が入り、レベルアップの時だけトースト�
   expect(hero().xp).toBe(61)
   expect(toasts).toEqual(['レベルアップ! Lv 2 見習いコーダー'])
   expect(await ui.find({ type: 'Text', text: 'レベルアップ! Lv 2 見習いコーダー' })).toBeDefined()
-  expect(await textOf(ui, /^攻撃力/)).toBe('攻撃力 7  魔力 1  素早さ 1  根性 0')
+  // Lv 2: 攻撃力 6 + 2x2 + 編集 7 / 防御力 1 + 2 / 魔力 4 + 2x2 + 調べ 1 / 素早さ 2 + 2 + コマンド 1
+  expect(await textOf(ui, /^攻撃力/)).toBe('攻撃力 17  防御力 3  魔力 9  素早さ 5  根性 0')
   expect(stored()).toMatchObject({ xp: 61, turns: 2, edits: 7 })
 
   // サブエージェントのターンと中断したターンは数えない
@@ -513,7 +514,8 @@ test('ガチャで持っていない装備は外れた扱い (store の装備は
   const twenty = Array.from({ length: 20 }, (_, i) => CARD(`c${i}`, 'N', 'charm', `カード${i}`))
   const { hero, stored } = await boot($, on, { xp: 150, equip: { weapon: GACHA_CARDS[0] } }, { gacha: () => g })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await textOf(ui, /^攻撃力/)).toBe('攻撃力 0  魔力 0  素早さ 0  根性 0')
+  // Lv 3 の素の値 (SSR の武器は持っていないので足さない)
+  expect(await textOf(ui, /^攻撃力/)).toBe('攻撃力 12  防御力 4  魔力 10  素早さ 5  根性 0')
   expect(stored()?.equip.weapon?.id).toBe('x01')
   expect(hero().achievements['gear-first']).toBeUndefined()
   g = { save: bookOf(twenty.map(c => c.id)), cards: twenty }
