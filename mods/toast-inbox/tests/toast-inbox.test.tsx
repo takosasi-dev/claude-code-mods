@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { InboxItem } from '../types'
-import { asItems, countByMod, inboxSvg, KEEP, merge, modLabel, toItem, unreadCount, when } from '../hooks/inbox'
+import { asItems, commandsByMod, countByMod, inboxSvg, KEEP, merge, modLabel, toItem, unreadCount, when } from '../hooks/inbox'
 import { setTheme } from '../hooks/style'
 
 // 2026-10-21 12:00 (日本時間 21:00)
@@ -55,7 +55,9 @@ const PLUGINS = {
   ],
 }
 
-type Boot = { taken?: boolean; theme?: () => string; store?: Record<string, unknown> }
+type Cmd = { name: string; description: string; source: 'builtin' | 'plugin' | 'user' | 'mcp'; plugin?: string }
+/** commands: $.command.list() の答え。ran: 押して走ったコマンドを積む */
+type Boot = { taken?: boolean; theme?: () => string; store?: Record<string, unknown>; commands?: () => Cmd[]; ran?: string[] }
 
 /** 下の hook を全部置いてセッションを始める (test が $ を呼んだ後は足せない) */
 const boot = async ($: Engine, on: On, opts: Boot = {}) => {
@@ -76,6 +78,17 @@ const boot = async ($: Engine, on: On, opts: Boot = {}) => {
   on('ui.status', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
+  const commands = opts.commands
+  if (commands) {
+    on('command.list', () => ({ value: commands() }))
+    for (const c of commands()) {
+      if (c.name === 'inbox') continue
+      on('command.run', { command: c.name }, (_$, e) => {
+        opts.ran?.push(e.command)
+        return { text: `${e.command} を開いた` }
+      })
+    }
+  }
   const theme = opts.theme
   if (theme) {
     on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme(), provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
@@ -241,3 +254,67 @@ test('/inbox を持てなかった時は /toast-inbox にして、/inbox を横�
   expect((await $.command.run({ command: 'inbox', ...RUN })).text).toBe('別の /inbox')
   expect((await $.command.run({ command: 'toast-inbox', ...RUN })).text).toBe('通知の受け箱を開きました。')
 })
+
+/** label で Button を探す (ElementQuery に label は無い) */
+const button = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string; props: Record<string, unknown> }[]> }, label: string) =>
+  (await ui.findAll({ type: 'Button' })).find(b => b.props.label === label)
+
+const cmd = (name: string, plugin?: string, source: Cmd['source'] = 'plugin'): Cmd => ({ name, description: '', source, plugin })
+
+test('mod ごとに開くコマンドを決める (純関数)', () => {
+  expect(
+    commandsByMod([
+      cmd('help', undefined, 'builtin'),
+      cmd('rpg', 'dev-rpg@market'),
+      cmd('dev-rpg', 'dev-rpg@market'),
+      cmd('aquarium', 'aqua-pet'),
+      cmd('inbox', 'toast-inbox'),
+      cmd('mine', undefined, 'user'),
+      cmd('later', 'aqua-pet'),
+    ]),
+  ).toEqual({ 'dev-rpg': 'dev-rpg', 'aqua-pet': 'aquarium' })
+  // mod と同じ名前の物は、一覧で後ろにあっても選ぶ。本体は入れない
+  expect(commandsByMod([cmd('dev-rpg', 'dev-rpg'), cmd('rpg', 'dev-rpg'), cmd('x', 'engine')])).toEqual({ 'dev-rpg': 'dev-rpg' })
+  expect(commandsByMod([])).toEqual({})
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 通知の行を押すと出した mod のコマンドを開き、コマンドの分からない mod の行は押せない`, PLUGINS, async ($, on) => {
+    const ran: string[] = []
+    let list = [cmd('after-main', 'demo-after@example-market'), cmd('demo-after', 'demo-after@example-market'), cmd('before', 'demo-before')]
+    const s = await boot($, on, { commands: () => list, ran, store: { items: [item('engine', '本体の通知', NOW - 60_000)] } })
+    await turn($, 't1', 'E')
+    await turn($, 's1', '動いています')
+    await s.clock.advance(1000)
+    await $.command.run({ command: 'inbox', ...RUN })
+
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // demo-after は mod と同じ名前の物、demo-before は 1 つだけの物
+    const after = await button(ui, '未読 21:00 demo-after を開く')
+    expect(after).toBeDefined()
+    expect(await button(ui, '未読 21:00 demo-before を開く')).toBeDefined()
+    // 本体と、コマンドの無い mod (demo-status) の行は文字のまま
+    expect(await ui.find({ type: 'Text', text: '未読 20:59 本体' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '未読 21:00 demo-status (ステータス)' })).toBeDefined()
+    expect((await ui.findAll({ type: 'Button' })).some(b => /本体|demo-status/.test(String(b.props.label)))).toBe(false)
+
+    await ui.press({ key: String(after?.key) })
+    expect(ran).toEqual(['demo-after'])
+    expect(await ui.find({ type: 'Text', text: '/demo-after を送りました(セッションが空いたら開きます)' })).toBeDefined()
+
+    // コマンドの名前が mod と違っても、その mod の物を開く
+    const before = await button(ui, '未読 21:00 demo-before を開く')
+    await ui.press({ key: String(before?.key) })
+    expect(ran).toEqual(['demo-after', 'before'])
+    expect(await ui.find({ type: 'Text', text: '/before を送りました(セッションが空いたら開きます)' })).toBeDefined()
+    await ui.unmount()
+
+    // mod を外した後にペインを開き直すと、その行は押せなくなる
+    list = [cmd('before', 'demo-before')]
+    await $.command.run({ command: 'inbox', ...RUN })
+    const again = await $.ui.mount({ ...PANE, surface })
+    expect(await button(again, '未読 21:00 demo-after を開く')).toBeUndefined()
+    expect(await again.find({ type: 'Text', text: '未読 21:00 demo-after' })).toBeDefined()
+    await again.unmount()
+  })
+}

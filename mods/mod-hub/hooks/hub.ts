@@ -1,6 +1,7 @@
 // 起動ボタンの一覧とヘッダーの SVG。$ に触らない純関数だけ置く
 import type { ModHubCommand, ModHubMod, ModHubRecent } from '../types'
 import { C, clean, frame, header } from './style'
+import type { Season } from './style'
 
 export { clean }
 
@@ -25,13 +26,13 @@ export type Category = (typeof CATEGORIES)[number]
 // ponytail: このリポジトリの mod だけを名前で引く。よその mod にも分けたくなったら plugin.json から読む
 const CATEGORY: Record<string, Category> = {
   'git-pane': '開発', 'edit-log': '開発', 'todo-board': '開発', 'test-runner': '開発', 'pre-check': '開発',
-  'ci-pane': '開発', 'port-watch': '開発', 'spec-board': '開発', 'project-board': '開発',
+  'ci-pane': '開発', 'port-watch': '開発', 'spec-board': '開発', 'project-board': '開発', 'fail-log': '開発',
   'cc-dash': '状況', 'token-meter': '状況', 'usage-pane': '状況', 'agent-watch': '状況', 'session-recap': '状況',
   'devlog-pane': '状況', 'work-bar': '状況', 'session-timeline': '状況', 'file-map': '状況', 'usage-history': '状況',
   'focus-timer': '道具', 'prompt-book': '道具', 'rule-switch': '道具', 'canvas-pane': '道具', 'done-chime': '道具',
-  'toast-inbox': '道具',
+  'toast-inbox': '道具', 'mod-check': '道具',
   'aqua-pet': '遊び', 'face-band': '遊び', 'turn-haiku': '遊び', 'live-commentary': '遊び', 'turn-gacha': '遊び',
-  'dev-rpg': '遊び', 'code-omikuji': '遊び', 'wait-games': '遊び',
+  'dev-rpg': '遊び', 'code-omikuji': '遊び', 'wait-games': '遊び', 'daily-quest': '遊び', 'trophy-shelf': '遊び',
 }
 export const categoryOf = (name: string): Category => CATEGORY[name] ?? 'その他'
 /** 表に載っている mod の名前 (アイコンが揃っているかの試験で回す) */
@@ -94,8 +95,39 @@ export const asRecent = (v: unknown): ModHubRecent[] | undefined =>
     ? (v as ModHubRecent[]).slice(0, RECENT_MAX)
     : undefined
 
-/** ヘッダー: 見出しと本数、mod ごとの色の点が順に灯る */
-export function headerSvg(count: number): string {
+/** 見出しの右下に置く季節の小さな飾り (中心 346,66・大きさ 30 ほど) */
+// 色は C から読むので、描くたびに作る (テーマに付いていく)
+const seasonDeco = (): Record<Season, string> => ({
+  // 桜の花がゆっくり回り、花びらが 1 枚落ちる
+  春:
+    `<g id="deco-spring"><g transform="translate(346 64)"><animateTransform attributeName="transform" type="rotate" values="0;72" additive="sum" dur="8s" repeatCount="indefinite"/>` +
+    [0, 72, 144, 216, 288].map(a => `<ellipse cx="0" cy="-6.5" rx="4.6" ry="6.5" fill="#f9a8c0" transform="rotate(${a})"/>`).join('') +
+    `<circle r="2.6" fill="#f2cc60"/></g>` +
+    `<ellipse cx="326" cy="60" rx="2.6" ry="1.6" fill="#f9a8c0"><animate attributeName="cy" values="56;84" dur="4s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0" dur="4s" repeatCount="indefinite"/></ellipse></g>`,
+  // 日の光がゆっくり回る
+  夏:
+    `<g id="deco-summer"><g><animateTransform attributeName="transform" type="rotate" values="0 346 66;45 346 66" dur="6s" repeatCount="indefinite"/>` +
+    [0, 45, 90, 135, 180, 225, 270, 315].map(a => `<path d="M346 52 V47" stroke="#f2cc60" stroke-width="2.4" stroke-linecap="round" transform="rotate(${a} 346 66)"/>`).join('') +
+    `</g><circle cx="346" cy="66" r="9" fill="#f2cc60"/></g>`,
+  // もみじが揺れる
+  秋:
+    `<g id="deco-autumn"><g><animateTransform attributeName="transform" type="rotate" values="-12 346 74;12 346 74;-12 346 74" dur="3s" repeatCount="indefinite"/>` +
+    `<path d="M346 50 L349 58 L356 54 L354 62 L362 63 L355 68 L358 73 L349 71 L347 78 L345 78 L343 71 L334 73 L337 68 L330 63 L338 62 L336 54 L343 58 Z" fill="#d9822b"/>` +
+    `<path d="M346 58 V82" stroke="#a0522d" stroke-width="1.4" stroke-linecap="round"/></g></g>`,
+  // 雪の結晶が回り、雪が降る
+  冬:
+    `<g id="deco-winter"><g><animateTransform attributeName="transform" type="rotate" values="0 346 66;60 346 66" dur="6s" repeatCount="indefinite"/>` +
+    [0, 60, 120].map(a => `<path d="M346 54 V78 M342 57 L346 60 L350 57 M342 75 L346 72 L350 75" stroke="${C.blue}" stroke-width="1.8" fill="none" stroke-linecap="round" transform="rotate(${a} 346 66)"/>`).join('') +
+    `</g>` +
+    [[318, 0], [370, 1.3], [330, 2.4]].map(([x, d]) => `<circle cx="${x}" cy="52" r="1.6" fill="${C.blue}"><animate attributeName="cy" values="50;84" dur="3.6s" begin="${d}s" repeatCount="indefinite"/></circle>`).join('') +
+    `</g>`,
+})
+
+/**
+ * ヘッダー: 見出しと本数、mod ごとの色の点が順に灯る。
+ * season を渡すと右下に季節の飾り (描く側が JST の今から決めて渡す。渡さなければ飾り無し)
+ */
+export function headerSvg(count: number, season?: Season): string {
   const pad = 16
   const colors = [C.blue, C.green, C.yellow, C.purple, C.orange, C.red]
   const dots = Array.from({ length: Math.min(count, 12) }, (_, i) => {
@@ -105,6 +137,7 @@ export function headerSvg(count: number): string {
   return frame(
     88,
     header('mod ハブ', `画面のある mod ${count} 本`) +
-      (count > 0 ? dots : `<text x="${pad}" y="70" font-size="12" fill="${C.dim}">まだ見つかっていません</text>`),
+      (count > 0 ? dots : `<text x="${pad}" y="70" font-size="12" fill="${C.dim}">まだ見つかっていません</text>`) +
+      (season ? seasonDeco()[season] : ''),
   )
 }

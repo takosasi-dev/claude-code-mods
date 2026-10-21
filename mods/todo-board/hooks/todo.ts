@@ -1,5 +1,6 @@
-// git grep の出力を表示用のデータに変え、SVG と terminal 用の行を組む。どれも純関数
-import type { TodoFile, TodoItem, TodoKind, TodoPoint, TodoSnapshot } from '../types'
+// git grep の出力・フォルダを歩いて拾った行を表示用のデータに変え、SVG と terminal 用の行を組む。
+// $ を使わない純関数 (歩く処理は読み書きの口を引数でもらう)。shots.mts が node で直に読む
+import type { TodoCut, TodoFile, TodoItem, TodoKind, TodoPoint, TodoSnapshot } from '../types'
 import { C, HEADER_H, countUp, frame, header } from './style'
 
 type Repo = Extract<TodoSnapshot, { kind: 'repo' }>
@@ -22,18 +23,34 @@ const zero = (): Record<TodoKind, number> => ({ FIXME: 0, TODO: 0, HACK: 0, XXX:
 /** 制御文字を落とす (タブと改行は残す)。エンジンは制御文字を含む Text・alt を描かない */
 export const plain = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 
-/** `git grep -n -z` の出力 (`ファイル\0行\0本文\n` の並び) から表示用のデータを作る */
-export function parseGrep(out: string, limit = LIMIT): Omit<Repo, 'kind' | 'cwd' | 'isCut' | 'loadedAt'> {
+/** 拾った 1 行 (本文は生のまま) */
+export type Row = { path: string; line: number; text: string }
+
+/** `git grep -n -z` の出力 (`ファイル\0行\0本文\n` の並び) を行に分ける */
+export function grepRows(out: string): Row[] {
+  const rows: Row[] = []
+  for (const raw of out.split('\n')) {
+    const [path = '', ln = '', ...rest] = raw.split('\0')
+    if (path === '' || rest.length === 0) continue
+    rows.push({ path, line: Number(ln) || 0, text: rest.join(' ') })
+  }
+  return rows
+}
+
+/** `git grep -n -z` の出力から表示用のデータを作る */
+export const parseGrep = (out: string, limit = LIMIT) => tally(grepRows(out), limit)
+
+/** 行から表示用のデータを作る。種類の語が無い行は捨てる */
+export function tally(rows: readonly Row[], limit = LIMIT): Omit<Repo, 'kind' | 'cwd' | 'isCut' | 'loadedAt'> {
   const counts = zero()
   const per = new Map<string, TodoFile>()
   const items: TodoItem[] = []
   let total = 0
-  for (const raw of out.split('\n')) {
-    const [rawPath = '', ln = '', ...rest] = raw.split('\0')
-    // -z なので名前は囲まれずに来る。表示と入力欄の文にしか使わないので、ここで制御文字を落とす
-    const path = plain(rawPath)
-    if (path === '' || rest.length === 0) continue
-    const text = plain(rest.join(' ').replace(/\r$/, ''))
+  for (const r of rows) {
+    // 名前は表示と入力欄の文にしか使わないので、ここで制御文字を落とす
+    const path = plain(r.path)
+    if (path === '') continue
+    const text = plain(r.text.replace(/\r$/, ''))
     const kind = KIND_RE.exec(text)?.[1] as TodoKind | undefined
     if (!kind) continue
     total++
@@ -42,11 +59,75 @@ export function parseGrep(out: string, limit = LIMIT): Omit<Repo, 'kind' | 'cwd'
     if (!f) per.set(path, (f = { path, count: 0, byKind: zero() }))
     f.count++
     f.byKind[kind]++
-    if (items.length < limit) items.push({ path, line: Number(ln) || 0, kind, text: text.trim().slice(0, 300) })
+    if (items.length < limit) items.push({ path, line: r.line, kind, text: text.trim().slice(0, 300) })
   }
   const files = [...per.values()].sort((p, q) => q.count - p.count || p.path.localeCompare(q.path))
   return { items, total, counts, files: files.slice(0, TOP), fileCount: files.length }
 }
+
+/** フォルダを歩く時の上限 */
+export type WalkLimits = { files: number; hits: number; ms: number; size: number }
+export const WALK_LIMITS: WalkLimits = { files: 2000, hits: 5000, ms: 8000, size: 1024 * 1024 }
+/** 入らないフォルダ。名前が . で始まる物も入らない */
+export const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'target', 'vendor', 'coverage', '__pycache__', 'venv', 'bower_components'])
+/** 読まないファイル (中身が文字でない物) */
+const BINARY = /\.(?:png|jpe?g|gif|webp|ico|bmp|svgz|pdf|zip|gz|tgz|7z|rar|tar|exe|dll|so|dylib|bin|o|a|class|jar|wasm|woff2?|ttf|otf|eot|mp3|mp4|wav|ogg|flac|mov|avi|webm|sqlite3?|db|pyc)$/i
+
+export type WalkEntry = { name: string; kind: 'file' | 'dir' | 'other'; size: number }
+export type WalkIo = {
+  list: (path: string) => Promise<readonly WalkEntry[]>
+  read: (path: string) => Promise<string>
+  now: () => Promise<number>
+}
+
+/**
+ * git でないフォルダを歩いて TODO の行を集める。広い順に歩き、上限 (ファイル数・見つけた数・時間) で止める。
+ * リンクは辿らない。読めないフォルダとファイルは飛ばす。path は root からの相対で、区切りは /
+ */
+export async function walk(io: WalkIo, root: string, lim: WalkLimits = WALK_LIMITS): Promise<{ rows: Row[]; scanned: number; cut: TodoCut }> {
+  const sep = root.includes('\\') ? '\\' : '/'
+  const base = root.replace(/[\\/]+$/, '')
+  const full = (rel: string) => (rel === '' ? base : `${base}${sep}${rel.split('/').join(sep)}`)
+  const deadline = (await io.now()) + lim.ms
+  const rows: Row[] = []
+  const queue = ['']
+  let scanned = 0
+  while (queue.length > 0) {
+    const dir = queue.shift() ?? ''
+    const entries = [...(await io.list(full(dir)).catch(() => []))].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const en of entries) {
+      const rel = dir === '' ? en.name : `${dir}/${en.name}`
+      if (en.kind === 'dir') {
+        if (!en.name.startsWith('.') && !SKIP_DIRS.has(en.name)) queue.push(rel)
+        continue
+      }
+      if (en.kind !== 'file' || en.size > lim.size || BINARY.test(en.name)) continue
+      if (scanned >= lim.files) return { rows, scanned, cut: 'files' }
+      if ((await io.now()) > deadline) return { rows, scanned, cut: 'time' }
+      const text = await io.read(full(rel)).catch(() => undefined)
+      scanned++
+      // ponytail: 中に NUL があれば文字のファイルでないと見る (git grep -I と同じ考え)
+      if (text === undefined || text.includes('\0')) continue
+      const lines = text.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i] ?? ''
+        if (!KIND_RE.test(t)) continue
+        rows.push({ path: rel, line: i + 1, text: t })
+        if (rows.length >= lim.hits) return { rows, scanned, cut: 'hits' }
+      }
+    }
+  }
+  return { rows, scanned, cut: '' }
+}
+
+/** 上限で止めた時の一言 */
+export const CUT_TEXT: Record<Exclude<TodoCut, ''>, string> = {
+  files: `ファイルが多いので ${WALK_LIMITS.files} 個で止めました`,
+  hits: `見つけた数が多いので ${WALK_LIMITS.hits} 件で止めました`,
+  time: `時間がかかるので ${WALK_LIMITS.ms / 1000} 秒で止めました`,
+  output: '出力が大きすぎて、途中までしか読めていません',
+}
+const cutText = (snap: Repo) => (snap.cut ? CUT_TEXT[snap.cut] : snap.isCut ? CUT_TEXT.output : '')
 
 export const itemId = (it: TodoItem) => `${it.path}:${it.line}`
 
@@ -161,7 +242,6 @@ function trendSvg(history: readonly TodoPoint[], y: number) {
 /** ペインに出す SVG 1 枚 */
 export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
   if (snap.kind === 'idle') return messageSvg('読み込み中', C.blue, '', '「再読込」で TODO を拾います')
-  if (snap.kind === 'not-repo') return messageSvg('git のフォルダでだけ使えます', C.yellow, snap.cwd, 'git のリポジトリの中で開くと TODO を拾います')
   if (snap.kind === 'error') return messageSvg('git grep を実行できません', C.red, snap.message, 'git が入っているか確かめてください')
 
   let s = ''
@@ -200,7 +280,8 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
   y += 112
   const d = delta(pts)
   y += 22
-  if (d === undefined) s += `<text x="12" y="${y}" font-size="12" fill="${C.dim}">ファイルを変えると、読み直した件数が並びます</text>`
+  // フォルダを歩く読み方は、ツールの後に自動では読み直さない
+  if (d === undefined) s += `<text x="12" y="${y}" font-size="12" fill="${C.dim}">${snap.via === 'walk' ? '「再読込」を押すと、読み直した件数が並びます' : 'ファイルを変えると、読み直した件数が並びます'}</text>`
   else if (d > 0)
     s +=
       `<g><path d="M14 ${y - 11} L26 ${y - 11} L20 ${y - 1} Z" fill="${C.green}"/>` +
@@ -247,20 +328,21 @@ export function paneSvg(snap: TodoSnapshot, history: readonly TodoPoint[]) {
     s += `<g clip-path="url(#tb-grow)">${bars}</g>`
     y += 4
   }
-  if (snap.isCut) {
-    s += `<text x="12" y="${y + 12}" font-size="12" fill="${C.yellow}">出力が大きすぎて、途中までしか読めていません</text>`
+  const cut = cutText(snap)
+  if (cut) {
+    s += `<text x="12" y="${y + 12}" font-size="12" fill="${C.yellow}">${cut}</text>`
     y += 20
   }
-  return svgDoc(y + 8, s, tailFit(base(snap.cwd), 26))
+  const sub = snap.via === 'walk' ? `${tailFit(base(snap.cwd), 14)}  ${snap.scanned ?? 0} 個読んだ` : tailFit(base(snap.cwd), 26)
+  return svgDoc(y + 8, s, sub)
 }
 
 /** Svg の alt と terminal で使う文の行 */
 export function paneLines(snap: TodoSnapshot, history: readonly TodoPoint[]): Line[] {
   if (snap.kind === 'idle') return [{ text: '読み込み中', isDim: true }]
-  if (snap.kind === 'not-repo') return [{ text: 'git のフォルダでだけ使えます', color: 'yellow' }, { text: plain(snap.cwd), isDim: true }]
   if (snap.kind === 'error') return [{ text: plain(`git grep を実行できません: ${snap.message}`), color: 'red' }]
   const lines: Line[] = [
-    { text: `合計 ${snap.total} 件`, isBold: true },
+    { text: `合計 ${snap.total} 件${snap.via === 'walk' ? ` (フォルダを歩いた ${snap.scanned ?? 0} 個)` : ''}`, isBold: true },
     { text: KINDS.map(k => `${k} ${snap.counts[k]}`).join(' / ') },
   ]
   const pts = history.slice(-5).map(p => p.total)
@@ -274,7 +356,8 @@ export function paneLines(snap: TodoSnapshot, history: readonly TodoPoint[]): Li
     lines.push({ text: '多いファイル', isBold: true })
     for (const f of snap.files) lines.push({ text: `${String(f.count).padStart(4)}  ${f.path}` })
   }
-  if (snap.isCut) lines.push({ text: '出力が大きすぎて、途中までしか読めていません', color: 'yellow' })
+  const cut = cutText(snap)
+  if (cut) lines.push({ text: cut, color: 'yellow' })
   return lines
 }
 

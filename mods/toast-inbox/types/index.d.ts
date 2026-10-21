@@ -22,6 +22,10 @@ declare module 'claude-code' {
       filter: string
       /** 「空にする」を 1 回押した後 */
       confirmClear: boolean
+      /** mod の名前 → 行を押した時に開くコマンド(スラッシュ無し)。ペインを開く時に $.command.list() から引き直す */
+      commands: Record<string, string>
+      /** 行を押した結果の一言。空なら出さない */
+      notice: string
     }
   }
 }

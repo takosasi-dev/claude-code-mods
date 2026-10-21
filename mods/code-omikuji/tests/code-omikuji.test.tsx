@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import { expect, mock, test } from 'claude-code/testing'
 
 import type { OmikujiDay, OmikujiResult } from '../types'
-import { RANK_NAMES, WORDS, addDay, fillText, fortune, isResult, jstDate, kanji, lastDays, paneSvg, wrap } from '../hooks/omikuji'
+import { RANK_NAMES, SEASON_WORDS, WORDS, addDay, fillText, fortune, isResult, jstDate, kanji, lastDays, paneSvg, seasonOf, wrap } from '../hooks/omikuji'
 
 // 2026-10-20 12:00 JST
 const NOW = Date.parse('2026-10-20T03:00:00Z')
@@ -359,4 +359,57 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
     origin: { kind: 'composer' },
   })
   expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
+})
+
+test('言葉: どの項目も 0.6 の 2 倍以上で重なりなし、季節の一言はその季節の日だけ出る', () => {
+  // 0.6 の時の数 (good 12, bad 12, language 16, command 16, bug 12, review 12, lost 11, warning 12, commit 14)
+  const before = { good: 12, bad: 12, language: 16, command: 16, bug: 12, review: 12, lost: 11, warning: 12, commit: 14 }
+  for (const [key, n] of Object.entries(before)) {
+    const list = WORDS[key as keyof typeof WORDS]
+    expect(list.length).toBeGreaterThanOrEqual(n * 2)
+    expect(new Set(list).size).toBe(list.length)
+  }
+  expect(seasonOf('2026-03-01')).toBe('春')
+  expect(seasonOf('2026-08-31')).toBe('夏')
+  expect(seasonOf('2026-10-20')).toBe('秋')
+  expect(seasonOf('2026-12-01')).toBe('冬')
+  expect(seasonOf('2027-02-28')).toBe('冬')
+  const seasonal = new Map(Object.entries(SEASON_WORDS).flatMap(([s, w]) => [...w.good, ...w.bad].map(t => [t, s] as const)))
+  let hits = 0
+  for (let i = 0; i < 365; i++) {
+    const date = jstDate(NOW + i * DAY)
+    for (const n of [0, 1, 2]) {
+      const f = fortune(date, n)
+      const s = seasonal.get(f.words)
+      if (s !== undefined) {
+        hits++
+        expect(s).toBe(seasonOf(date))
+      } else expect([...WORDS.good, ...WORDS.bad]).toContain(f.words)
+    }
+  }
+  expect(hits).toBeGreaterThan(20)
+  // 画面の文字に絵文字や記号の飾りを使わない
+  const all = [...Object.values(WORDS).flat(), ...seasonal.keys()].join('')
+  expect(all).not.toMatch(/[\p{Extended_Pictographic}★☆♪→←↑↓]/u)
+})
+
+test('store の今日・この 7 日に知らない欄があっても消さずに書く (新しい版が足した欄)', async ($, on) => {
+  const old = { ...fortune('2026-10-19'), futureField: 1 }
+  const { store, open } = await boot($, on, {
+    today: old,
+    history: [{ date: '2026-10-19', rank: old.rank, futureField: 2 }],
+  })
+  await open()
+  const today = store.today() as OmikujiResult & { futureField?: number }
+  expect(today.date).toBe(TODAY)
+  expect(today.futureField).toBe(1)
+  expect(isResult(today)).toBe(true)
+  const history = store.history() as (OmikujiDay & { futureField?: number })[]
+  expect(history[0]?.futureField).toBe(2)
+  expect(history[1]).toEqual({ date: TODAY, rank: today.rank })
+  // 同じ日に開き直しても書き換えない
+  const writes = store.writes()
+  await open()
+  expect((store.today() as { futureField?: number }).futureField).toBe(1)
+  expect(store.writes()).toBe(writes + 1) // history だけ
 })

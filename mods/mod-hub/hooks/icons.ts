@@ -38,6 +38,7 @@ const ICONS: Record<string, (c: string, a: string) => string> = {
     `<rect x="8" y="7" width="16" height="20" rx="2" ${line(c)}/><rect x="12" y="5" width="8" height="4" rx="1" fill="${c}"/><path d="M12 15h8 M12 19h8 M12 23h5" ${line(a)}/>`,
   'project-board': (c, a) =>
     `<rect x="6" y="7" width="5.5" height="18" rx="1.5" fill="${c}"/><rect x="13.25" y="7" width="5.5" height="12" rx="1.5" fill="${c}" opacity="0.65"/><rect x="20.5" y="7" width="5.5" height="7" rx="1.5" fill="${a}"/>`,
+  'fail-log': (c, a) => `<path d="M16 5L28 26H4z" ${line(c)}/><path d="M16 12v7" ${line(a, 2.5)}/><circle cx="16" cy="22.5" r="1.6" fill="${a}"/>`,
   // 状況
   'cc-dash': (c, a) => `<path d="M6 22a10 10 0 0 1 20 0" ${line(c, 2.5)}/><path d="M16 22l5.5-6.5" ${line(a)}/><circle cx="16" cy="22" r="2.2" fill="${c}"/>`,
   'token-meter': (c, a) => `<path d="M8 10h16 M8 16h11" ${line(c, 3)}/><path d="M8 22h6" ${line(a, 3)}/>`,
@@ -59,6 +60,8 @@ const ICONS: Record<string, (c: string, a: string) => string> = {
   'canvas-pane': (c, a) => `<rect x="5" y="7" width="22" height="18" rx="2" ${line(c)}/><path d="M8 22l5-6 4 4 3-3 4 5" ${line(a)}/><circle cx="20.5" cy="12" r="2" fill="${c}"/>`,
   'done-chime': (c, a) => `<path d="M10 21v-6a6 6 0 0 1 12 0v6l2 2H8z" ${line(c)}/><path d="M14 26.5h4" ${line(a, 2.5)}/>`,
   'toast-inbox': (c, a) => `<path d="M5 17l3.5-10h15L27 17v8H5z M5 17h6.5l1.5 3h6l1.5-3H27" ${line(c)}/><path d="M12.5 11.5h7" ${line(a)}/>`,
+  'mod-check': (c, a) =>
+    `<rect x="7" y="6" width="18" height="21" rx="2" ${line(c)}/><rect x="12" y="4" width="8" height="4" rx="1" fill="${c}"/><path d="M11.5 17l3.5 3.5 6-7" ${line(a, 2.5)}/>`,
   // 遊び
   'aqua-pet': (c, a) => `<path d="M6 16c3.5-6.5 11.5-6.5 15.5 0c-4 6.5-12 6.5-15.5 0z M21.5 16l5-4.5v9z" ${line(c)}/><circle cx="11" cy="15" r="1.5" fill="${a}"/>`,
   'face-band': (c, a) =>
@@ -71,6 +74,10 @@ const ICONS: Record<string, (c: string, a: string) => string> = {
   'code-omikuji': (c, a) => `<path d="M10.5 12.5l5.5-3.5 5.5 3.5V26h-11z" ${line(c)}/><path d="M18 9l3.5-5.5" ${line(a, 2.5)}/><path d="M13.5 17.5h5" ${line(c)}/>`,
   'wait-games': (c, a) =>
     `<path d="M9.5 10.5h13a5.5 5.5 0 0 1 5.5 5.5v2.5a4 4 0 0 1-7 2.5l-1.2-1.5h-7.6L11 21a4 4 0 0 1-7-2.5V16a5.5 5.5 0 0 1 5.5-5.5z" ${line(c)}/><path d="M10 14v5 M7.5 16.5h5" ${line(c)}/><circle cx="21" cy="15" r="1.5" fill="${a}"/><circle cx="23.5" cy="18" r="1.5" fill="${a}"/>`,
+  'daily-quest': (c, a) =>
+    `<rect x="5" y="8" width="22" height="18" rx="2" ${line(c)}/><path d="M5 13h22 M10 5v5 M22 5v5" ${line(c)}/><circle cx="20.5" cy="20" r="2.8" fill="${a}"/>`,
+  'trophy-shelf': (c, a) =>
+    `<path d="M10 6h12v6a6 6 0 0 1-12 0z" ${line(c)}/><path d="M10 8H6.5a3.5 3.5 0 0 0 4 6 M22 8h3.5a3.5 3.5 0 0 1-4 6" ${line(c)}/><path d="M16 18v4 M11 26h10 M13 22h6" ${line(a)}/>`,
 }
 
 /** 表に無い mod: カテゴリーの色の 4 つの点 */

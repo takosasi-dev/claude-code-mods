@@ -9,8 +9,17 @@ const GIVENS: Record<SudokuSize, number> = { 4: 6, 9: 30 }
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => i)
 
-/** i と同じ行・列・箱のマス (i 自身は除く) */
-export function peers(n: SudokuSize, i: number): number[] {
+/** i と同じ行・列・箱のマス (i 自身は除く)。中では大きさごとに 1 回だけ作った表を引く (返すのは写し) */
+export const peers = (n: SudokuSize, i: number): number[] => [...(peerTable(n)[i] ?? [])]
+
+const tables = new Map<SudokuSize, readonly (readonly number[])[]>()
+function peerTable(n: SudokuSize) {
+  let t = tables.get(n)
+  if (!t) tables.set(n, (t = range(n * n).map(i => makePeers(n, i))))
+  return t
+}
+
+function makePeers(n: SudokuSize, i: number): number[] {
   const b = boxOf(n)
   const r = Math.floor(i / n)
   const c = i % n
@@ -43,26 +52,34 @@ export function solutionFor(n: SudokuSize, rand: () => number): number[] {
 /** 答えの数 (limit で打ち切る)。0 は空き。候補の一番少ないマスから埋める */
 export function countSolutions(n: SudokuSize, cells: readonly number[], limit = 2): number {
   const grid = [...cells]
-  const peerOf = range(n * n).map(i => peers(n, i))
+  const peerOf = peerTable(n)
+  // 候補はビットで持つ (d の印は 1 << d)。試す順は小さい数字から (前と同じ盤になる)
+  const all = ((1 << (n + 1)) - 1) & ~1
   let found = 0
   const walk = (): void => {
     let best = -1
-    let bestCands: number[] = []
+    let bestCands = 0
+    let bestCount = n + 1
     for (let i = 0; i < grid.length; i++) {
       if (grid[i] !== 0) continue
-      const used = new Set(peerOf[i]!.map(j => grid[j]))
-      const cands = range(n).map(d => d + 1).filter(d => !used.has(d))
-      if (cands.length === 0) return
-      if (best < 0 || cands.length < bestCands.length) {
+      let used = 0
+      for (const j of peerOf[i]!) used |= 1 << grid[j]!
+      const cands = all & ~used
+      if (cands === 0) return
+      let count = 0
+      for (let m = cands; m !== 0; m &= m - 1) count++
+      if (count < bestCount) {
         best = i
         bestCands = cands
+        bestCount = count
       }
     }
     if (best < 0) {
       found++
       return
     }
-    for (const d of bestCands) {
+    for (let d = 1; d <= n; d++) {
+      if ((bestCands & (1 << d)) === 0) continue
       grid[best] = d
       walk()
       if (found >= limit) break
@@ -88,10 +105,10 @@ export function newSudoku(n: SudokuSize, rand: () => number): Sudoku {
 }
 
 /** 同じ行・列・箱に同じ数字がある */
-export const clashes = (g: Sudoku, i: number) => (g.cells[i] ?? 0) !== 0 && peers(g.size, i).some(j => g.cells[j] === g.cells[i])
+export const clashes = (g: Sudoku, i: number) => (g.cells[i] ?? 0) !== 0 && (peerTable(g.size)[i] ?? []).some(j => g.cells[j] === g.cells[i])
 
 /** 全部埋まっていて、どの行・列・箱にも重なりが無い */
-export const isComplete = (g: Pick<Sudoku, 'size' | 'cells'>) => g.cells.every((v, i) => v !== 0 && !peers(g.size, i).some(j => g.cells[j] === v))
+export const isComplete = (g: Pick<Sudoku, 'size' | 'cells'>) => g.cells.every((v, i) => v !== 0 && !(peerTable(g.size)[i] ?? []).some(j => g.cells[j] === v))
 
 /** マスを選ぶ。もう一度押すと外す。初めからある数字と、解き終わった盤は選べない */
 export function selectCell(g: Sudoku, i: number): Sudoku {

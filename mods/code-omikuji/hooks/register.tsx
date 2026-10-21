@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { addDay, fillText, fortune, isResult, jstDate, paneLines, paneSvg, toDays } from './omikuji'
+import { addDay, fillText, fortune, isResult, jstDate, objOf, paneLines, paneSvg, toDays } from './omikuji'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'code-omikuji'
@@ -25,7 +25,8 @@ let ownsMain = false
 async function drawToday($: EngineInterface) {
   const date = jstDate(await $.clock.now())
   const saved = await $.store.get('today')
-  const today = isResult(saved) && saved.date === date ? saved : fortune(date)
+  // 引き直す時も、知らない欄 (新しい版が足した欄) は残して書く
+  const today = isResult(saved) && saved.date === date ? saved : { ...objOf(saved), ...fortune(date) }
   const history = addDay(toDays(await $.store.get('history')), { date, rank: today.rank })
   if (today !== saved) await $.store.set('today', today)
   await $.store.set('history', history)

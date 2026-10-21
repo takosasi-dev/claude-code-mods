@@ -1,6 +1,6 @@
 {
   "name": "code-omikuji",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "/omikuji で今日のコード運勢を引く。1 日 1 回の本番は同じ日なら同じ結果で、筒を振るアニメと和紙のおみくじをペインに SVG で表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

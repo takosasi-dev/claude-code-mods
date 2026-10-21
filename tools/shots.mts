@@ -28,7 +28,7 @@ registerHooks({
   },
 })
 
-const load = (file: string): Promise<any> => import(new URL(`../mods/${file}`, import.meta.url).href)
+export const load = (file: string): Promise<any> => import(new URL(`../mods/${file}`, import.meta.url).href)
 
 // 時刻の欄が毎回ずれて行の区切り (10 分ごと) で絵が変わらないよう、正時 + 50 分に寄せる
 const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000 + 50 * 60_000
@@ -47,16 +47,16 @@ const seeded = (seed: number) => () => {
 type Pic = string | { svg: string; at: number }
 
 // mod 名 → その mod の画面に並ぶ SVG (上から順)。ここに 1 行足せば撮る物が増える
-const SHOTS: Record<string, () => Promise<Pic[]>> = {
+export const SHOTS: Record<string, () => Promise<Pic[]>> = {
   'mod-hub': async () => {
     const m = await load('mod-hub/hooks/hub.ts')
     const i = await load('mod-hub/hooks/icons.ts')
     // アイコンは 32x32 なので、1 枚ずつ載せると引き伸ばされる。iconStrip に通す
     return [
-      m.headerSvg(14),
-      i.iconStrip(['git-pane', 'todo-board', 'test-runner', 'cc-dash', 'usage-history', 'file-map', 'focus-timer', 'toast-inbox', 'aqua-pet', 'turn-gacha', 'wait-games']),
+      m.headerSvg(14, '秋'),
+      i.iconStrip(['git-pane', 'fail-log', 'test-runner', 'cc-dash', 'usage-history', 'toast-inbox', 'mod-check', 'aqua-pet', 'turn-gacha', 'daily-quest', 'trophy-shelf']),
       i.bandSvg('固定', 2),
-      i.bandSvg('開発', 9),
+      i.bandSvg('開発', 10),
     ]
   },
 
@@ -410,8 +410,11 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
   'face-band': async () => {
     const m = await load('face-band/hooks/face.ts')
     const moods = ['idle', 'think', 'tool', 'happy', 'sad']
-    const faces = moods.map((mood, i) => m.faceSvg(mood).replace('<svg ', `<svg x="${i * 96}" y="0" width="96" height="72" `)).join('')
-    return [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 72">${faces}</svg>`]
+    // 上の段は昼の夏、下の段は夜の冬 (時間帯と季節で小物が変わる)
+    const rows = [['昼', '夏'], ['夜', '冬']]
+    const faces = rows.flatMap(([part, season], r) => moods.map((mood, i) =>
+      m.faceSvg(mood, part, season).replace('<svg ', `<svg x="${i * 96}" y="${r * 72}" width="96" height="72" `))).join('')
+    return [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 144">${faces}</svg>`]
   },
 
   'done-chime': async () => {
@@ -430,17 +433,20 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
     const m = await load('aqua-pet/hooks/tank.ts')
     const fish = [
       { id: 0, kind: 'maru', bornAt: NOW - 12 * DAY, turnsSeen: 64 },
-      { id: 1, kind: 'shima', bornAt: NOW - 9 * DAY, turnsSeen: 30 },
-      { id: 2, kind: 'mizutama', bornAt: NOW - 6 * DAY, turnsSeen: 21 },
-      { id: 3, kind: 'hirenaga', bornAt: NOW - 3 * DAY, turnsSeen: 9 },
-      { id: 4, kind: 'ougi', bornAt: NOW - DAY, turnsSeen: 3 },
-      { id: 5, kind: 'akari', bornAt: NOW, turnsSeen: 0, name: 'ぴか' },
+      { id: 1, kind: 'shima', bornAt: NOW - 10 * DAY, turnsSeen: 40 },
+      { id: 2, kind: 'mizutama', bornAt: NOW - 8 * DAY, turnsSeen: 30 },
+      { id: 3, kind: 'hoshi', bornAt: NOW - 6 * DAY, turnsSeen: 21 },
+      { id: 4, kind: 'tsuno', bornAt: NOW - 4 * DAY, turnsSeen: 12 },
+      { id: 5, kind: 'akari', bornAt: NOW - 2 * DAY, turnsSeen: 6, name: 'ぴか' },
+      { id: 6, kind: 'niji', bornAt: NOW - DAY, turnsSeen: 3 },
+      { id: 7, kind: 'ryugu', bornAt: NOW, turnsSeen: 0 },
     ]
     const tank = {
-      ...m.INITIAL, turns: 55, bornAt: NOW - 12 * DAY, fullness: 80, fedAt: NOW, murk: 1, name: 'demo', isRunning: true, lastActiveAt: NOW, fish,
+      ...m.INITIAL, turns: 80, bornAt: NOW - 12 * DAY, fullness: 80, fedAt: NOW, murk: 1, name: 'demo', isRunning: true, lastActiveAt: NOW, fish,
       view: { period: '夕', season: '秋', slot: 70, fullness: 80, isIdle: false, isUpset: false, isFeeding: false, days: 12 },
     }
-    return [m.drawTank(tank), m.fishListSvg(fish)]
+    // 2 枚目は夜の冬 (水の色と飾りが時間帯と季節で変わる)
+    return [m.drawTank(tank), m.drawTank({ ...tank, view: { ...tank.view, period: '夜', season: '冬', slot: 88 } }), m.fishListSvg(fish)]
   },
 
   'session-timeline': async () => {
@@ -508,6 +514,56 @@ const SHOTS: Record<string, () => Promise<Pic[]>> = {
     })
     return [m.chartSvg(days, NOW, 7, 'turns'), m.heatSvg(heat)]
   },
+
+  'fail-log': async () => {
+    const m = await load('fail-log/hooks/faillog.ts')
+    const f = (k: number, tool: string, input: string, group: string, error: string, isSub = false) => ({ at: NOW - k * 7 * MIN, tool, input, group, error, isSub })
+    const entries = [
+      ...Array.from({ length: 6 }, (_, k) => f(30 + k, 'Bash', 'npm test', 'Bash npm test', 'Exit code 1: 2 failed, 41 passed', k % 3 === 0)),
+      ...Array.from({ length: 4 }, (_, k) => f(20 + k, 'Edit', 'register.tsx', 'Edit register.tsx', 'String to replace not found in file.')),
+      ...Array.from({ length: 3 }, (_, k) => f(10 + k, 'Bash', 'npx tsc -p .', 'Bash npx tsc', 'Exit code 2: src/a.ts(3,1): error TS2304', k === 0)),
+      f(8, 'Read', 'settings.json', 'Read settings.json', 'File does not exist.'),
+      f(5, 'Bash', 'git push', 'Bash git push', 'Exit code 128: fatal: could not read Username'),
+      f(2, 'WebFetch', 'example.com', 'WebFetch example.com', 'Request failed with status code 404', true),
+    ]
+    return [m.failSvg(entries, 57, NOW)]
+  },
+
+  'daily-quest': async () => {
+    const m = await load('daily-quest/hooks/quest.ts')
+    const date = m.jstDate(NOW)
+    const p = m.questsFor(date)
+    // 1 つ目はこなした、2 つ目は半分、3 つ目はまだ
+    const counts = { [p[0].kind]: p[0].goal, [p[1].kind]: Math.ceil(p[1].goal / 2) }
+    return [m.paneSvg(m.dayOf(date, counts), 5, 23, m.lastDays(date, 7).slice(1, 6))]
+  },
+
+  'trophy-shelf': async () => {
+    const m = await load('trophy-shelf/hooks/shelf.ts')
+    const cards = Array.from({ length: 60 }, (_, k) => ({ id: `c${k}`, rarity: k % 10 === 0 ? 'SSR' : 'N' }))
+    const raw = {
+      hero: { xp: 1760, achievements: { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7 }, wins: 18, defeated: { slime: 1 } },
+      save: { book: Object.fromEntries(Array.from({ length: 34 }, (_, k) => [`c${k}`, { count: 1, firstAt: 1 }])), total: 80 },
+      cards,
+      tank: { fish: [{ kind: 'maru' }, { kind: 'shima' }, { kind: 'akari' }, { kind: 'ougi' }], view: { days: 12 } },
+      stats: { best2048: 1024, wins2048: 0, winsMines: 2, puzzles: { fifteen: { wins: 1 } } },
+      streak: 4,
+      totalDone: 21,
+    }
+    const firstAt = { 'rpg-lv5': NOW - 9 * DAY, 'rpg-lv10': NOW - 2 * DAY, 'quest-1': NOW - 6 * DAY, 'aqua-3': NOW - 5 * DAY }
+    return [m.shelfSvg(m.snapshotOf(raw), firstAt)]
+  },
+
+  'mod-check': async () => {
+    const m = await load('mod-check/hooks/check.ts')
+    // /quest は入っていない、/agents は組み込み、/history は別の plugin に取られて予備名に回った形
+    const cmds = m.MODS.filter((x: any) => x.main && !['quest', 'agents', 'history'].includes(x.main)).map((x: any) => ({ name: x.main, source: 'plugin', plugin: x.name }))
+    cmds.push({ name: 'agents', source: 'builtin' }, { name: 'agent-watch', source: 'plugin', plugin: 'agent-watch' }, { name: 'history', source: 'plugin', plugin: 'other-history' }, { name: 'usage-history', source: 'plugin', plugin: 'usage-history' })
+    const states = Object.fromEntries(m.MODS.filter((x: any) => x.name !== 'daily-quest').map((x: any) => [x.name, true]))
+    const report = { at: NOW, env: { surface: 'vscode', theme: 'dark', engine: '2.1.304', panes: ['mod-check'] }, rows: m.buildRows(cmds, states, []) }
+    // 全 41 行だと長いので、問題のある行が先に来る並びの上 12 行だけ
+    return [m.summarySvg(report), m.rowsSvg(report.rows.slice(0, 12))]
+  },
 }
 
 // ---- HTML と PNG ----
@@ -566,47 +622,50 @@ const page = (svgs: Pic[], bg: string) =>
     .join('') +
   `</body></html>`
 
-const args = process.argv.slice(2)
-const chrome = args.find(a => a.startsWith('--chrome='))?.slice(9) ?? process.env.CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
-const only = args.filter(a => !a.startsWith('--'))
-const isLight = args.includes('--light')
-const unknown = only.filter(n => !(n in SHOTS))
-if (unknown.length) throw new Error(`知らない mod: ${unknown.join(', ')}`)
+// tools/gif.mts と tools/perf.mts が SHOTS と load を import するので、撮るのは直に走らせた時だけ
+if (import.meta.main) {
+  const args = process.argv.slice(2)
+  const chrome = args.find(a => a.startsWith('--chrome='))?.slice(9) ?? process.env.CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+  const only = args.filter(a => !a.startsWith('--'))
+  const isLight = args.includes('--light')
+  const unknown = only.filter(n => !(n in SHOTS))
+  if (unknown.length) throw new Error(`知らない mod: ${unknown.join(', ')}`)
 
-const outDir = fileURLToPath(new URL('../docs/images/', import.meta.url))
-mkdirSync(outDir, { recursive: true })
-const tmp = mkdtempSync(join(tmpdir(), 'shots-'))
-try {
-  for (const [mod, make] of Object.entries(SHOTS)) {
-    if (only.length && !only.includes(mod)) continue
-    // その mod の style.ts の色を替えてから描く (色は描く時に C から読まれる)
-    const style = await load(`${mod}/hooks/style.ts`)
-    style.setTheme(isLight)
-    const svgs = await make()
-    const height = Math.ceil(PAD * 2 + GAP * (svgs.length - 1) + svgs.reduce((n, s) => n + heightOf(typeof s === 'string' ? s : s.svg), 0))
-    const html = join(tmp, `${mod}.html`)
-    const png = join(outDir, `${mod}${isLight ? '-light' : ''}.png`)
-    writeFileSync(html, page(svgs, style.C.bg))
-    execFileSync(
-      chrome,
-      [
-        '--headless=new',
-        `--screenshot=${png}`,
-        `--window-size=380,${height}`,
-        '--force-device-scale-factor=2',
-        '--hide-scrollbars',
-        '--mute-audio',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--virtual-time-budget=4000',
-        `--user-data-dir=${join(tmp, 'profile')}`,
-        pathToFileURL(html).href,
-      ],
-      // Chrome は TEMP に .tmp や scoped_dir を残すので、TEMP も消す一時フォルダに向ける
-      { stdio: 'ignore', timeout: 60_000, env: { ...process.env, TEMP: tmp, TMP: tmp } },
-    )
-    console.log(`${mod}${isLight ? '-light' : ''}.png  380x${height}  ${Math.round(statSync(png).size / 1024)}KB`)
+  const outDir = fileURLToPath(new URL('../docs/images/', import.meta.url))
+  mkdirSync(outDir, { recursive: true })
+  const tmp = mkdtempSync(join(tmpdir(), 'shots-'))
+  try {
+    for (const [mod, make] of Object.entries(SHOTS)) {
+      if (only.length && !only.includes(mod)) continue
+      // その mod の style.ts の色を替えてから描く (色は描く時に C から読まれる)
+      const style = await load(`${mod}/hooks/style.ts`)
+      style.setTheme(isLight)
+      const svgs = await make()
+      const height = Math.ceil(PAD * 2 + GAP * (svgs.length - 1) + svgs.reduce((n, s) => n + heightOf(typeof s === 'string' ? s : s.svg), 0))
+      const html = join(tmp, `${mod}.html`)
+      const png = join(outDir, `${mod}${isLight ? '-light' : ''}.png`)
+      writeFileSync(html, page(svgs, style.C.bg))
+      execFileSync(
+        chrome,
+        [
+          '--headless=new',
+          `--screenshot=${png}`,
+          `--window-size=380,${height}`,
+          '--force-device-scale-factor=2',
+          '--hide-scrollbars',
+          '--mute-audio',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--virtual-time-budget=4000',
+          `--user-data-dir=${join(tmp, 'profile')}`,
+          pathToFileURL(html).href,
+        ],
+        // Chrome は TEMP に .tmp や scoped_dir を残すので、TEMP も消す一時フォルダに向ける
+        { stdio: 'ignore', timeout: 60_000, env: { ...process.env, TEMP: tmp, TMP: tmp } },
+      )
+      console.log(`${mod}${isLight ? '-light' : ''}.png  380x${height}  ${Math.round(statSync(png).size / 1024)}KB`)
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })
   }
-} finally {
-  rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })
 }

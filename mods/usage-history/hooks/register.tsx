@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DayRec, Days, HistoryMetric, HistoryRange } from '../types'
-import { addDay, asDays, asHeat, busiest, chartSvg, dayKey, dayLabel, EMPTY_DAY, fmtNum, heatSvg, lastDays, mergeDays, mergeHeat, slot, SLOTS, summarize, UNIT } from './history'
+import { addDay, asDays, asHeat, busiest, chartSvg, dayKey, dayLabel, EMPTY_DAY, fmtNum, heatSvg, lastDays, mergeDays, mergeHeat, slot, SLOTS, summarize, UNIT, withUnknown } from './history'
 import { followTheme, readTheme } from './style'
 
 type $ = EngineInterface
@@ -42,13 +42,15 @@ const flush = ($: $) =>
     const heat = pendingHeat
     pendingDays = {}
     pendingHeat = []
-    const savedDays = asDays(await $.store.get('days').catch(() => undefined)) ?? (await read($, DAYS))
+    const rawDays = await $.store.get('days').catch(() => undefined)
+    const savedDays = asDays(rawDays) ?? (await read($, DAYS))
     const savedHeat = asHeat(await $.store.get('heat').catch(() => undefined)) ?? (await read($, HEAT))
     const nextDays = mergeDays(savedDays, days)
     const nextHeat = mergeHeat(savedHeat, heat)
     await update($, DAYS, () => nextDays)
     await update($, HEAT, () => nextHeat)
-    await $.store.set('days', nextDays).catch(() => {})
+    // この版の知らない欄 (新しい版が足した物) は読んだまま残す
+    await $.store.set('days', withUnknown(rawDays, nextDays)).catch(() => {})
     if (heat.length > 0) await $.store.set('heat', nextHeat).catch(() => {})
   })
 

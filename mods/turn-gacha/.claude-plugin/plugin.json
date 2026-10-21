@@ -1,7 +1,7 @@
 {
   "name": "turn-gacha",
-  "version": "0.2.0",
-  "description": "/gacha で、ターンが終わるたびに引く開発ネタのカードと図鑑をペインで見る",
+  "version": "0.3.1",
+  "description": "/gacha で、ターンが終わるたびに引く開発ネタのカード (60 種) と図鑑をペインで見る。daily-quest のお題をこなすと、ごほうびでおまけに引く",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"
 }

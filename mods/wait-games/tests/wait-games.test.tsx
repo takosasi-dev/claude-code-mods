@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { canMove, linesOf, move, newGame, play, slideLine, spawn } from '../hooks/game2048'
 import { around, CELLS, countAt, isCleared, look, MINE_COUNT, minesLeft, newMines, place, reveal, toggleFlag } from '../hooks/mines'
-import { addStats, EMPTY_STATS, statsFromSaved } from '../hooks/stats'
+import { addStats, EMPTY_STATS, keepUnknown, statsFromSaved } from '../hooks/stats'
 import { board2048Svg, clean, esc, fifteenSvg, lightsSvg, memorySvg, minesSvg, sudokuSvg } from '../hooks/svg'
 import type { Fifteen, Game2048, GameStats, Lights, Memory, Mines, Sudoku } from '../types'
 import { applyFifteen, isSolvable as solvable15, isSolved, look as look15, newFifteen, neighbors, SOLVED } from '../hooks/fifteen'
@@ -600,6 +600,25 @@ test('2048 を作ると勝ちを 1 回数え、連打しても記録が消えな
   expect(saved.best2048).toBe(g2048Of().score)
   expect(saved.best2048).toBeGreaterThanOrEqual(2048 + 4 + 8 + 16)
   expect(String((await ui.find({ type: 'Svg' }))?.props.source)).toMatch(/2048 達成/)
+})
+
+test('記録を書く時、知らない欄 (新しい版が足した物) を入れ子の中まで残す', async ($, on) => {
+  const future = {
+    best2048: 10, wins2048: 0, winsMines: 2, fastestMines: 0, futureField: 1,
+    puzzles: { fifteen: { wins: 1, bestMoves: 50, fastest: 90_000, futureInner: 2 }, sudoku16: { wins: 3 } },
+  }
+  const { store, arm } = await boot($, on, future)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  arm('g2048', game([8, 8, ...Array(14).fill(0)]))
+  await ui.press({ key: 'new-2048' })
+  await ui.press({ key: 'left' })
+  const saved = store.get('stats') as Record<string, unknown> & { puzzles: Record<string, Record<string, unknown>> }
+  expect(saved.best2048).toBe(16)
+  expect(saved.futureField).toBe(1)
+  expect(saved.puzzles.sudoku16).toEqual({ wins: 3 })
+  expect(saved.puzzles.fifteen).toEqual({ wins: 1, bestMoves: 50, fastest: 90_000, futureInner: 2 })
+  expect(keepUnknown({ a: 1, b: { c: 2, d: 3 } }, { b: { c: 5 }, e: 6 })).toEqual({ a: 1, b: { c: 5, d: 3 }, e: 6 })
+  expect(keepUnknown('broken', { a: 1 })).toEqual({ a: 1 })
 })
 
 test('store が読めない形なら書かずに知らせる', async ($, on) => {

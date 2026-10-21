@@ -14,11 +14,18 @@ export type FaceBandNow = {
   seq: number
 }
 
+/** 日本時間で決まる時間帯と季節 (小物が変わる)。1 分ごとに見て、変わった時だけ書く */
+export type FaceBandLook = {
+  part: '朝' | '昼' | '夕' | '夜'
+  season: '春' | '夏' | '秋' | '冬'
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'face-band': {
       now: FaceBandNow
       isHidden: boolean
+      look: FaceBandLook
     }
   }
 }

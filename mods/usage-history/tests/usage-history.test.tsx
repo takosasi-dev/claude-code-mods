@@ -132,6 +132,15 @@ test('書く直前に読み直し、別のセッションが足した分を消�
   expect(s.days()['2026-10-20']?.turns).toBe(1)
 })
 
+test('知らない欄 (新しい版が書いた物) は、1 ターン後も store に残る。日ごとの知らない数も', async ($, on) => {
+  const today = '2026-10-21'
+  const s = await boot($, on, { store: { days: { futureField: 1, [today]: { ...rec({ turns: 2 }), futureMetric: 5 } } } })
+  await turn($, { id: 'm1' })
+  await s.clock.settle()
+  // 書いたこと (ターンが増えた) と、知らない欄が残ったこと
+  expect(s.raw.get('days')).toMatchObject({ futureField: 1, [today]: { turns: 3, futureMetric: 5 } })
+})
+
 test('400 日を超えたら古い日から捨てる', async ($, on) => {
   const old: Days = Object.fromEntries(Array.from({ length: KEEP_DAYS }, (_, k) => [dayKey(NOW - (KEEP_DAYS - k) * DAY), rec({ turns: 1 })]))
   const s = await boot($, on, { store: { days: old } })

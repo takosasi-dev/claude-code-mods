@@ -17,6 +17,7 @@ import {
   sameView,
   stepFish,
   toSaved,
+  toStore,
   viewAt,
 } from './tank'
 import type { Saved } from './tank'
@@ -68,9 +69,13 @@ const change = ($: $, fn: (t: AquaTank, now: number) => AquaTank) =>
       const y = fn(fresh ? { ...x, ...fresh.saved } : x, now)
       return { ...y, view: viewAt(y, now) }
     })
-    // 初めて (キーが無い) なら生まれた時刻を残すために書く
+    // 初めて (キーが無い) なら生まれた時刻を残すために書く。
+    // 新しい版の mod が足した欄 (この版の知らない欄) は消さずに書き戻す
     if (!fresh) warn($, '水槽の記録を読めなかったので保存していません')
-    else if (JSON.stringify(toSaved(t)) !== JSON.stringify(fresh.raw)) await $.store.set(STORE_KEY, toSaved(t)).catch(() => warn($, '水槽の記録を保存できませんでした'))
+    else {
+      const next = toStore(fresh.raw, toSaved(t))
+      if (JSON.stringify(next) !== JSON.stringify(fresh.raw)) await $.store.set(STORE_KEY, next).catch(() => warn($, '水槽の記録を保存できませんでした'))
+    }
     return t
   })
 

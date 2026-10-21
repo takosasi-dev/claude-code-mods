@@ -47,6 +47,23 @@ export function asDays(v: unknown): Days | undefined {
 export const asHeat = (v: unknown): number[] | undefined =>
   Array.isArray(v) && v.length === SLOTS ? v.map(num) : undefined
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * store に書く形。書く直前に読んだ raw のうち、この版の知らない欄 (日付でないキー・日ごとの知らない数) を残して days を重ねる。
+ * 古い版のまま動いているセッションが、新しい版の記録を消さないように。刈り込んだ古い日は戻さない
+ */
+export function withUnknown(raw: unknown, days: Days): Record<string, unknown> {
+  const o = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const out: Record<string, unknown> = Object.fromEntries(Object.entries(o).filter(([k]) => !DATE_RE.test(k)))
+  for (const [k, d] of Object.entries(days)) {
+    const was = o[k]
+    const extra = typeof was === 'object' && was !== null && !Array.isArray(was) ? Object.entries(was).filter(([f]) => !(FIELDS as string[]).includes(f)) : []
+    out[k] = { ...Object.fromEntries(extra), ...d }
+  }
+  return out
+}
+
 /** 保存済みの日々に、このセッションで溜めた差分を足し、新しい KEEP_DAYS 日だけ残す */
 export function mergeDays(saved: Days, delta: Days): Days {
   const out: Days = { ...saved }

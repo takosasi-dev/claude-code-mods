@@ -426,3 +426,22 @@ test('Input の無い画面 (mobile) では検索欄を出さず、全部並べ�
   expect(await ui.find({ key: 'filter' })).toBeUndefined()
   expect(await cardKeys(ui)).toEqual(['card:band-mod', 'card:pane-mod'])
 })
+
+// ---- 0.5.0 見出しに季節の飾り ----
+
+test('見出しの季節の飾りは 4 季で違い、渡さなければ飾り無し', () => {
+  const ids = ['deco-spring', 'deco-summer', 'deco-autumn', 'deco-winter']
+  ;(['春', '夏', '秋', '冬'] as const).forEach((s, i) => ids.forEach((id, k) => expect(headerSvg(3, s).includes(`id="${id}"`)).toBe(i === k)))
+  expect(headerSvg(3)).not.toContain('id="deco-')
+  expect(headerSvg(0, '冬')).toContain('まだ見つかっていません')
+  expect(headerSvg(12, '春')).not.toMatch(/<svg[^>]*\swidth=/)
+})
+
+test('vscode の見出しは今の季節 (JST の月) の飾りを描く', PLUGINS, async ($, on) => {
+  // 2026-11-30 23:30 UTC は JST で 12/1 (冬)
+  mock.clock(on, { now: Date.parse('2026-11-30T23:30:00Z') })
+  await openWithStore($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const head = (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt).startsWith('画面のある mod'))
+  expect(String(head?.props.source)).toContain('id="deco-winter"')
+})

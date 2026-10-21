@@ -44,7 +44,24 @@ export const asReadAt = (v: unknown) => (typeof v === 'number' && Number.isFinit
 /** 保存済みの物に、このセッションで溜めた分を足す(古い順、最新 KEEP 件) */
 export const merge = (saved: readonly InboxItem[], pending: readonly InboxItem[]) => [...saved, ...pending].slice(-KEEP)
 
-export const unreadCount = (items: readonly InboxItem[], readAt: number) => items.filter(i => i.at > readAt).length
+/**
+ * mod ごとに、行を押した時に開くコマンドを決める($.command.list() の plugin 欄で引く)。
+ * 1 つの mod に複数あれば、mod と同じ名前の物(予備の名前。どの mod でもペインを開く)、無ければ一覧で先に出る物。
+ * 本体と自分は入れない
+ */
+export function commandsByMod(list: readonly { name: string; source: string; plugin?: string }[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const c of list) {
+    if (c.source !== 'plugin' || c.plugin === undefined) continue
+    const mod = modName(c.plugin)
+    if (mod === SELF || mod === 'engine') continue
+    const name = clean(c.name)
+    if (name !== '' && (out[mod] === undefined || name === mod)) out[mod] = name
+  }
+  return out
+}
+
+export const unreadCount =(items: readonly InboxItem[], readAt: number) => items.filter(i => i.at > readAt).length
 
 /** mod ごとの件数(多い順、同じなら名前順) */
 export function countByMod(items: readonly InboxItem[]) {

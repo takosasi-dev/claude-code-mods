@@ -1,6 +1,6 @@
 {
   "name": "usage-history",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "/history で日をまたいだ使い方の記録(日ごとのターン数・トークン・ツール回数)を縦棒グラフと曜日×時間帯のヒートマップで見る",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

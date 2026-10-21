@@ -2,7 +2,8 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { MockClock } from 'claude-code/testing'
 
-import { LIMIT, delta, paneSvg, parseGrep } from '../hooks/todo'
+import { CUT_TEXT, LIMIT, WALK_LIMITS, delta, paneLines, paneSvg, parseGrep, tally, walk } from '../hooks/todo'
+import type { WalkEntry } from '../hooks/todo'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const CWD = '/tmp/demo'
@@ -36,7 +37,7 @@ const FEWER = [row('src/app.ts', 10, '  // FIXME 0 で割ると落ちる <x> & y
 const HUGE = Array.from({ length: 520 }, (_, i) => row(`gen/f${i % 13}.ts`, i + 1, `// TODO 項目 ${i}`)).join('')
 
 type World = {
-  repo: 'none' | 'empty' | 'many' | 'fewer' | 'huge' | 'broken' | 'odd'
+  repo: 'none' | 'no-git' | 'empty' | 'many' | 'fewer' | 'huge' | 'broken' | 'odd'
   calls: string[][]
   /** 作業フォルダ。無ければ CWD */
   cwd?: string
@@ -58,8 +59,9 @@ const mockGit = (on: On, world: World) => {
       value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
     })
     if (e.init?.cwd !== (world.cwd ?? CWD)) return out('', 1, 'wrong cwd')
-    const args = e.argv.slice(3).join(' ')
+    const args = e.argv.slice(4).join(' ')
     const repo = world.repo
+    if (repo === 'no-git') throw new Error('spawn git ENOENT')
     if (repo === 'none') return out('', 128, 'fatal: not a git repository')
     if (args === 'rev-parse --is-inside-work-tree') return out('true\n')
     if (args.startsWith('grep ') && args.endsWith(' -E \\b(TODO|FIXME|HACK|XXX)\\b')) {
@@ -73,7 +75,9 @@ const mockGit = (on: On, world: World) => {
   })
 }
 
-const onlyReads = (world: World) => world.calls.every(a => a[0] === 'git' && ['rev-parse', 'grep'].includes(a[3] ?? ''))
+// 読むだけの git で、index を書かない形 (先頭 4 つは決まった前置き)
+const onlyReads = (world: World) =>
+  world.calls.every(a => a.slice(0, 4).join(' ') === 'git --no-optional-locks -c core.fsmonitor=false' && ['rev-parse', 'grep'].includes(a[4] ?? ''))
 
 test('変換: 種類・件数・ファイルの並び・上限', () => {
   const r = parseGrep(MANY)
@@ -147,13 +151,16 @@ for (const surface of SURFACES) {
     expect(await ui.find({ key: 'detail' })).toBeUndefined()
 
     // 種類で絞る
-    await ui.select({ key: 'filter', value: 'FIXME' })
+    expect((await ui.find({ key: 'filter-ALL' }))?.props.label).toBe('全部 6')
+    expect((await ui.find({ key: 'filter-TODO' }))?.props.label).toBe('TODO 3')
+    await ui.press({ key: 'filter-FIXME' })
+    expect((await ui.find({ key: 'filter-FIXME' }))?.props.variant).toBe('primary')
     expect(await ui.find({ key: 'item:src/app.ts:10' })).toBeDefined()
     expect(await ui.find({ key: 'item:src/app.ts:3' })).toBeUndefined()
-    await ui.select({ key: 'filter', value: 'HACK' })
+    await ui.press({ key: 'filter-HACK' })
     expect(await ui.find({ key: 'item:src/app.ts:22' })).toBeDefined()
     expect(await ui.find({ key: 'item:src/app.ts:10' })).toBeUndefined()
-    await ui.select({ key: 'filter', value: 'ALL' })
+    await ui.press({ key: 'filter-ALL' })
     expect(await ui.find({ key: 'item:src/app.ts:3' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ほか/ })).toBeUndefined()
     expect(onlyReads(world)).toBe(true)
@@ -235,18 +242,11 @@ for (const surface of SURFACES) {
     else expect(await ui.find({ type: 'Text', text: '合計 520 件' })).toBeDefined()
   })
 
-  test(`${surface}: git のフォルダでない・見つからない・失敗`, async ($, on) => {
+  test(`${surface}: 見つからない・失敗`, async ($, on) => {
     mock.clock(on, { now: NOW })
-    const world: World = { repo: 'none', calls: [] }
+    const world: World = { repo: 'empty', calls: [] }
     mockGit(on, world)
     const ui = await $.ui.mount({ ...PANE, surface })
-    await ui.press({ key: 'reload' })
-    if (surface === 'vscode') expect(String((await ui.find({ type: 'Svg' }))?.props.alt)).toMatch(/git のフォルダでだけ使えます/)
-    else expect((await ui.find({ type: 'Text', text: 'git のフォルダでだけ使えます' }))?.props.color).toBe('yellow')
-    expect(world.calls).toHaveLength(1)
-    expect(await ui.find({ key: 'filter' })).toBeUndefined()
-
-    world.repo = 'empty'
     await ui.press({ key: 'reload' })
     if (surface === 'vscode') expect(String((await ui.find({ type: 'Svg' }))?.props.source)).toMatch(/TODO はありません/)
     else expect(await ui.find({ type: 'Text', text: 'TODO はありません' })).toBeDefined()
@@ -273,7 +273,7 @@ test('/todos で読んで開く。ファイルを変えうるツールの後に 
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
 
-  const reads = () => world.calls.filter(a => a[3] === 'grep').length
+  const reads = () => world.calls.filter(a => a[4] === 'grep').length
   const call = (tool: string) => $.tool.call({ tool, input: {} } as never)
 
   // 開く前はツールが終わっても読まない
@@ -289,6 +289,8 @@ test('/todos で読んで開く。ファイルを変えうるツールの後に 
   })
   expect(ran).toMatchObject({ text: 'TODO のペインを開きました。' })
   expect(isUp).toBe(true)
+  // 読むのは裏なので、終わるのを待つ
+  await clock.settle()
   expect(reads()).toBe(1)
 
   // 読むだけのツールでは読み直さない
@@ -337,7 +339,7 @@ test('追跡していない新しいファイルも拾う (git grep --untracked)
   mockGit(on, world)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'reload' })
-  const grep = world.calls.find(a => a[3] === 'grep')
+  const grep = world.calls.find(a => a[4] === 'grep')
   expect(grep).toContain('--untracked')
   expect(await ui.find({ type: 'Text', text: '合計 6 件' })).toBeDefined()
 })
@@ -423,4 +425,114 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   theme = 'dark'
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(await source()).toMatch(/<rect width="380" height="\d+" rx="10" fill="#0d1117"\/>/)
+})
+
+// ── v0.3.0: todo-scan から移した物 (git の外はフォルダを歩く)
+
+// エンジンは Windows で区切りとドライブを直して渡すことがあるので、そろえて比べる
+const key = (p: string) => p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+
+/** git でないフォルダ。パス → 中身 (フォルダは null) */
+const TREE: Record<string, string | null> = {
+  '/proj/a.ts': '// TODO 一つ目\nconst x = 1 // FIXME 二つ目\n',
+  '/proj/src': null,
+  '/proj/src/b.py': '# HACK ここ\n# XXX そこ\n# TODO あれ\n',
+  '/proj/src/deep': null,
+  '/proj/src/deep/c.md': 'TODO 深い所\n',
+  '/proj/node_modules': null,
+  '/proj/node_modules/x.js': '// TODO 読まない\n',
+  '/proj/.git': null,
+  '/proj/.git/HEAD': 'TODO 読まない\n',
+  '/proj/logo.png': 'TODO 読まない',
+  '/proj/blob.dat': 'TODO\0 文字でない',
+}
+const mockFs = (on: On, reads: string[]) => {
+  on('fs.list', (_$, e) => {
+    const dir = key(e.path ?? '')
+    if (TREE[dir] !== null && dir !== '/proj') return { deny: 'ENOENT' }
+    const value: WalkEntry[] = Object.keys(TREE)
+      .filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
+      .map(p => ({ name: p.slice(dir.length + 1), kind: TREE[p] === null ? ('dir' as const) : ('file' as const), size: TREE[p]?.length ?? 0 }))
+    return { value: value.map(v => ({ ...v, mtimeMs: 0, isLink: false })) }
+  })
+  on('fs.read', (_$, e) => {
+    reads.push(key(e.path))
+    const text = TREE[key(e.path)]
+    return typeof text === 'string' ? { value: text } : { deny: 'ENOENT' }
+  })
+}
+
+for (const surface of SURFACES) {
+  test(`${surface}: git でないフォルダは $.fs で歩く。node_modules・. で始まるフォルダ・文字でないファイルは飛ばす`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const world: World = { repo: 'none', calls: [], cwd: 'D:\\proj' }
+    const reads: string[] = []
+    mockGit(on, world)
+    mockFs(on, reads)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // git の外と、git が入っていない時
+    for (const repo of ['none', 'no-git'] as const) {
+      world.repo = repo
+      world.calls = []
+      reads.length = 0
+      await ui.press({ key: 'reload' })
+      expect(world.calls.map(a => a[4])).toEqual(['rev-parse'])
+      expect(reads.sort()).toEqual(['/proj/a.ts', '/proj/blob.dat', '/proj/src/b.py', '/proj/src/deep/c.md'])
+      if (surface === 'vscode') {
+        const src = String((await ui.find({ type: 'Svg' }))?.props.source)
+        expect(src).toContain('4 個読んだ')
+        expect(src).toContain('>src/b.py<')
+        expect(String((await ui.find({ type: 'Svg' }))?.props.alt)).toMatch(/^合計 6 件 \(フォルダを歩いた 4 個\)/)
+      } else {
+        expect(await ui.find({ type: 'Text', text: '合計 6 件 (フォルダを歩いた 4 個)' })).toBeDefined()
+        expect(await ui.find({ type: 'Text', text: 'FIXME 1 / TODO 3 / HACK 1 / XXX 1' })).toBeDefined()
+        expect(await ui.find({ type: 'Text', text: '   3  src/b.py' })).toBeDefined()
+      }
+      const items = (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('item:'))
+      expect(items).toEqual(['item:a.ts:1', 'item:a.ts:2', 'item:src/b.py:1', 'item:src/b.py:2', 'item:src/b.py:3', 'item:src/deep/c.md:1'])
+    }
+    await ui.press({ key: 'filter-XXX' })
+    expect(await ui.find({ key: 'item:src/b.py:2' })).toBeDefined()
+    expect(await ui.find({ key: 'item:a.ts:1' })).toBeUndefined()
+  })
+}
+
+test('歩く上限: ファイルの数・見つけた数・時間で止め、止めたことを出す', async () => {
+  const files = Array.from({ length: 10 }, (_, i) => ({ name: `f${i}.ts`, kind: 'file' as const, size: 10 }))
+  let t = 0
+  const io = (step = 0) => ({
+    list: async (p: string) => (p === 'D:\\w' ? files : []),
+    read: async () => '// TODO a\n// TODO b\n',
+    now: async () => (t += step),
+  })
+  expect(await walk(io(), 'D:\\w', { ...WALK_LIMITS, files: 3 })).toMatchObject({ scanned: 3, cut: 'files' })
+  expect((await walk(io(), 'D:\\w', { ...WALK_LIMITS, hits: 5 })).rows.length).toBe(5)
+  expect(await walk(io(), 'D:\\w', { ...WALK_LIMITS, hits: 5 })).toMatchObject({ cut: 'hits' })
+  t = 0
+  expect(await walk(io(1000), 'D:\\w', { ...WALK_LIMITS, ms: 2500 })).toMatchObject({ scanned: 2, cut: 'time' })
+  expect(await walk(io(), 'D:\\w')).toMatchObject({ scanned: 10, cut: '' })
+  // 大きすぎるファイルは読まない
+  expect(await walk({ ...io(), list: async p => (p === 'D:\\w' ? [{ name: 'big.ts', kind: 'file', size: WALK_LIMITS.size + 1 }] : []) }, 'D:\\w')).toMatchObject({ scanned: 0 })
+  const snap = { kind: 'repo' as const, cwd: 'D:\\w', via: 'walk' as const, scanned: 2000, cut: 'files' as const, loadedAt: NOW, isCut: true, ...tally([]) }
+  expect(paneSvg(snap, [])).toContain(CUT_TEXT.files)
+  expect(paneLines(snap, []).map(l => l.text)).toContain('ファイルが多いので 2000 個で止めました')
+})
+
+test('/todos は読み終わるのを待たずに返り、読み終わったら件数が出る', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const world: World = { repo: 'many', calls: [], delays: [3000], clock }
+  mockGit(on, world)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.panes', () => ({ value: [] }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  // 待っていたら、時計を進めない限り grep が終わらず、ここに来ない
+  const ran = await $.command.run({ command: 'todos', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  expect(ran).toMatchObject({ text: 'TODO のペインを開きました。' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '読み込み中' })).toBeDefined()
+  await clock.advance(3000)
+  expect(await ui.find({ type: 'Text', text: '合計 6 件' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '読んでいます…' })).toBeUndefined()
 })

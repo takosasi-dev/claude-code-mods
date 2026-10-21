@@ -34,6 +34,15 @@ const cleanDone = (v: unknown): Record<string, number> | undefined => {
   return out
 }
 
+/**
+ * store に書く形。日付でないキー (この版が知らない、新しい版が足した欄) は、cleanDone で 0 にせず読んだまま残す。
+ * 古い版のまま動いているセッションが、新しい版の記録を消さないように
+ */
+const withUnknown = (raw: unknown, done: Record<string, number>): Record<string, unknown> => ({
+  ...done,
+  ...(raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? Object.fromEntries(Object.entries(raw).filter(([k]) => !/^\d{4}-\d{2}-\d{2}$/.test(k))) : {}),
+})
+
 /** 日付ごとに大きい方 */
 const maxDone = (a: Record<string, number>, b: Record<string, number>) => {
   const out = { ...a }
@@ -110,7 +119,7 @@ const finish = async ($: $, endsAt: number): Promise<void> => {
     } else {
       // ponytail: 日付ごとの記録は消さずに溜める。1 日 1 キーなので年単位でも小さい
       const all = { ...stored, [key]: (stored[key] ?? 0) + 1 }
-      await $.store.set(STORE_KEY, all).then(
+      await $.store.set(STORE_KEY, withUnknown(raw, all)).then(
         () => update($, doneA, d => maxDone(d, all)),
         () => {
           $.ui.toast('集中の本数を保存できませんでした', { timeoutMs: 8000 })

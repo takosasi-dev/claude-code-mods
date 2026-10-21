@@ -2,7 +2,25 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GachaSave } from '../types'
-import { addDraw, bookLines, bookSvg, cardLines, cardSvg, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, statsLines, statsSvg } from './gacha'
+import {
+  addDraw,
+  bookLines,
+  bookSvg,
+  cardLines,
+  cardSvg,
+  claimedFrom,
+  EMPTY,
+  fromSaved,
+  goalsMet,
+  KEEP_CLAIMED,
+  manualLeft,
+  PUBLIC_CARDS,
+  pull,
+  questRewards,
+  statsLines,
+  statsSvg,
+  withUnknown,
+} from './gacha'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'turn-gacha'
@@ -16,6 +34,9 @@ const NOTE = atom({ plugin: 'turn-gacha', key: 'note' } as const, '')
 const ERRORS = atom({ plugin: 'turn-gacha', key: 'turnErrors' } as const, 0)
 /** 他の mod (dev-rpg) が読むカードの表 */
 const CARDS_REF = { plugin: 'turn-gacha', key: 'cards' } as const
+/** daily-quest の今日のお題 (読むだけ。daily-quest が無ければ undefined のまま) */
+const QUEST_TODAY = { plugin: 'daily-quest', key: 'today' } as const
+const CLAIM_KEY = 'questClaimed'
 
 type $ = EngineInterface
 
@@ -27,12 +48,12 @@ let ownsMain = false
 let chain: Promise<unknown> = Promise.resolve()
 const serial = (f: () => Promise<unknown>) => (chain = chain.then(f, f))
 
-/** store の値。キーが無ければ空、読めない時 (例外・形が違う) は undefined */
-async function readStore($: $): Promise<GachaSave | undefined> {
+/** store の値 (と、知らない欄を残して書くための生の値)。キーが無ければ空、読めない時 (例外・形が違う) は undefined */
+async function readStore($: $): Promise<{ saved: GachaSave; raw: unknown } | undefined> {
   try {
     const raw = await $.store.get(STORE_KEY)
-    if (raw === undefined) return EMPTY
-    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? fromSaved(raw) : undefined
+    if (raw === undefined) return { saved: EMPTY, raw }
+    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? { saved: fromSaved(raw), raw } : undefined
   } catch {
     return undefined
   }
@@ -40,7 +61,7 @@ async function readStore($: $): Promise<GachaSave | undefined> {
 
 /** store を state に写す。読めなければ知らせるだけ */
 async function load($: $) {
-  const saved = await readStore($)
+  const saved = (await readStore($))?.saved
   if (saved) await update($, SAVE, () => saved)
   else await update($, NOTE, () => BROKEN)
 }
@@ -52,11 +73,12 @@ async function load($: $) {
 const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
   serial(async () => {
     const now = await $.clock.now()
-    const saved = await readStore($)
-    if (!saved) {
+    const got = await readStore($)
+    if (!got) {
       await update($, NOTE, () => BROKEN)
       return
     }
+    const saved = got.saved
     if (flags.isManual && manualLeft(saved, now) <= 0) {
       await update($, SAVE, () => saved)
       await update($, NOTE, () => '今日の手動はおしまいです(また明日。ターンが終わるたびには引けます)')
@@ -64,7 +86,8 @@ const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
     }
     const card = pull(Math.random(), Math.random(), flags.isClean)
     const next = addDraw(saved, card, now, flags)
-    const isSaved = await $.store.set(STORE_KEY, next).then(
+    // この版の知らない欄 (新しい版が足した物) は読んだまま残す
+    const isSaved = await $.store.set(STORE_KEY, withUnknown(got.raw, next)).then(
       () => true,
       () => false,
     )
@@ -77,6 +100,39 @@ const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
     await update($, NOTE, () => (isSaved ? note : '引いたカードを保存できませんでした'))
     if (card.rarity === 'SR' || card.rarity === 'SSR') $.ui.toast(`${card.rarity}!${card.name}`)
   })
+
+/**
+ * daily-quest でこなしたお題のごほうびを 1 回だけ受け取り、その回数だけその場で引く。
+ * 受け取った印は store の questClaimed (書く直前に読み直す)。daily-quest が無ければ何もしない
+ */
+async function claim($: $) {
+  let today: unknown
+  try {
+    today = (await $.state.get(QUEST_TODAY)).value
+  } catch {
+    return
+  }
+  if (questRewards(today, []).length === 0) return
+  let got: ReturnType<typeof questRewards> = []
+  await serial(async () => {
+    const claimed = await $.store.get(CLAIM_KEY).then(claimedFrom, () => undefined)
+    if (!claimed) return
+    const fresh = questRewards(today, claimed)
+    if (fresh.length === 0) return
+    // ponytail: 読んでから書くまでの間に別のセッションが受け取ると 2 度引ける。間は数ミリ秒なので見送り
+    const isSaved = await $.store.set(CLAIM_KEY, [...claimed, ...fresh.map(g => g.key)].slice(-KEEP_CLAIMED)).then(
+      () => true,
+      () => false,
+    )
+    if (isSaved) got = fresh
+  })
+  const pulls = got.reduce((n, g) => n + g.pulls, 0)
+  for (let i = 0; i < pulls; i++) await draw($, { isClean: false, isManual: false })
+  if (got.length > 0) {
+    const msg = `お題「${got.map(g => g.title).join('」「')}」のごほうびで ${pulls} 回引いた`
+    await update($, NOTE, n => (n === '' ? msg : `${msg} / ${n}`))
+  }
+}
 
 const openPane = async ($: $) => {
   await load($)
@@ -96,6 +152,8 @@ export const register: Register = on => {
     ownsMain = got?.command === 'gacha'
     if (!ownsMain) await $.command.register({ name: 'turn-gacha', description: DESCRIPTION }).catch(() => {})
     await load($)
+    // 別のセッションでこなしたお題の分もここで拾う
+    await claim($).catch(() => {})
     return started
   })
 
@@ -109,13 +167,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 答えて終わったターンだけ引く (中断・エラー・拒否では引かない)
+  // 答えて終わったターンだけ引く (中断・エラー・拒否では引かない)。
+  // お題のごほうびは next の後に見る (daily-quest は next の前に進みを書くので、読み込みの順によらず同じターンで届く)
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined && e.reason === 'answer') {
       const isClean = (await read($, ERRORS)) === 0
       await draw($, { isClean, isManual: false })
     }
+    if (e.agentId === undefined) await claim($).catch(() => {})
     return done
   }).catch(($, e, next) => next(e))
 

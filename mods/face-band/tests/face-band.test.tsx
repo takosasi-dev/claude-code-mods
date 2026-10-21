@@ -23,11 +23,11 @@ const BAND = {
 const presentation = { isFullscreen: false, columns: 80 }
 
 type Below = 'none' | 'band' | 'text'
-type Opts = { denyFace?: boolean; below?: Below; stored?: Record<string, unknown> }
+type Opts = { denyFace?: boolean; below?: Below; stored?: Record<string, unknown>; now?: number }
 
 // エンジンの代役を下に置く (下の hook はテストの最初の $ より前に全部登録する)
 const setup = (on: On, opts: Opts = {}) => {
-  const clock = mock.clock(on, { now: NOW })
+  const clock = mock.clock(on, { now: opts.now ?? NOW })
   // 何も渡さなければ、/face で出した後の人 (store に false) として始める
   const saved: Record<string, unknown> = { ...(opts.stored ?? { isHidden: false }) }
   const registered: string[] = []
@@ -279,7 +279,7 @@ test('セッション開始とターン開始で帯の描き直しを頼む', as
 
 test('顔の SVG は viewBox だけで、気分ごとに違う', () => {
   const moods = ['idle', 'think', 'tool', 'happy', 'sad'] as const
-  const sources = moods.map(faceSvg)
+  const sources = moods.map(m => faceSvg(m))
   expect(new Set(sources).size).toBe(5)
   for (const s of sources) {
     expect(s).toContain('viewBox="0 0 96 72"')
@@ -301,4 +301,56 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   // setup が ui.invalidate を受け止めて描き直さないので、付け直して見る
   const again = await $.ui.mount({ ...BAND, surface: 'vscode' })
   expect(await shown(again)).toContain('fill="#161b22" stroke="#8b949e"')
+})
+
+// ---- 0.4.0 時間帯と季節で小物が変わる ----
+
+const jst = (s: string) => Date.parse(`${s}+09:00`)
+
+test('夜の待ちは眠そう (目を閉じて z、ナイトキャップ)。terminal も眠そうな顔', async ($, on) => {
+  setup(on, { now: jst('2026-10-20T22:00:00') })
+  await begin($)
+  const vs = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  const svg = await shown(vs)
+  expect(svg).toContain('id="nightcap"')
+  expect(svg).toContain('id="sky-night"')
+  expect(svg).toContain('>z<')
+  expect(svg).not.toContain('attributeName="ry" values="4.5;4.5;0.6;4.5"') // 昼のまばたきではない
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await shown(term)).toContain('(-_-)zzz')
+  // 夜でも考え中は目を開ける (帽子はそのまま)
+  await start($)
+  const busy = await shown(vs)
+  expect(busy).toContain('id="nightcap"')
+  expect(busy).not.toContain('>z<')
+})
+
+test('時計が進んで夕方から夜になると、描き直して小物が替わる', async ($, on) => {
+  const { clock } = setup(on, { now: jst('2026-10-20T18:58:00') })
+  await begin($)
+  const vs = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(await shown(vs)).toContain('id="sky-evening"')
+  expect(await shown(vs)).not.toContain('id="nightcap"')
+  await clock.advance(3 * 60_000)
+  expect(await shown(vs)).toContain('id="sky-night"')
+  expect(await shown(vs)).toContain('id="nightcap"')
+})
+
+test('季節の小物: 春は花びら、夏は昼に麦わら帽子・夜に蛍、秋は葉、冬はマフラーと雪', () => {
+  const has = (s: string, ids: string[]) => ids.filter(id => s.includes(`id="${id}"`))
+  const all = ['petals', 'straw-hat', 'fireflies', 'leaves', 'scarf', 'snow', 'nightcap']
+  expect(has(faceSvg('idle', '昼', '春'), all)).toEqual(['petals'])
+  expect(has(faceSvg('idle', '昼', '夏'), all)).toEqual(['straw-hat'])
+  expect(has(faceSvg('idle', '夜', '夏'), all)).toEqual(['fireflies', 'nightcap'])
+  expect(has(faceSvg('idle', '朝', '秋'), all)).toEqual(['leaves'])
+  expect(has(faceSvg('idle', '夕', '冬'), all)).toEqual(['scarf', 'snow'])
+  // 朝・昼・夕・夜で空が違う (昼は何も無い)
+  const skies = (['朝', '昼', '夕', '夜'] as const).map(p => faceSvg('happy', p, '秋'))
+  expect(new Set(skies).size).toBe(4)
+  expect(skies[1]).not.toContain('id="sky-')
+  // 小物を足しても顔の円と viewBox は変わらない
+  for (const s of skies) {
+    expect(s).toContain('viewBox="0 0 96 72"')
+    expect(s).toContain('<circle cx="48" cy="40" r="28"')
+  }
 })

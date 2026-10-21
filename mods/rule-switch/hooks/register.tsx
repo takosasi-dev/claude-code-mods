@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { RuleSwitchSave } from '../types'
 import { followTheme, readTheme } from './style'
-import { boardLines, boardSvg, clean, fromSaved, isKnown, MAX_CUSTOM, rulesOf, SECTION_ID, sectionText, summary, withAdded, withRemoved, withToggle } from './rules'
+import { boardLines, boardSvg, clean, fromSaved, isKnown, MAX_CUSTOM, rulesOf, SECTION_ID, sectionText, summary, withAdded, withRemoved, withToggle, withUnknown } from './rules'
 
 const PANE = 'rule-switch'
 const TITLE = 'ルールスイッチ'
@@ -25,10 +25,12 @@ let ownsMain = false
 let chain: Promise<unknown> = Promise.resolve()
 const serial = (f: () => Promise<unknown>) => (chain = chain.then(f, f))
 
-/** store の値。キーが無ければ空、読めない時 (例外・形が違う) は undefined */
-async function readStore($: $): Promise<RuleSwitchSave | undefined> {
+/** store の値 (と、知らない欄を残して書くための生の値)。キーが無ければ空、読めない時 (例外・形が違う) は undefined */
+async function readStore($: $): Promise<{ saved: RuleSwitchSave; raw: unknown } | undefined> {
   try {
-    return fromSaved(await $.store.get(STORE_KEY))
+    const raw = await $.store.get(STORE_KEY)
+    const saved = fromSaved(raw)
+    return saved && { saved, raw }
   } catch {
     return undefined
   }
@@ -36,7 +38,7 @@ async function readStore($: $): Promise<RuleSwitchSave | undefined> {
 
 /** store を state に写す。読めなければ知らせるだけ */
 async function load($: $) {
-  const saved = await readStore($)
+  const saved = (await readStore($))?.saved
   if (saved) await update($, SAVE, () => saved)
   else await update($, NOTE, () => BROKEN)
   return saved
@@ -53,18 +55,20 @@ async function current($: $) {
  */
 const write = ($: $, change: (fresh: RuleSwitchSave) => RuleSwitchSave | string) =>
   serial(async () => {
-    const fresh = await readStore($)
-    if (!fresh) {
+    const got = await readStore($)
+    if (!got) {
       await update($, NOTE, () => BROKEN)
       return
     }
+    const fresh = got.saved
     const next = change(fresh)
     if (typeof next === 'string') {
       await update($, SAVE, () => fresh)
       await update($, NOTE, () => next)
       return
     }
-    const isSaved = await $.store.set(STORE_KEY, next).then(
+    // この版の知らない欄 (新しい版が足した物) は読んだまま残す
+    const isSaved = await $.store.set(STORE_KEY, withUnknown(got.raw, next)).then(
       () => true,
       () => false,
     )

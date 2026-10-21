@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { CcDashCall } from '../types'
+import { layoutOf, move, PANELS, reset, setShown, shownOf } from '../hooks/layout'
 
 const NOW = Date.parse('2026-10-03T07:15:00Z')
 const SURFACES = ['vscode', 'terminal'] as const
@@ -72,13 +73,13 @@ const svgOf = async (ui: Found, key: string) =>
   (await ui.findAll({ type: 'Svg' })).find(el => ALT[key]?.test(String(el.props.alt)))?.props
 const svgSource = async (ui: Found, key: string) => String((await svgOf(ui, key))?.source ?? '')
 
-test('タブの Button が 3 つ、今のタブが primary、押すと state が変わる', async ($, on) => {
+test('タブの Button が 4 つ、今のタブが primary、押すと state が変わる', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('fs.read', () => ({ value: usage(10) }))
   const last = spy(on)
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await ui.findAll({ type: 'Button' })).toHaveLength(3)
+    expect(await ui.findAll({ type: 'Button' })).toHaveLength(4)
     expect((await ui.find({ key: 'tab-overview' }))?.props.variant).toBe('primary')
     expect((await ui.find({ key: 'tab-tools' }))?.props.variant).toBe('secondary')
 
@@ -381,4 +382,126 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(await svgSource(ui, 'header')).toMatch(/fill="#0d1117"/)
   expect(await svgSource(ui, 'turns')).toContain(`fill="${RED}" opacity="1"`)
+})
+
+// ---------------------------------------------------------------- 自分の並び
+
+/** store を手元の Map で答える */
+const fakeStore = (on: On, init: Record<string, unknown> = {}) => {
+  const m = new Map<string, unknown>(Object.entries(init))
+  on('store.get', (_$, e) => ({ value: m.get(e.key) }))
+  on('store.set', (_$, e) => {
+    m.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  return m
+}
+
+/** 出ている Svg の順 (alt から枠の名前にする) */
+const svgKeys = async (ui: Found) =>
+  (await ui.findAll({ type: 'Svg' })).map(el => Object.keys(ALT).find(k => ALT[k]!.test(String(el.props.alt))) ?? '?')
+
+test('並びの純関数: 隣の知っている枠と入れ替え、知らない名前はその場に残す', () => {
+  const l = layoutOf({ order: ['usage', 'future', 'overview', 1, 'usage'], hidden: ['x', 2] })
+  expect(l.order).toEqual(['usage', 'future', 'overview', 'turns', 'toolBars', 'timeline'])
+  expect(l.hidden).toEqual(['x'])
+  expect(move(l, 'overview', -1).order).toEqual(['overview', 'future', 'usage', 'turns', 'toolBars', 'timeline'])
+  expect(move(l, 'usage', -1)).toBe(l) // 先頭はそれより上に行かない
+  expect(move(l, 'timeline', 1)).toBe(l)
+  expect(setShown(setShown(l, 'turns', false), 'turns', true).hidden).toEqual(['x'])
+  expect(reset(setShown(l, 'turns', false))).toEqual({ order: [...PANELS, 'future'], hidden: ['x'] })
+  expect(shownOf(setShown(l, 'usage', false))).toEqual(['overview', 'turns', 'toolBars', 'timeline'])
+  expect(layoutOf('壊れた値')).toEqual({ order: [...PANELS], hidden: [] })
+})
+
+test('自分の並び: 初めは 5 つの枠を全部出し、上へ・下へ・隠す・出すで並びが変わって store に残る', USAGE_FILE, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('fs.read', () => ({ value: usage(20) }))
+  const store = fakeStore(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'tab-mine' })
+  expect(await svgKeys(ui)).toEqual(['header', 'turns', 'tool-bars', 'timeline', 'gauges'])
+
+  await ui.press({ key: 'arrange' })
+  expect(await ui.find({ key: 'up-overview' })).toBeUndefined() // 一番上に「上へ」は無い
+  expect(await ui.find({ key: 'down-usage' })).toBeUndefined()
+  expect((await ui.find({ key: 'up-usage' }))?.props.label).toBe('上へ')
+  expect((await ui.find({ key: 'hide-turns' }))?.props.label).toBe('隠す')
+  await ui.press({ key: 'up-usage' })
+  await ui.press({ key: 'up-usage' })
+  await ui.press({ key: 'down-overview' })
+  await ui.press({ key: 'hide-turns' })
+  expect((await ui.find({ key: 'show-turns' }))?.props.label).toBe('出す')
+  expect(store.get('layout')).toEqual({ order: ['turns', 'overview', 'usage', 'toolBars', 'timeline'], hidden: ['turns'] })
+  await ui.press({ key: 'arrange-done' })
+  expect(await svgKeys(ui)).toEqual(['header', 'gauges', 'tool-bars', 'timeline'])
+  await ui.unmount()
+
+  // terminal も同じ並び
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const texts = (await term.findAll({ type: 'Text' })).map(el => String((el as { text?: string }).text ?? ''))
+  const at = (re: RegExp) => texts.findIndex(s => re.test(s))
+  expect(at(/^経過/)).toBeGreaterThanOrEqual(0)
+  expect(at(/^経過/)).toBeLessThan(at(/^5時間枠/))
+  expect(at(/^最新ターン|まだ完了/)).toBe(-1)
+
+  // 初めの並びに戻す
+  await term.press({ key: 'arrange' })
+  await term.press({ key: 'arrange-reset' })
+  expect(store.get('layout')).toEqual({ order: [...PANELS], hidden: [] })
+})
+
+test('自分の並び: 起動時に store の並びを読み、知らない欄・知らない枠を消さずに書く', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  bottom(on)
+  const store = fakeStore(on, {
+    layout: { order: ['timeline', 'future-panel', 'overview'], hidden: ['future-x', 'usage'], futureField: 1 },
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  await turn($, 't1', 30_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'tab-mine' })
+  expect(await svgKeys(ui)).toEqual(['timeline', 'header', 'turns', 'tool-bars'])
+  await ui.press({ key: 'arrange' })
+  await ui.press({ key: 'down-timeline' })
+  await turn($, 't2', 30_000)
+  const saved = store.get('layout') as Record<string, unknown>
+  expect(saved.futureField).toBe(1)
+  // 知らない枠は飛ばして入れ替え、その位置に残る
+  expect(saved.order).toEqual(['overview', 'future-panel', 'timeline', 'turns', 'toolBars', 'usage'])
+  expect(saved.hidden).toEqual(['future-x', 'usage'])
+})
+
+test('自分の並び: 書く直前に読み直すので、別のセッションが変えた並びに足す', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const store = fakeStore(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-mine' })
+  await ui.press({ key: 'arrange' })
+  // 別のセッションが turns を隠した
+  store.set('layout', { order: [...PANELS], hidden: ['turns'] })
+  await ui.press({ key: 'hide-usage' })
+  expect(store.get('layout')).toEqual({ order: [...PANELS], hidden: ['turns', 'usage'] })
+})
+
+test('自分の並び: 全部隠すと案内を出し、store が無くても画面の上では並べ替えられる', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-mine' })
+    await ui.press({ key: 'arrange' })
+    for (const id of PANELS) await ui.press({ key: `hide-${id}` })
+    await ui.press({ key: 'arrange-done' })
+    expect(await ui.find({ type: 'Text', text: /^出す枠がありません/ })).toBeDefined()
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+    await ui.press({ key: 'arrange' })
+    await ui.press({ key: 'arrange-reset' })
+    await ui.press({ key: 'arrange-done' })
+    await ui.unmount()
+  }
 })

@@ -13,9 +13,12 @@ import {
   gearSvg,
   mergeSaved,
   ownedCards,
+  claimedFrom,
+  questRewards,
   setGear,
   statsOf,
   wear,
+  withUnknown,
   wornOf,
   levelInfo,
   onTool,
@@ -56,7 +59,7 @@ const PANE = {
 } as const
 
 /** 下の hook は全部ここで足す (test が $ を呼んだ後は足せない) */
-const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTool?: () => boolean; gacha?: () => Gacha } = {}) => {
+const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTool?: () => boolean; gacha?: () => Gacha; quest?: () => unknown; claimed?: string[] } = {}) => {
   const clock = mock.clock(on, { now: NOW })
   // turn-gacha の state の代わり (無ければ turn-gacha が入っていない)
   const gacha = opts.gacha
@@ -64,7 +67,11 @@ const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTo
     on('state.get', { plugin: 'turn-gacha', key: 'save' }, () => ({ value: { value: gacha().save as never, version: 1 } }))
     on('state.get', { plugin: 'turn-gacha', key: 'cards' }, () => ({ value: { value: gacha().cards as never, version: 1 } }))
   }
+  // daily-quest の state の代わり (無ければ daily-quest が入っていない)
+  const quest = opts.quest
+  if (quest) on('state.get', { plugin: 'daily-quest', key: 'today' }, () => ({ value: { value: quest() as never, version: 1 } }))
   const m = new Map<string, unknown>(saved ? [['hero', saved]] : [])
+  if (opts.claimed) m.set('questClaimed', opts.claimed)
   on('store.get', (_$, e) => ({ value: m.get(e.key) }))
   on('store.set', (_$, e) => {
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
@@ -93,7 +100,7 @@ const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved>, opts: { failTo
     if (!last) throw new Error('hero が書かれていない')
     return last
   }
-  return { clock, hero, toasts, stored: () => m.get('hero') as RpgSaved | undefined, put: (v: unknown) => m.set('hero', v) }
+  return { clock, hero, toasts, stored: () => m.get('hero') as RpgSaved | undefined, put: (v: unknown) => m.set('hero', v), claimed: () => m.get('questClaimed') }
 }
 
 const tool = ($: Engine, name: string) => $.tool.call({ tool: name, input: {} } as never)
@@ -535,4 +542,90 @@ test('/config の theme が light 系なら明るい窓で描き、切り替え�
   theme = 'dark'
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(await svgOf(ui)).toContain('stop-color="#0b1f5c"')
+})
+
+// ---------------------------------------------------------------- daily-quest のごほうび
+
+const quest = (id: string, done: boolean, exp: number, title = `お題 ${id}`) => ({ id, title, goal: 5, progress: done ? 5 : 1, done, reward: { exp, pulls: 1 } })
+
+test('お題のごほうび: 形の違う物と受け取り済みは捨て、題名の制御文字は落とす', () => {
+  expect(questRewards(undefined, [])).toEqual([])
+  expect(questRewards({ date: '2026-10-20', quests: 'x' }, [])).toEqual([])
+  const today = {
+    date: '2026-10-20',
+    quests: [quest('a', true, 30, `ab${String.fromCharCode(7)}c`), quest('b', false, 30), quest('c', true, 99_999), { id: 'd', done: true, reward: { exp: 'x' } }, 'x'],
+  }
+  expect(questRewards(today, [])).toEqual([
+    { key: '2026-10-20:a', title: 'abc', exp: 30 },
+    { key: '2026-10-20:c', title: 'お題 c', exp: 500 },
+  ])
+  expect(questRewards(today, ['2026-10-20:c']).map(r => r.key)).toEqual(['2026-10-20:a'])
+  expect(claimedFrom([1, 'a'])).toEqual(['a'])
+  expect(claimedFrom({})).toEqual([])
+})
+
+test('こなしたお題の経験値を 1 回だけ受け取り、一言で知らせて store に残す', async ($, on) => {
+  let today = { date: '2026-10-20', quests: [quest('turns-5', true, 30, 'ターンを 5 回終える'), quest('edits-5', false, 50)] }
+  const { hero, stored, claimed, toasts } = await boot($, on, undefined, { quest: () => today })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // セッションの始まりで、もうこなしていた分を受け取る
+  expect(hero().xp).toBe(30)
+  expect(stored()?.xp).toBe(30)
+  expect(claimed()).toEqual(['2026-10-20:turns-5'])
+  expect(await ui.find({ type: 'Text', text: 'お題「ターンを 5 回終える」のごほうび 経験値 +30' })).toBeDefined()
+  // 同じお題では 2 度入らない (ターンの 10 だけ)
+  await turn($)
+  expect(hero().xp).toBe(40)
+  today = { ...today, quests: [today.quests[0]!, { ...today.quests[1]!, done: true, progress: 5 }] }
+  await turn($)
+  expect(hero().xp).toBe(100)
+  expect(stored()?.xp).toBe(100)
+  expect(claimed()).toEqual(['2026-10-20:turns-5', '2026-10-20:edits-5'])
+  expect(await ui.find({ type: 'Text', text: /^お題「お題 edits-5」のごほうび 経験値 \+50/ })).toBeDefined()
+  expect(toasts).toEqual(['レベルアップ! Lv 2 見習いコーダー'])
+})
+
+test('別のセッションが受け取ったお題は受け取らない', async ($, on) => {
+  const today = { date: '2026-10-20', quests: [quest('turns-5', true, 30)] }
+  const { hero, claimed } = await boot($, on, undefined, { quest: () => today, claimed: ['2026-10-20:turns-5'] })
+  await turn($)
+  expect(hero().xp).toBe(10)
+  expect(claimed()).toEqual(['2026-10-20:turns-5'])
+})
+
+test('daily-quest が入っていなければ、ごほうびは無く store にも書かない', async ($, on) => {
+  const { hero, claimed } = await boot($, on)
+  await turn($)
+  expect(hero().xp).toBe(10)
+  expect(claimed()).toBeUndefined()
+})
+
+// ---------------------------------------------------------------- 知らない欄
+
+test('知らない欄 (新しい版が書いた物) は、1 ターン後も store に残る。入れ子の中も', async ($, on) => {
+  const weapon = { id: 'x01', rarity: 'SSR', slot: 'weapon', name: '一発で通ったテスト', futurePower: 3 }
+  const { stored } = await boot($, on, {
+    ...INITIAL_SAVED,
+    turns: 4,
+    futureField: 1,
+    achievements: { 'first-bash': NOW, futureAch: NOW },
+    learned: { slash: NOW, futureSkill: NOW },
+    defeated: { futureBoss: NOW },
+    alloc: { str: 1, vit: 0, int: 0, agi: 0, luck: 2 },
+    equip: { weapon, ring: { id: 'z01' } },
+  } as Partial<RpgSaved>)
+  await turn($)
+  // 書いたこと (ターンが増えた) と、知らない欄が残ったこと
+  expect(stored() as unknown as object).toMatchObject({
+    turns: 5,
+    futureField: 1,
+    achievements: { 'first-bash': NOW, futureAch: NOW },
+    learned: { slash: NOW, futureSkill: NOW },
+    defeated: { futureBoss: NOW },
+    alloc: { str: 1, luck: 2 },
+  })
+  expect(stored()?.equip).toEqual({ weapon, ring: { id: 'z01' } } as never)
+  // 知っている欄は今の値で書く: 外した枠は戻さない
+  const raw = { ...INITIAL_SAVED, equip: { weapon, ring: { id: 'z01' } } }
+  expect(withUnknown(raw, { ...fromSaved(raw), equip: {} }).equip).toEqual({ ring: { id: 'z01' } })
 })

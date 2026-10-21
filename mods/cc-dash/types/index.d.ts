@@ -1,4 +1,10 @@
-export type CcDashTab = 'overview' | 'tools' | 'usage'
+export type CcDashTab = 'overview' | 'tools' | 'usage' | 'mine'
+
+/** 「自分の並び」に置ける枠 */
+export type CcDashPanel = 'overview' | 'turns' | 'toolBars' | 'timeline' | 'usage'
+
+/** 「自分の並び」の順と隠す枠。知らない名前(新しい版の枠)も残すので string */
+export type CcDashLayout = { order: string[]; hidden: string[] }
 
 /** ツール呼び出し 1 回の記録。end が無いものは実行中 */
 export type CcDashCall = { id: string; tool: string; start: number; end?: number; isError: boolean }
@@ -34,6 +40,10 @@ declare module 'claude-code' {
       errorCount: number
       /** 最後に読んだ使用量。文字列は読めなかった理由、null はまだ読んでいない */
       usage: CcDashUsage | string | null
+      /** 「自分の並び」(store の写し) */
+      layout: CcDashLayout
+      /** 「自分の並び」で並べ替えの画面を開いているか */
+      isArranging: boolean
     }
   }
 }

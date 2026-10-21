@@ -170,5 +170,12 @@ declare module 'claude-code' {
       save: { book: Record<string, { count: number; firstAt: number }> }
       cards: RpgGachaCard[]
     }
+    /**
+     * daily-quest が他の mod に見せている物のうち、dev-rpg が読む分だけ (書くのは daily-quest)。
+     * daily-quest の types/index.d.ts の写し。入っていない時は undefined なので、読んだ値は rpg.ts の questRewards で確かめる
+     */
+    'daily-quest': {
+      today: { date: string; quests: { id: string; title: string; done: boolean; reward: { exp: number; pulls: number } }[] }
+    }
   }
 }

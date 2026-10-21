@@ -97,6 +97,25 @@ export const clean = (s: string) => s.replace(/[\t\n\r]+/g, ' ').replace(/[\x00-
 export const esc = (s: string) =>
   clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+// ---- 時間帯と季節 (日本時間 JST = UTC+9 固定。動いている環境のタイムゾーンには頼らない) ----
+
+export type DayPart = '朝' | '昼' | '夕' | '夜'
+export type Season = '春' | '夏' | '秋' | '冬'
+
+const jstDate = (now: number) => new Date(now + 9 * 3_600_000)
+
+/** 時間帯。朝 5-10 時 / 昼 10-16 時 / 夕 16-19 時 / 夜 19-5 時 */
+export const dayPart = (now: number): DayPart => {
+  const h = jstDate(now).getUTCHours()
+  return h >= 5 && h < 10 ? '朝' : h >= 10 && h < 16 ? '昼' : h >= 16 && h < 19 ? '夕' : '夜'
+}
+
+/** 季節。春 3-5 月 / 夏 6-8 月 / 秋 9-11 月 / 冬 12-2 月 */
+export const season = (now: number): Season => {
+  const m = jstDate(now).getUTCMonth() + 1
+  return m >= 3 && m <= 5 ? '春' : m >= 6 && m <= 8 ? '夏' : m >= 9 && m <= 11 ? '秋' : '冬'
+}
+
 /** n 文字を超えたら … で切る */
 export const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s)
 

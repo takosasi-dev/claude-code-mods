@@ -436,10 +436,16 @@ test('段階は来てからのターンで 稚魚 → 若魚 → 成魚 → 大�
 test('種類: 最初はまる魚、節目が進むほど珍しい種類まで来る (同じ水槽なら同じ魚)', () => {
   const seen = (i: number) => new Set(Array.from({ length: 300 }, (_, k) => kindFor(i, NOW + k * 86_400_000)))
   expect([...seen(0)]).toEqual(['maru'])
-  // 2 匹目は先頭の 3 種だけ、8 匹目は 6 種すべて
+  // 2 匹目は先頭の 3 種だけ、8 匹目は 10 種すべて
   expect([...seen(1)].every(k => KINDS.indexOf(k) <= 2)).toBe(true)
   expect(seen(1).size).toBe(3)
-  expect(seen(7).size).toBe(6)
+  expect(seen(7).size).toBe(KINDS.length)
+  expect(KINDS).toHaveLength(10)
+  // 0.3.x までの 6 種は並びを変えない (記録の魚の種類が変わらない)
+  expect(KINDS.slice(0, 6)).toEqual(['maru', 'shima', 'mizutama', 'hirenaga', 'ougi', 'akari'])
+  // 一番珍しいりゅうぐうは 8 匹目だけ
+  for (const i of [1, 2, 3, 4, 5, 6]) expect(seen(i).has('ryugu')).toBe(false)
+  expect(seen(7).has('ryugu')).toBe(true)
   // 一番珍しいあかり魚は 5 匹目より前には来ない
   for (const i of [1, 2, 3]) expect(seen(i).has('akari')).toBe(false)
   expect(kindFor(5, NOW)).toBe(kindFor(5, NOW))
@@ -451,16 +457,18 @@ test('古い記録 (魚の欄が無い) は今の数の魚に移し、来てか�
   expect(saved.fish.map(f => f.id)).toEqual([0, 1, 2, 3])
   expect(saved.fish.map(f => stageOf(f.turnsSeen))).toEqual(['成魚', '成魚', '若魚', '稚魚'])
   expect(saved.fish.length).toBe(fishCount(25))
-  // 壊れた魚は落とし、全部壊れていれば作り直す。名前の制御文字は落とす
+  // 壊れた魚 (番号や種類が無い) は落とし、全部壊れていれば作り直す。名前の制御文字は落とす。
+  // 知らない種類 (新しい版の魚) は落とさず、種類の文字列のまま残す
   const mixed = fromSaved(
-    { turns: 30, bornAt: NOW, fish: [aFish(0, 'ougi', 3), { id: 'x', kind: 'maru' }, { id: 2, kind: 'unknown' }, null, { ...aFish(4, 'shima', 1), name: 'ぶち\x07丸' }] },
+    { turns: 30, bornAt: NOW, fish: [aFish(0, 'ougi', 3), { id: 'x', kind: 'maru' }, { id: 2, kind: 'unknown' }, { id: 3, kind: 7 }, null, { ...aFish(4, 'shima', 1), name: 'ぶち\x07丸' }] },
     NOW,
   )
   expect(mixed.fish.map(f => [f.id, f.kind])).toEqual([
     [0, 'ougi'],
+    [2, 'unknown'],
     [4, 'shima'],
   ])
-  expect(mixed.fish[1]?.name).toBe('ぶち丸')
+  expect(mixed.fish[2]?.name).toBe('ぶち丸')
   expect(fromSaved({ turns: 30, bornAt: NOW, fish: [null] }, NOW).fish).toHaveLength(fishCount(30))
   expect(fromSaved({ turns: 30, bornAt: NOW, fish: Array.from({ length: 12 }, (_, i) => aFish(i, 'maru', 0)) }, NOW).fish).toHaveLength(8)
 })
@@ -511,9 +519,9 @@ test('大きさは段階で決まり、種類ごとに形が違う', () => {
   const svg = at([aFish(0, 'maru', 0), aFish(1, 'maru', 5), aFish(2, 'maru', 20), aFish(3, 'maru', 60)])
   for (const sc of ['0.55', '0.8', '1.1', '1.5']) expect(svg).toContain(`transform="scale(${sc})"`)
   expect(count(svg, 'animateMotion')).toBe(4)
-  // 一匹ずつ描いて、6 種とも違う絵。あかり魚だけ提灯が光る
+  // 一匹ずつ描いて、10 種とも違う絵。あかり魚だけ提灯が光る
   const one = KINDS.map(k => at([aFish(0, k, 30)]))
-  expect(new Set(one).size).toBe(6)
+  expect(new Set(one).size).toBe(KINDS.length)
   one.forEach((s, i) => expect(s.includes('class="lure"')).toBe(KINDS[i] === 'akari'))
   // 魚が配列で渡されれば turns の数ではなく配列の数
   expect(count(at([aFish(0, 'shima', 1)]), 'animateMotion')).toBe(1)
@@ -567,4 +575,49 @@ test('/config の theme が light 系なら枠と HUD を明るい色で描き�
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(await svgOf(ui)).toContain('rx="14" fill="#0d1117"')
   expect(await svgOf(ui)).not.toContain('rx="14" fill="#ffffff"')
+})
+
+// ---- 0.4.0 夕は橙・魚 10 種・知らない欄を消さない ----
+
+test('夕方は水が橙で日が沈みかけ、夜は月 (どちらも HUD の上に描く)', () => {
+  const at = (h: string) => drawAt(jst(`2026-10-20T${h}:00`), { turns: 25 })
+  const [noon, evening, night] = [at('12:00'), at('17:30'), at('22:00')]
+  expect(evening).toContain('id="sunset"')
+  for (const s of [noon, night]) expect(s).not.toContain('id="sunset"')
+  // 赤が青より強い (橙)
+  const rgb = (c: string) => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16))
+  const [r = 0, , b = 0] = rgb(waterTop(evening) ?? '#000000')
+  expect(r).toBeGreaterThan(b + 60)
+  // HUD の地より後に描く (前だと隠れる)
+  for (const [s, id] of [[evening, 'id="sunset"'], [night, 'id="moon"']] as const) expect(s.indexOf(id)).toBeGreaterThan(s.indexOf('opacity=".88"'))
+})
+
+test('新しい版が足した欄は、水槽の中も魚の中も消さずに書き戻す', async ($, on) => {
+  const fish = [{ ...aFish(0, 'maru', 4), futureFish: 'x' }]
+  const { store } = await boot($, on, { turns: 4, bornAt: NOW, fullness: 70, fedAt: NOW, murk: 0, name: '', fish, futureField: 1 } as Partial<AquaTank>)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const saved = store.saved() as Record<string, unknown> & Partial<AquaTank>
+  expect(saved.turns).toBe(5)
+  expect(saved.futureField).toBe(1)
+  expect(saved.fish?.[0]).toMatchObject({ id: 0, turnsSeen: 5, futureFish: 'x' })
+  expect(saved.fish).toHaveLength(2)
+  // 知っている欄の壊れた値は直す (名前の制御文字)
+  expect(fromSaved({ turns: 1, fish: [{ ...aFish(0, 'maru', 1), name: 'a\x07', more: 2 }] }, NOW).fish[0]).toEqual({ ...aFish(0, 'maru', 1, NOW), name: 'a', more: 2 })
+})
+
+test('知らない種類の魚は残って、まる魚の形で描かれ、一覧では「なぞの魚」', async ($, on) => {
+  const odd = { ...aFish(1, 'maru', 30), kind: 'kirin' } as AquaFish
+  const draw = (fish: AquaFish[]) => drawTank({ ...INITIAL, fish, view: viewAt({ ...INITIAL, fedAt: NOW, bornAt: NOW }, NOW) })
+  // 番号 1 の魚を、まる魚として描いた時と同じ絵
+  expect(draw([odd])).toBe(draw([aFish(1, 'maru', 30)]))
+  expect(fishListSvg([odd])).toContain('なぞの魚')
+  // ターンをまたいでも store に種類の文字列のまま残る
+  const { store } = await boot($, on, { turns: 5, bornAt: NOW, fullness: 70, fedAt: NOW, murk: 0, name: '', fish: [aFish(0, 'maru', 5), odd] })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(store.saved()?.fish?.map(f => [f.id, f.kind, f.turnsSeen])).toEqual([
+    [0, 'maru', 6],
+    [1, 'kirin', 31],
+  ])
 })

@@ -97,7 +97,8 @@ async function pressStop($: $, row: PortWatchRow) {
 
 const openPane = async ($: $) => {
   await $.ui.open({ id: PANE, title: TITLE })
-  await refresh($)
+  // netstat と tasklist は 1 秒近くかかる。コマンドは待たせず、読むのは裏で (読み終われば描き直る)
+  void refresh($).catch(() => {})
   return { text: 'ポートのペインを開きました。' }
 }
 

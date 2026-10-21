@@ -5,7 +5,7 @@ import type { ModHubCommand, ModHubRecent, ModHubSort } from '../types'
 import { applyFilter, asPins, asRecent, byCategory, clean, headerSvg, launchers, noteMod, pushRecent, sortRecent, splitPins } from './hub'
 import type { Launcher } from './hub'
 import { bandSvg, categoryColor, modIcon } from './icons'
-import { C, followTheme, readTheme } from './style'
+import { C, followTheme, readTheme, season } from './style'
 
 const PANE = 'mod-hub'
 const TITLE = 'mod'
@@ -120,6 +120,8 @@ export const register: Register = on => {
     const sort = await read($, SORT)
     const pins = await read($, PINS)
     const filter = Input ? await read($, FILTER) : ''
+    // 見出しの季節の飾り (JST の月から。時計が読めなければ飾り無し)
+    const seasonNow = Svg ? await $.clock.now().then(season, () => undefined) : undefined
 
     const shown = applyFilter(all, filter)
     const { pinned, rest } = splitPins(sort === 'recent' ? sortRecent(shown, await read($, RECENT)) : shown, pins)
@@ -160,7 +162,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1}>
         {Svg ? (
-          <Svg source={headerSvg(all.length)} alt={`画面のある mod ${all.length} 本`} />
+          <Svg source={headerSvg(all.length, seasonNow)} alt={`画面のある mod ${all.length} 本`} />
         ) : (
           <Text bold>{`画面のある mod ${all.length} 本`}</Text>
         )}

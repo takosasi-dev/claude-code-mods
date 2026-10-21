@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { HaikuPoem, HaikuTurn } from '../types'
-import { askFor, clean, cleanAnswer, digestOf, failText, fileOf, mergePoems, poemsOf, shouldCompose, stamp, tanzakuSvg } from './haiku'
+import { askFor, clean, cleanAnswer, digestOf, failText, fileOf, jstMonth, mergePoems, poemsOf, shouldCompose, stamp, tanzakuSvg } from './haiku'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'turn-haiku'
@@ -60,7 +60,7 @@ const compose = ($: $, turn: HaikuTurn) =>
     await note($, '')
     try {
       const now = await $.clock.now()
-      const { system, prompt } = askFor(turn, new Date(now).getMonth() + 1)
+      const { system, prompt } = askFor(turn, jstMonth(now))
       // 断られた時 (使えないモデルなど) だけ reject する
       const r = await $.model.complete({ model: 'haiku', effort: 'low', timeoutMs: 15_000, maxTokens: 200, system, prompt }).catch((err: unknown) => message(err))
       if (typeof r === 'string') return void (await note($, `詠めませんでした (${r})`))

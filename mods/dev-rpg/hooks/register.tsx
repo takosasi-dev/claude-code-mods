@@ -16,7 +16,11 @@ import {
   SP_RULE,
   achievementLines,
   achievementsSvg,
+  claimedFrom,
   fromSaved,
+  gain,
+  KEEP_CLAIMED,
+  questRewards,
   gearLines,
   gearSvg,
   grant,
@@ -40,6 +44,7 @@ import {
   toSaved,
   upgradeHero,
   wear,
+  withUnknown,
   wornOf,
 } from './rpg'
 import type { Achievement } from './rpg'
@@ -58,6 +63,9 @@ const BATTLE = atom({ plugin: 'dev-rpg', key: 'battle' } as const, null as RpgBa
 // turn-gacha の state (読むだけ。turn-gacha が無ければ undefined のまま)
 const GACHA_SAVE = { plugin: 'turn-gacha', key: 'save' } as const
 const GACHA_CARDS = { plugin: 'turn-gacha', key: 'cards' } as const
+// daily-quest の今日のお題 (読むだけ。daily-quest が無ければ undefined のまま)
+const QUEST_TODAY = { plugin: 'daily-quest', key: 'today' } as const
+const CLAIM_KEY = 'questClaimed'
 
 type $ = EngineInterface
 
@@ -69,12 +77,12 @@ let ownsMain = false
 let chain: Promise<unknown> = Promise.resolve()
 const serial = (f: () => Promise<unknown>) => (chain = chain.then(f, f))
 
-/** store の値。キーが無ければ最初から、読めない時 (例外・形が違う) は undefined */
-async function readStore($: $): Promise<RpgSaved | undefined> {
+/** store の値 (と、知らない欄を残して書くための生の値)。キーが無ければ最初から、読めない時 (例外・形が違う) は undefined */
+async function readStore($: $): Promise<{ saved: RpgSaved; raw: unknown } | undefined> {
   try {
     const raw = await $.store.get(STORE_KEY)
-    if (raw === undefined) return INITIAL_SAVED
-    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? fromSaved(raw) : undefined
+    if (raw === undefined) return { saved: INITIAL_SAVED, raw }
+    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? { saved: fromSaved(raw), raw } : undefined
   } catch {
     return undefined
   }
@@ -88,7 +96,7 @@ async function ensureLoaded($: $) {
     if (upgradeHero(cur) !== cur) await update($, HERO, upgradeHero)
     return
   }
-  const saved = await readStore($)
+  const saved = (await readStore($))?.saved
   if (!saved) await update($, NEWS, () => BROKEN)
   const now = await $.clock.now()
   await update($, HERO, x => (x.s.startedAt === 0 ? startSession(saved ?? INITIAL_SAVED, now) : x))
@@ -100,11 +108,12 @@ const readHero = async ($: $) => upgradeHero(await read($, HERO))
 /** 今の store を読み直し、前に合わせた時から増えた分だけを足して書く。画面も store に合わせる */
 const save = ($: $) =>
   serial(async () => {
-    const store = await readStore($)
-    if (!store) {
+    const got = await readStore($)
+    if (!got) {
       await update($, NEWS, () => BROKEN)
       return
     }
+    const store = got.saved
     // $.state.get は 1 つの dispatch の中では同じ時点を読むので、差分は update の中 (最新の値) で取る
     let written: RpgSaved | undefined
     await update($, HERO, x0 => {
@@ -114,7 +123,8 @@ const save = ($: $) =>
       return { ...x, ...written, synced: written }
     })
     if (!written) return
-    await $.store.set(STORE_KEY, written).catch(async () => {
+    // この版の知らない欄 (新しい版が足した物) は読んだまま残す
+    await $.store.set(STORE_KEY, withUnknown(got.raw, written)).catch(async () => {
       // 書けなかった分は、読んだ store からの差分として次に足す
       await update($, HERO, x => ({ ...x, synced: store }))
       await update($, NEWS, () => '記録を保存できませんでした。次のターンの終わりにもう一度書きます')
@@ -173,6 +183,37 @@ async function equip($: $, slot: RpgSlot, id: string) {
   }
   await update($, NEWS, () => (card ? `${SLOT_LABEL[slot]}に「${card.name}」を着けた` : `${SLOT_LABEL[slot]}を外した`))
   await change($, h => setGear(h, slot, card))
+  await save($)
+}
+
+/**
+ * daily-quest でこなしたお題のごほうび (経験値) を 1 回だけ受け取る。
+ * 受け取った印は store の questClaimed (書く直前に読み直す)。daily-quest が無ければ何もしない
+ */
+async function claim($: $) {
+  let today: unknown
+  try {
+    today = (await $.state.get(QUEST_TODAY)).value
+  } catch {
+    return
+  }
+  if (questRewards(today, []).length === 0) return
+  let got: ReturnType<typeof questRewards> = []
+  await serial(async () => {
+    const claimed = await $.store.get(CLAIM_KEY).then(claimedFrom, () => undefined)
+    if (!claimed) return
+    const fresh = questRewards(today, claimed)
+    if (fresh.length === 0) return
+    // ponytail: 読んでから書くまでの間に別のセッションが受け取ると 2 度入る。間は数ミリ秒なので見送り
+    const isSaved = await $.store.set(CLAIM_KEY, [...claimed, ...fresh.map(g => g.key)].slice(-KEEP_CLAIMED)).then(
+      () => true,
+      () => false,
+    )
+    if (isSaved) got = fresh
+  })
+  if (got.length === 0) return
+  const xp = got.reduce((n, g) => n + g.exp, 0)
+  await change($, h => gain(h, xp), false, [`お題「${got.map(g => g.title).join('」「')}」のごほうび 経験値 +${xp}`])
   await save($)
 }
 
@@ -261,7 +302,7 @@ async function unspend($: $) {
   await save($)
 }
 
-/** やり直しは消す操作なので、store を丸ごと書き替える */
+/** やり直しは消す操作なので、store を丸ごと書き替える (知らない欄も「すべて消えます」のうち) */
 const reset = ($: $) =>
   serial(async () => {
     const now = await $.clock.now()
@@ -293,6 +334,8 @@ export const register: Register = on => {
     // 読み戻して (冒険の回数を足して) 実績を見て、残す
     await change($, h => h)
     await save($)
+    // 別のセッションでこなしたお題の分もここで拾う
+    await claim($).catch(() => {})
     $.clock.every(60_000, () => void refresh($).catch(() => {}))
     return started
   })
@@ -327,7 +370,10 @@ export const register: Register = on => {
       }
       await save($)
     }
-    return next(e)
+    // お題のごほうびは next の後に見る (daily-quest は next の前に進みを書くので、読み込みの順によらず同じターンで届く)
+    const done = await next(e)
+    if (!e.agentId) await claim($).catch(() => {})
+    return done
   })
 
   // 見るだけ。断られた呼び出し (deny) は数えない

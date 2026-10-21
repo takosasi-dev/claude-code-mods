@@ -1,5 +1,5 @@
-import type { AquaFish, AquaPeriod, AquaSeason, AquaTank, AquaView, FishKind, FishStage } from '../types'
-import { C, clean, esc, frame, header, panel } from './style'
+import type { AquaFish, AquaPeriod, AquaSeason, AquaTank, AquaView, FishKind, FishStage, KnownFishKind } from '../types'
+import { C, clean, dayPart, esc, frame, header, panel, season } from './style'
 
 export const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -23,15 +23,19 @@ export const MAX_FISH = 8
 /** i 番目 (0 から) の魚が来る累計ターン。fishCount の逆 */
 export const arrivalTurn = (i: number) => (i <= 0 ? 0 : 5 + (i - 1) * 10)
 
-/** 種類。後ろほど珍しい */
-export const KINDS: readonly FishKind[] = ['maru', 'shima', 'mizutama', 'hirenaga', 'ougi', 'akari']
-export const KIND_NAME: Record<FishKind, string> = {
+/** 種類。後ろほど珍しい (足す時は後ろに。前の記録の魚の種類が変わらないように) */
+export const KINDS: readonly KnownFishKind[] = ['maru', 'shima', 'mizutama', 'hirenaga', 'ougi', 'akari', 'hoshi', 'tsuno', 'niji', 'ryugu']
+export const KIND_NAME: Record<KnownFishKind, string> = {
   maru: 'まる魚',
   shima: 'しま魚',
   mizutama: '水玉魚',
   hirenaga: 'ひれなが',
   ougi: 'おうぎ尾',
   akari: 'あかり魚',
+  hoshi: 'ほし魚',
+  tsuno: 'つの魚',
+  niji: 'にじ魚',
+  ryugu: 'りゅうぐう',
 }
 
 /** 来てからのターンで決まる段階 */
@@ -40,12 +44,12 @@ const STAGE_SCALE: Record<FishStage, number> = { 稚魚: 0.55, 若魚: 0.8, 成�
 
 /**
  * i 番目に来る魚の種類。最初はまる魚、以後は節目が進むほど珍しい種類まで出る
- * (i 番目は先頭から i + 2 種、後ろほど出やすい)。
+ * (2 匹目は先頭の 3 種から、最後の 8 匹目は全種から。後ろほど出やすい)。
  * 水槽の生まれた時刻を種にするので、どのセッションが節目を越えても同じ魚が来る
  */
-export const kindFor = (i: number, tankBornAt: number): FishKind => {
+export const kindFor = (i: number, tankBornAt: number): KnownFishKind => {
   if (i <= 0) return 'maru'
-  const pool = KINDS.slice(0, Math.min(KINDS.length, i + 2))
+  const pool = KINDS.slice(0, Math.min(KINDS.length, 1 + Math.ceil((i * (KINDS.length - 1)) / (MAX_FISH - 1))))
   const total = pool.reduce((a, _, k) => a + k + 1, 0)
   let x = rng(Math.floor(tankBornAt / 1000) ^ Math.imul(i, 2654435761))() * total
   for (let k = 0; k < pool.length; k++) {
@@ -83,17 +87,20 @@ const fishFrom = (raw: unknown, turns: number, tankBornAt: number): AquaFish[] =
   const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
   const out = raw.flatMap((x): AquaFish[] => {
     const o = typeof x === 'object' && x !== null ? (x as Record<string, unknown>) : {}
-    if (!ok(o.id) || !KINDS.includes(o.kind as FishKind)) return []
+    // 知らない種類 (新しい版の魚) も落とさない。描く時はまる魚の形、名前は「なぞの魚」
+    if (!ok(o.id) || typeof o.kind !== 'string' || o.kind === '') return []
     const name = typeof o.name === 'string' ? clean(o.name).slice(0, 12) : ''
-    return [
-      {
-        id: Math.max(0, Math.floor(o.id)),
-        kind: o.kind as FishKind,
-        bornAt: ok(o.bornAt) ? o.bornAt : tankBornAt,
-        turnsSeen: ok(o.turnsSeen) ? Math.max(0, Math.floor(o.turnsSeen)) : 0,
-        ...(name ? { name } : {}),
-      },
-    ]
+    // 知らない欄 (新しい版が足した物) はそのまま持ち回る。欄の並びも元のまま (変わっていなければ書かない比べのため)
+    const f: Record<string, unknown> = {
+      ...o,
+      id: Math.max(0, Math.floor(o.id)),
+      kind: o.kind as FishKind,
+      bornAt: ok(o.bornAt) ? o.bornAt : tankBornAt,
+      turnsSeen: ok(o.turnsSeen) ? Math.max(0, Math.floor(o.turnsSeen)) : 0,
+    }
+    if (name) f.name = name
+    else delete f.name
+    return [f as AquaFish]
   })
   return out.length > 0 ? out.slice(0, MAX_FISH) : migrateFish(turns, tankBornAt)
 }
@@ -101,17 +108,11 @@ const fishFrom = (raw: unknown, turns: number, tankBornAt: number): AquaFish[] =
 export const fullnessAt = (t: AquaTank, now: number) =>
   clamp(t.fullness - (Math.max(0, now - t.fedAt) / HOUR) * HUNGER_PER_HOUR, 0, 100)
 
-/** 日本時間 (JST, UTC+9) 固定の時刻帯。動いている環境のタイムゾーンには頼らない */
-export const periodAt = (now: number): AquaPeriod => {
-  const h = Math.floor(now / HOUR + 9) % 24
-  return h >= 5 && h < 10 ? '朝' : h >= 10 && h < 16 ? '昼' : h >= 16 && h < 19 ? '夕' : '夜'
-}
+/** 日本時間 (JST) の時刻帯。決まりは共通の style.ts の dayPart */
+export const periodAt = (now: number): AquaPeriod => dayPart(now)
 
-/** 日本時間 (JST) の月で決まる季節。春 3-5 / 夏 6-8 / 秋 9-11 / 冬 12-2 */
-export const seasonAt = (now: number): AquaSeason => {
-  const m = new Date(now + 9 * HOUR).getUTCMonth() + 1
-  return m >= 3 && m <= 5 ? '春' : m >= 6 && m <= 8 ? '夏' : m >= 9 && m <= 11 ? '秋' : '冬'
-}
+/** 日本時間 (JST) の月で決まる季節。決まりは共通の style.ts の season */
+export const seasonAt = (now: number): AquaSeason => season(now)
 
 /** 日本時間の 15 分刻みの番号 0-95 (0 は 0:00〜0:15) */
 export const slotAt = (now: number) => Math.floor((((Math.floor(now / 60_000) + 540) % 1440) + 1440) % 1440 / 15)
@@ -166,6 +167,13 @@ export const toSaved = (t: AquaTank): Saved => ({
   fish: t.fish,
 })
 
+/**
+ * store に書く物。書く直前に読み直した生の値 raw のうち、この版の知らない欄
+ * (新しい版の mod が足した欄) はそのまま残し、知っている欄だけ s で上書きする。
+ * 魚の中の知らない欄は fromSaved が持ち回っている
+ */
+export const toStore = (raw: unknown, s: Saved): Saved => ({ ...(typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {}), ...s })
+
 /** store の中身は信用しない: 数と文字だけ拾う */
 export const fromSaved = (raw: unknown, now: number): Saved => {
   const o = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
@@ -216,7 +224,7 @@ const WATER_KEYS: (Water & { at: number })[] = [
   { at: 300, top: '#2f4f78', mid: '#16304f', bottom: '#08172b' }, // 5:00 夜明け
   { at: 450, top: '#4a86a8', mid: '#1f557a', bottom: '#0c2a42' }, // 7:30 朝
   { at: 780, top: '#3aa0d8', mid: '#1767a3', bottom: '#0a345c' }, // 13:00 昼
-  { at: 1050, top: '#a8607e', mid: '#493f78', bottom: '#151f42' }, // 17:30 夕焼け
+  { at: 1050, top: '#d9803e', mid: '#7a4a52', bottom: '#1c1c3c' }, // 17:30 夕焼け (橙)
   { at: 1170, top: '#163256', mid: '#0b1c36', bottom: '#040a16' }, // 19:30 夜
   { at: 1440, top: '#10294a', mid: '#08172e', bottom: '#030814' },
 ]
@@ -253,7 +261,7 @@ const LIGHT: Record<AquaPeriod, { sky: string; ray: string; rayOp: number; tint:
     tintOp: 0,
     rays: [{ x: 50, w: 36, d: 6 }, { x: 130, w: 26, d: 8 }, { x: 200, w: 30, d: 7.5 }, { x: 280, w: 42, d: 10 }],
   },
-  夕: { sky: '#2a1f2b', ray: '#ffc28a', rayOp: 0.18, tint: '#ff8a50', tintOp: 0.07, rays: [{ x: 90, w: 30, d: 8 }, { x: 230, w: 36, d: 11 }] },
+  夕: { sky: '#3a2216', ray: '#ffb36b', rayOp: 0.22, tint: '#ff8a3c', tintOp: 0.08, rays: [{ x: 90, w: 30, d: 8 }, { x: 230, w: 36, d: 11 }] },
   夜: { sky: '#0f141c', ray: '#c8d8ff', rayOp: 0.12, tint: '#000814', tintOp: 0.24, rays: [{ x: 214, w: 16, d: 12 }] },
 }
 
@@ -339,10 +347,18 @@ const pellets = () => {
 
 // ---- 時刻と季節の飾り (animateMotion と fill="freeze" は使わない: 魚とえさの目印なので)
 
-/** 夜: 空の帯に三日月、水面に映る光 */
-const moon = (sky: string) =>
-  `<g id="moon"><circle cx="196" cy="15" r="8" fill="#f2f0d0"/><circle cx="200" cy="12" r="7" fill="${sky}"/>` +
-  `<ellipse cx="214" cy="${TOP + 3}" rx="18" ry="2" fill="#f2f0d0" opacity=".25"><animate attributeName="rx" values="18;24;18" dur="5s" repeatCount="indefinite"/></ellipse></g>`
+// 空の物は HUD の文字の間 (x 180〜230 あたり) に、HUD の後に描く (前に描くと HUD の地で隠れる)
+
+/** 夜: 三日月と小さな星、水面に映る光 */
+const moon = () =>
+  `<g id="moon"><path d="M206 7 A8 8 0 1 0 206 23 A4 8 0 1 1 206 7 Z" fill="#f2f0d0"/>` +
+  [[186, 10], [228, 18], [176, 20]].map(([x, y], k) => `<circle cx="${x}" cy="${y}" r=".9" fill="#f2f0d0" opacity=".3"><animate attributeName="opacity" values=".2;.9;.2" dur="${2 + k * 0.7}s" repeatCount="indefinite"/></circle>`).join('') +
+  `<ellipse cx="214" cy="${TOP + 3}" rx="18" ry="2" fill="#f2f0d0" opacity=".3"><animate attributeName="rx" values="18;24;18" dur="5s" repeatCount="indefinite"/></ellipse></g>`
+
+/** 夕: 沈みかけの橙の日と、水面に映る光 */
+const sunset = () =>
+  `<g id="sunset"><path d="M196 26 A11 11 0 0 1 218 26 Z" fill="#ffa552"/><path d="M190 26 H224" stroke="#ffcf8a" stroke-width="1" opacity=".7"/>` +
+  `<ellipse cx="207" cy="${TOP + 3}" rx="26" ry="2.6" fill="#ffb36b" opacity=".45"><animate attributeName="rx" values="22;30;22" dur="4s" repeatCount="indefinite"/></ellipse></g>`
 
 /** 春: 花びらが水面から舞い落ちる */
 const petals = () => {
@@ -416,7 +432,7 @@ const snow = () => {
 type Mood = { isRunning: boolean; isUpset: boolean; isIdle: boolean; isHungry: boolean; isNight: boolean }
 
 /** 種類ごとの尾びれ・背びれ・模様 (左上 0,0 で右を向いた形) */
-const SHAPE: Record<FishKind, { tail: string; dorsal: string; extra: (body: string) => string }> = {
+const SHAPE: Record<KnownFishKind, { tail: string; dorsal: string; extra: (body: string) => string }> = {
   maru: { tail: 'M-10 0 L-21 -8 Q-17 0 -21 8 Z', dorsal: 'M3 -8 Q-3 -15 -8 -7 Z', extra: () => '' },
   shima: {
     tail: 'M-10 0 L-21 -8 Q-17 0 -21 8 Z',
@@ -446,11 +462,47 @@ const SHAPE: Record<FishKind, { tail: string; dorsal: string; extra: (body: stri
       `<circle class="lure" cx="24" cy="-17" r="5" fill="#fff3a0" opacity=".35"><animate attributeName="opacity" values=".15;.55;.15" dur="2.2s" repeatCount="indefinite"/></circle>` +
       `<circle cx="24" cy="-17" r="2.4" fill="#fff8c4"/>`,
   },
+  // 体に小さな星が瞬く
+  hoshi: {
+    tail: 'M-10 0 L-22 -10 L-17 0 L-22 10 Z',
+    dorsal: 'M4 -8 L0 -16 L-3 -9 L-8 -13 L-8 -6 Z',
+    extra: () =>
+      ([[4, -3, 0], [-4, 3, 0.6], [8, 4, 1.2]] as const)
+        .map(
+          ([x, y, d]) =>
+            `<path d="M${x} ${y - 3} L${x + 0.9} ${y - 0.9} L${x + 3} ${y} L${x + 0.9} ${y + 0.9} L${x} ${y + 3} L${x - 0.9} ${y + 0.9} L${x - 3} ${y} L${x - 0.9} ${y - 0.9} Z" fill="#fffbe0">` +
+            `<animate attributeName="opacity" values=".35;1;.35" dur="1.8s" begin="${d}s" repeatCount="indefinite"/></path>`,
+        )
+        .join(''),
+  },
+  // 額の角と、とげの背びれ
+  tsuno: {
+    tail: 'M-10 0 L-20 -11 L-16 0 L-20 11 Z',
+    dorsal: 'M8 -8 L5 -15 L2 -9 L-1 -16 L-4 -9 L-7 -14 L-9 -6 Z',
+    extra: b => `<path d="M12 -6 L25 -13 L15 -2 Z" fill="${mix(b, '#ffffff', 0.55)}" stroke="${mix(b, '#0d1117', 0.3)}" stroke-width=".6"/>`,
+  },
+  // 赤・黄・青の筋が横に流れる
+  niji: {
+    tail: 'M-10 0 C-16 -10 -24 -12 -26 -10 Q-20 0 -26 10 C-24 12 -16 10 -10 0 Z',
+    dorsal: 'M5 -8 Q-2 -17 -9 -7 Z',
+    extra: () =>
+      [['#ff7b72', -4], ['#e3b341', 0], ['#79c0ff', 4]].map(([c, y]) => `<path d="M-10 ${y} Q2 ${Number(y) - 3} 14 ${y}" stroke="${c}" stroke-width="2" fill="none" opacity=".85"/>`).join(''),
+  },
+  // 一番珍しい: 長い赤いたてがみが揺れ、尾が細く長い
+  ryugu: {
+    tail: 'M-10 0 C-22 -3 -30 -2 -40 -6 C-32 0 -32 0 -40 6 C-30 2 -22 3 -10 0 Z',
+    dorsal: 'M10 -8 Q8 -12 4 -10 Z',
+    extra: () => {
+      const a = 'M10 -9 Q4 -24 -2 -12 Q-8 -22 -14 -9 Q-22 -18 -30 -5'
+      const z = 'M10 -9 Q2 -20 -2 -11 Q-10 -24 -14 -8 Q-20 -14 -30 -3'
+      return `<path d="${a}" stroke="#f85149" stroke-width="2.4" fill="none" stroke-linecap="round"><animate attributeName="d" values="${a};${z};${a}" dur="1.6s" repeatCount="indefinite"/></path>`
+    },
+  },
 }
 
 /** 魚の形 1 匹分。body は胴の色、fill は胴の塗り (グラデーションの url か色) */
 const fishShape = (f: AquaFish, body: string, fill: string, tailAnim: string, eye: string) => {
-  const s = SHAPE[f.kind] ?? SHAPE.maru
+  const s = (SHAPE as Partial<Record<FishKind, (typeof SHAPE)['maru']>>)[f.kind] ?? SHAPE.maru
   return (
     `<path d="${s.tail}" fill="${mix(body, '#0d1117', 0.25)}">${tailAnim}</path>` +
     `<path d="M16 0 C10 -11 -6 -11 -12 0 C-6 11 10 11 16 0 Z" fill="${fill}"/>` +
@@ -598,7 +650,6 @@ export const drawTank = (t: AquaTank): string => {
     `<rect width="${W}" height="${H}" rx="14" fill="${C.bg}"/>` +
     `<g clip-path="url(#glass)">` +
     `<rect x="0" y="0" width="${W}" height="${TOP}" fill="${c.sky}"/>` +
-    (isNight ? moon(c.sky) : '') +
     `<rect x="0" y="${TOP}" width="${W}" height="${H - TOP}" fill="url(#water)"/>` +
     rays(c) +
     sand(rng(31)) +
@@ -613,6 +664,7 @@ export const drawTank = (t: AquaTank): string => {
     `<path d="${surface0}" stroke="#e6f6ff" stroke-width="1.5" fill="none" opacity=".35"><animate attributeName="d" values="${surface0};${surface1};${surface0}" dur="3s" repeatCount="indefinite"/></path>` +
     `<path d="M20 ${TOP + 14} L44 ${TOP + 14} L14 ${H - 20} L-10 ${H - 20} Z" fill="#ffffff" opacity=".04"/>` +
     hud(t, v) +
+    (isNight ? moon() : v.period === '夕' ? sunset() : '') +
     `</g>` +
     `<rect x="2" y="2" width="${W - 4}" height="${H - 4}" rx="13" fill="none" stroke="${C.line}" stroke-width="3"/>` +
     `</svg>`
@@ -631,7 +683,7 @@ const stageColor = (s: FishStage) => (s === '稚魚' ? C.dim : s === '若魚' ? 
 
 /** 魚の一覧の 1 行ぶんの言葉 (terminal と SVG で同じ物を使う) */
 export const fishLine = (f: AquaFish) => ({
-  title: `${KIND_NAME[f.kind] ?? f.kind}${f.name ? ` ${f.name}` : ''}`,
+  title: `${(KIND_NAME as Partial<Record<FishKind, string>>)[f.kind] ?? 'なぞの魚'}${f.name ? ` ${f.name}` : ''}`,
   stage: stageOf(f.turnsSeen),
   came: `${dayOf(f.bornAt)}に来た / ${f.turnsSeen}ターン`,
 })

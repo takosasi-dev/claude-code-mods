@@ -1,6 +1,6 @@
 {
   "name": "turn-haiku",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ターンでした事を Haiku が五七五の一句に詠み、/haiku のペインに短冊の縦書きで並べる",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

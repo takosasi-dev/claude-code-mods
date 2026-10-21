@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { HaikuPoem } from '../types'
-import { askFor, cleanAnswer, columnsOf, digestOf, fileOf, mergePoems, poemsOf, shouldCompose, tanzakuSvg } from '../hooks/haiku'
+import { KIGO, askFor, cleanAnswer, columnsOf, digestOf, fileOf, jstMonth, kigoFor, mergePoems, poemsOf, seasonOf, shouldCompose, tanzakuSvg } from '../hooks/haiku'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const SURFACES = ['vscode', 'terminal'] as const
@@ -324,6 +324,37 @@ test('別のセッションが書いた句を消さずに足す (C1)、store の
   w.failGet = true
   await turn($, 't3', { tools: [['Read', '/tmp/demo/a.ts']] })
   expect(w.store.get('poems')).toEqual([])
+})
+
+test('季語: 季節ごとに 16 語以上で重なりなし、候補はその季節から 3 つ、JST の月で決める', () => {
+  const all = Object.values(KIGO).flat()
+  for (const list of Object.values(KIGO)) expect(list.length).toBeGreaterThanOrEqual(16)
+  expect(new Set(all).size).toBe(all.length)
+  expect(all.join('')).not.toMatch(/[\p{Extended_Pictographic}★☆♪]/u)
+  expect([1, 2, 3, 5, 6, 8, 9, 11, 12].map(seasonOf)).toEqual(['冬', '冬', '春', '春', '夏', '夏', '秋', '秋', '冬'])
+  // 11/30 15:30 UTC は JST の 12/1
+  expect(jstMonth(Date.parse('2026-11-30T15:30:00Z'))).toBe(12)
+  expect(jstMonth(Date.parse('2026-11-30T14:30:00Z'))).toBe(11)
+  const picks = kigoFor('t1', 10)
+  expect(picks).toHaveLength(3)
+  expect(new Set(picks).size).toBe(3)
+  for (const k of picks) expect(KIGO['秋']).toContain(k)
+  expect(kigoFor('t1', 10)).toEqual(picks) // 詠み直しても同じ候補
+  // ターンが変わると候補もばらける
+  expect(new Set(Array.from({ length: 20 }, (_, i) => kigoFor(`t${i}`, 4).join())).size).toBeGreaterThan(10)
+  const { prompt } = askFor(digestOf('t1', new Map(), [], '', 1_000), 10)
+  expect(prompt).toContain(`季語はこの中から 1 つ選んでください: ${picks.join('、')}`)
+  for (const k of KIGO['夏']) expect(prompt).not.toContain(k)
+})
+
+test('ターンの句を足しても、store の句の知らない欄 (新しい版が足した欄) は消さない', async ($, on) => {
+  const w = engine(on, { poems: [{ id: 'old', at: NOW - 1000, text: '古い句', futureField: 1 }] })
+  await start($)
+  await turn($, 't1', { tools: [['Read', '/tmp/demo/a.ts']] })
+  const saved = w.store.get('poems') as (HaikuPoem & { futureField?: number })[]
+  expect(saved.map(p => p.id)).toEqual(['old', 't1'])
+  expect(saved[0]?.futureField).toBe(1)
+  expect(w.asked[0]?.prompt).toMatch(/季語はこの中から 1 つ選んでください: /)
 })
 
 test('同時に 2 回詠んでも 1 本ずつ流し、どちらも残る', async ($, on) => {

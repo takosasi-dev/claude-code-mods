@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { FaceBandMood, FaceBandNow } from '../types'
-import { followTheme, readTheme } from './style'
-import { FACE_TEXT, IDLE, clean, endWord, faceAlt, faceSvg, subLine } from './face'
+import type { FaceBandLook, FaceBandMood, FaceBandNow } from '../types'
+import { dayPart, followTheme, readTheme, season } from './style'
+import { IDLE, clean, endWord, faceAlt, faceSvg, faceText, subLine } from './face'
 
 const NOW = atom({ plugin: 'face-band', key: 'now' } as const, IDLE)
+const LOOK = atom({ plugin: 'face-band', key: 'look' } as const, { part: '昼', season: '春' } as FaceBandLook)
 // 最初は隠しておく (0.3.0 から)。/face で出すと store に false が残り、次からも出る
 const HIDDEN = atom({ plugin: 'face-band', key: 'isHidden' } as const, true)
 const STORE_KEY = 'isHidden'
@@ -32,6 +33,14 @@ const toggle = async ($: $) => {
   return { text: `${hidden ? '顔の帯を隠しました。' : '顔の帯を出しました。'}${saved}` }
 }
 
+/** 今の時間帯と季節を見て、変わっていれば書く (書くと帯が描き直される) */
+const lookAround = async ($: $) => {
+  const t = await $.clock.now()
+  const next: FaceBandLook = { part: dayPart(t), season: season(t) }
+  const old = await read($, LOOK)
+  if (old.part !== next.part || old.season !== next.season) await update($, LOOK, () => next)
+}
+
 /** 下の mod の木が何かを描いているか (何も描かなければエンジンの物の印が返る) */
 const drawsSomething = (tree: RenderElement) => tree.type !== 'engine'
 
@@ -48,6 +57,9 @@ export const register: Register = on => {
     await update($, HIDDEN, () => stored !== false)
     // リロードがにっこり/しょんぼりの途中だったら、戻す時計は消えているので待ちに戻す
     await update($, NOW, n => (n.mood === 'happy' || n.mood === 'sad' ? { ...IDLE, tool: n.tool, seq: n.seq + 1 } : n))
+    // 時間帯と季節の小物。時間帯の境目は 1 時間単位なので 1 分ごとに見れば足りる
+    await lookAround($).catch(() => {})
+    $.clock.every(60_000, () => lookAround($).catch(() => {}))
     // VS Code は帯を「フック無し」と 2 回見ると聞きに来なくなる。後から読み込まれた時のために描き直しを頼む
     $.ui.invalidate('ui.render')
     return started
@@ -98,6 +110,7 @@ export const register: Register = on => {
     // work-bar など、帯を描く他の mod がこの下にいれば、その木が返る。顔を左に置き、その木を右に並べる
     const below = await next(e)
     const now = await read($, NOW)
+    const look = await read($, LOOK)
     const sub = subLine(now)
     const t = $.ui.resolve(e)
     const { Box, Text } = t
@@ -107,7 +120,7 @@ export const register: Register = on => {
       e.surface !== 'terminal' && 'Svg' in t ? (
         <Box key="face" flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
           <Box width={8} flexShrink={0}>
-            <t.Svg source={faceSvg(now.mood)} alt={faceAlt(now)} width={60} />
+            <t.Svg source={faceSvg(now.mood, look.part, look.season)} alt={faceAlt(now)} width={60} />
           </Box>
           <Box flexDirection="column">
             <Text bold>{now.word}</Text>
@@ -117,7 +130,7 @@ export const register: Register = on => {
       ) : (
         <Box key="face" flexDirection="column" flexShrink={0}>
           <Text>
-            <Text bold>{FACE_TEXT[now.mood]}</Text> {now.word}
+            <Text bold>{faceText(now.mood, look.part)}</Text> {now.word}
           </Text>
           {sub !== '' && <Text dimColor>{sub}</Text>}
         </Box>

@@ -1,7 +1,7 @@
 {
   "name": "aqua-pet",
-  "version": "0.3.0",
-  "description": "Claude の作業に反応して魚が泳ぐ水槽のペイン (/aquarium)。魚はターンで育ち、節目で珍しい種類が来る。背景は時刻と季節で変わる",
+  "version": "0.4.0",
+  "description": "Claude の作業に反応して魚が泳ぐ水槽のペイン (/aquarium)。魚はターンで育ち、節目で珍しい種類が来る(10 種)。水の色と飾りは時刻と季節で変わる",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"
 }

@@ -44,11 +44,18 @@ export type GachaSave = {
 /**
  * 他の mod が読んでよい物 (書けるのは turn-gacha だけ):
  * - save.book: 持っているカードの id と枚数。セッションの始まりに store から写し、引くたびに置き換わる
- * - cards: カード 40 種の表 (id・レア度・枠・名前)。セッションの始まりに 1 回置く
+ * - cards: カード 60 種の表 (id・レア度・枠・名前)。セッションの始まりに 1 回置く
  * どちらも turn-gacha が入っていない、またはまだ読み込む前は undefined
  */
 declare module 'claude-code' {
   interface PluginState {
+    /**
+     * daily-quest が他の mod に見せている物のうち、turn-gacha が読む分だけ (書くのは daily-quest)。
+     * daily-quest の types/index.d.ts の写し。入っていない時は undefined なので、読んだ値は gacha.ts の questRewards で確かめる
+     */
+    'daily-quest': {
+      today: { date: string; quests: { id: string; title: string; done: boolean; reward: { exp: number; pulls: number } }[] }
+    }
     'turn-gacha': {
       save: GachaSave
       cards: GachaCard[]

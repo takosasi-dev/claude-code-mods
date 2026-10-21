@@ -225,6 +225,15 @@ test('C1: 別のセッションが書いた切り替えと自分のルールを�
   expect(await ui.find({ type: 'Text', text: 'オン 5 個 / 全 10 個' })).toBeDefined()
 })
 
+test('知らない欄 (新しい版が書いた物) は、ターンと切り替えの後も store に残る', async ($, on) => {
+  const { raw } = await boot($, on, { ...EMPTY, on: { ja: true }, futureField: 1 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await $.turn.start({ text: 'p', turnId: 't1' })
+  await ui.press({ key: 'rule-plan' })
+  // 書いたこと (plan がオンになった) と、知らない欄が残ったこと
+  expect(raw() as object).toEqual({ futureField: 1, on: { ja: true, plan: true }, custom: [] })
+})
+
 test('C1: 同時に押しても 1 つも消えない', async ($, on) => {
   const { saved } = await boot($, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })

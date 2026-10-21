@@ -1,12 +1,12 @@
 // カードの表・抽選・保存の形・SVG と terminal 用の行。どれも純関数
 import type { GachaCard, GachaDraw, GachaRarity, GachaSave, GachaSlot } from '../types'
-import { C, esc, header, HEADER_H } from './style'
+import { C, clean, esc, header, HEADER_H, short } from './style'
 
 export type Card = GachaCard & { line: string }
 
 const c = (id: string, rarity: GachaRarity, slot: GachaSlot, name: string, line: string): Card => ({ id, rarity, slot, name, line })
 
-/** カードの表 (N 16 / R 12 / SR 8 / SSR 4)。id は保存に使うので変えない。slot は dev-rpg で装備する枠 */
+/** カードの表 (N 24 / R 18 / SR 12 / SSR 6)。id は保存に使うので変えない。slot は dev-rpg で装備する枠 */
 export const CARDS: readonly Card[] = [
   c('n01', 'N', 'weapon', '消し忘れた console.log', '本番で誰かが読んでいる'),
   c('n02', 'N', 'charm', 'TODO: あとで直す', 'あとは来ない'),
@@ -24,6 +24,15 @@ export const CARDS: readonly Card[] = [
   c('n14', 'N', 'weapon', 'どこかで見たコード片', '出どころは覚えていない'),
   c('n15', 'N', 'armor', '終わらないビルド', 'お茶を淹れる時間'),
   c('n16', 'N', 'charm', '使われない import', 'いつかの名残'),
+  // 0.3.0 で足した分
+  c('n17', 'N', 'armor', 'ローカルでは動く', 'ほかの場所では知らない'),
+  c('n18', 'N', 'weapon', 'コピペで増えた関数', '少しずつ違う五兄弟'),
+  c('n19', 'N', 'charm', '付箋だらけのモニター', '一枚はがすと二枚増える'),
+  c('n20', 'N', 'armor', '流れ続けるログ', '目当ての一行はいつも上'),
+  c('n21', 'N', 'weapon', '読めない正規表現', '書いた本人も読めない'),
+  c('n22', 'N', 'charm', '名前が temp のファイル', '一時的に三年いる'),
+  c('n23', 'N', 'armor', '赤いままの CI の印', 'もう誰も気にしない'),
+  c('n24', 'N', 'weapon', '紛れ込んだ全角空白', '見た目は同じ、中身は違う'),
   c('r01', 'R', 'weapon', 'きれいな差分', 'レビューが一瞬で終わる'),
   c('r02', 'R', 'armor', '型エラー 0 件', '赤い波線が消えた'),
   c('r03', 'R', 'charm', '意味のあるコミットメッセージ', '半年後の自分が喜ぶ'),
@@ -36,6 +45,12 @@ export const CARDS: readonly Card[] = [
   c('r10', 'R', 'charm', '小さなプルリク', '誰もこわがらない'),
   c('r11', 'R', 'weapon', '先に書いたテスト', '迷わず進める'),
   c('r12', 'R', 'charm', '当たった仮説', 'ログが味方した'),
+  c('r13', 'R', 'weapon', '効いたブレークポイント', '止まってほしい所で止まった'),
+  c('r14', 'R', 'armor', '足りていた型注釈', '補完がすらすら出る'),
+  c('r15', 'R', 'charm', '先に読んだエラー文', '答えはだいたい書いてある'),
+  c('r16', 'R', 'weapon', 'ちょうどいい粒度のコミット', '戻すのも簡単'),
+  c('r17', 'R', 'armor', 'どこでも同じ環境', 'みんなの手元で同じ動き'),
+  c('r18', 'R', 'charm', '分かりやすい変更の説明', 'レビューする人が助かる'),
   c('s01', 'SR', 'weapon', '一行で直ったバグ', '三時間さがして一行'),
   c('s02', 'SR', 'armor', '競合なしのマージ', '何事もなかったように混ざる'),
   c('s03', 'SR', 'charm', 'ぴたりと決まった名前', '命名の神が降りてきた'),
@@ -44,10 +59,16 @@ export const CARDS: readonly Card[] = [
   c('s06', 'SR', 'armor', '静かなビルドログ', '警告がひとつも出ない'),
   c('s07', 'SR', 'charm', '一度で通ったレビュー', '承認がすぐに付いた'),
   c('s08', 'SR', 'charm', '説明書どおりに動いた API', '書いてある通りだった'),
+  c('s09', 'SR', 'weapon', '一晩で終わった移行', '朝には新しい版'),
+  c('s10', 'SR', 'armor', 'ゼロになった依存の警告', '監査がきれいに通る'),
+  c('s11', 'SR', 'charm', '最初から付いていた型', '型定義を探さなくていい'),
+  c('s12', 'SR', 'weapon', '半分になったバンドル', '読み込みが目に見えて速い'),
   c('x01', 'SSR', 'weapon', '一発で通ったテスト', '書いて走らせたら全部緑'),
   c('x02', 'SSR', 'charm', 'つかまえた幽霊バグ', 'たまにしか出ないあの子をついに'),
   c('x03', 'SSR', 'weapon', '千行の削除', '機能はそのまま、コードは半分'),
   c('x04', 'SSR', 'armor', '障害ゼロの一年', 'ずっと平和だった'),
+  c('x05', 'SSR', 'armor', '一度も落ちない夜間ビルド', '毎朝ずっと緑'),
+  c('x06', 'SSR', 'charm', '誰でも読める設計図', '新しい人が初日から動ける'),
 ]
 
 export const RARITIES: readonly GachaRarity[] = ['SSR', 'SR', 'R', 'N']
@@ -114,6 +135,27 @@ export function fromSaved(raw: unknown): GachaSave {
   }
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** raw のうち known に無い欄 (この版が知らない、新しい版が書いた物)。物でなければ空 */
+export function unknownOf(raw: unknown, known: Iterable<string>): Record<string, unknown> {
+  if (!isObj(raw)) return {}
+  const k = new Set(known)
+  return Object.fromEntries(Object.entries(raw).filter(([key]) => !k.has(key)))
+}
+
+/**
+ * store に書く形。書く直前に読んだ raw のうち、この版の知らない欄 (新しい版の欄・知らないカードの所持・所持の欄) を残して mine を重ねる。
+ * 古い版のまま動いているセッションが、新しい版で増えたカードの記録を消さないように
+ */
+export function withUnknown(raw: unknown, mine: GachaSave): Record<string, unknown> {
+  const o = isObj(raw) ? raw : {}
+  const was = isObj(o.book) ? o.book : {}
+  const book = unknownOf(was, BY_ID.keys())
+  for (const [id, v] of Object.entries(mine.book)) book[id] = { ...unknownOf(was[id], ['count', 'firstAt']), ...v }
+  return { ...unknownOf(o, Object.keys(EMPTY)), ...mine, book }
+}
+
 /** 1 枚引いた後の保存の形 */
 export function addDraw(s: GachaSave, card: Card, now: number, flags: { isClean: boolean; isManual: boolean }): GachaSave {
   const had = s.book[card.id]
@@ -142,18 +184,50 @@ export const ownedKinds = (s: GachaSave) => CARDS.filter(x => s.book[x.id]).leng
 /** 他の mod に見せるカードの表 (一言は除く)。state の cards に置く */
 export const PUBLIC_CARDS: GachaCard[] = CARDS.map(({ id, rarity, slot, name }) => ({ id, rarity, slot, name }))
 
+// ── daily-quest のごほうび
+
+/** 受け取ったお題 (`${date}:${id}`) を覚えておく数 */
+export const KEEP_CLAIMED = 60
+/** 1 つのお題で引ける回数の上限 (外から来る数は信用しない) */
+const MAX_PULLS = 5
+
+/**
+ * daily-quest の state の today から、こなしたお題のうちまだ受け取っていない物。
+ * daily-quest が無い・形が違う時は空。題名は制御文字を落として短くする
+ */
+export function questRewards(today: unknown, claimed: readonly string[]): { key: string; title: string; pulls: number }[] {
+  if (typeof today !== 'object' || today === null) return []
+  const { date, quests } = today as { date?: unknown; quests?: unknown }
+  if (typeof date !== 'string' || !Array.isArray(quests)) return []
+  return quests.flatMap(q => {
+    if (typeof q !== 'object' || q === null) return []
+    const { id, title, done, reward } = q as Record<string, unknown>
+    const pulls = (reward as { pulls?: unknown } | undefined)?.pulls
+    if (done !== true || typeof id !== 'string' || typeof pulls !== 'number' || !Number.isFinite(pulls)) return []
+    const key = clean(`${date}:${id}`).slice(0, 80)
+    if (claimed.includes(key)) return []
+    return [{ key, title: short(clean(String(title ?? '')), 30), pulls: Math.max(0, Math.min(MAX_PULLS, Math.floor(pulls))) }]
+  })
+}
+
+/** store の questClaimed を読む (壊れていれば空) */
+export const claimedFrom = (raw: unknown): string[] => (Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string').slice(-KEEP_CLAIMED) : [])
+
 // ── 図鑑の実績 (図鑑から毎回数えるので、保存はしない)
 
 export type BookGoal = { id: string; name: string; hint: string; test: (s: GachaSave) => boolean }
 const hasAll = (s: GachaSave, r: GachaRarity) => CARDS.every(x => x.rarity !== r || s.book[x.id])
+const kindsOf = (r: GachaRarity) => CARDS.filter(x => x.rarity === r).length
+/** 図鑑の半分 (カードを足しても実績の数が表と合うように、表から数える) */
+export const HALF = Math.ceil(CARDS.length / 2)
 
 export const BOOK_GOALS: readonly BookGoal[] = [
   { id: 'first', name: 'はじめの一枚', hint: '1 枚引く', test: s => ownedKinds(s) >= 1 },
   { id: 'ssr-first', name: '虹色の出会い', hint: 'SSR を 1 枚引く', test: s => CARDS.some(x => x.rarity === 'SSR' && s.book[x.id]) },
-  { id: 'n-all', name: 'N コンプ', hint: 'N を 16 種そろえる', test: s => hasAll(s, 'N') },
-  { id: 'half', name: '図鑑の半分', hint: '20 種そろえる', test: s => ownedKinds(s) >= 20 },
-  { id: 'sr-all', name: 'SR コンプ', hint: 'SR を 8 種そろえる', test: s => hasAll(s, 'SR') },
-  { id: 'all', name: '全 40 種', hint: '全部そろえる', test: s => ownedKinds(s) >= CARDS.length },
+  { id: 'n-all', name: 'N コンプ', hint: `N を ${kindsOf('N')} 種そろえる`, test: s => hasAll(s, 'N') },
+  { id: 'half', name: '図鑑の半分', hint: `${HALF} 種そろえる`, test: s => ownedKinds(s) >= HALF },
+  { id: 'sr-all', name: 'SR コンプ', hint: `SR を ${kindsOf('SR')} 種そろえる`, test: s => hasAll(s, 'SR') },
+  { id: 'all', name: `全 ${CARDS.length} 種`, hint: '全部そろえる', test: s => ownedKinds(s) >= CARDS.length },
 ]
 
 export const goalsMet = (s: GachaSave) => BOOK_GOALS.filter(g => g.test(s))

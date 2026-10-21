@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { InboxItem } from '../types'
-import { asItems, asReadAt, countByMod, inboxSvg, merge, modLabel, toItem, unreadCount, when } from './inbox'
+import { asItems, asReadAt, commandsByMod, countByMod, inboxSvg, merge, modLabel, toItem, unreadCount, when } from './inbox'
 import { followTheme, readTheme } from './style'
 
 type $ = EngineInterface
@@ -18,6 +18,8 @@ const ITEMS = atom({ plugin: 'toast-inbox', key: 'items' } as const, [] as Inbox
 const READ_AT = atom({ plugin: 'toast-inbox', key: 'readAt' } as const, 0)
 const FILTER = atom({ plugin: 'toast-inbox', key: 'filter' } as const, '')
 const CONFIRM = atom({ plugin: 'toast-inbox', key: 'confirmClear' } as const, false)
+const COMMANDS = atom({ plugin: 'toast-inbox', key: 'commands' } as const, {} as Record<string, string>)
+const NOTICE = atom({ plugin: 'toast-inbox', key: 'notice' } as const, '')
 
 // /inbox を自分で取れたか (取れなければ /toast-inbox にして、/inbox は横取りしない)
 let ownsMain = false
@@ -86,7 +88,25 @@ async function pressClear($: $) {
   })
 }
 
+// どの mod がどのコマンドか。起動直後はまだ登録していない mod があるので、ペインを開くたびに引き直す
+async function loadCommands($: $) {
+  const map = commandsByMod(await $.command.list())
+  await update($, COMMANDS, () => map)
+}
+
+// 行を押した時。送るだけで、開くのはセッションが空いた時(mod-hub と同じ)
+async function openMod($: $, command: string) {
+  await update($, NOTICE, () => `/${command} を送りました(セッションが空いたら開きます)`)
+  try {
+    await $.command.run({ command })
+  } catch {
+    await update($, NOTICE, () => `/${command} を送れませんでした`)
+  }
+}
+
 const openPane = async ($: $) => {
+  await update($, NOTICE, () => '')
+  await loadCommands($).catch(() => {})
   await $.ui.open({ id: PANE, title: TITLE })
   return { text: '通知の受け箱を開きました。' }
 }
@@ -104,6 +124,7 @@ export const register: Register = on => {
     if (items) await update($, ITEMS, () => items)
     const readAt = asReadAt(await $.store.get('readAt').catch(() => undefined))
     if (readAt !== undefined) await update($, READ_AT, () => readAt)
+    await loadCommands($).catch(() => {})
     return started
   })
 
@@ -143,6 +164,8 @@ export const register: Register = on => {
     const readAt = await read($, READ_AT)
     const filter = await read($, FILTER)
     const confirm = await read($, CONFIRM)
+    const commands = await read($, COMMANDS)
+    const notice = await read($, NOTICE)
     const unread = unreadCount(items, readAt)
     const mods = countByMod(items)
     const isKnown = filter === '' || mods.some(m => m.name === filter)
@@ -180,13 +203,26 @@ export const register: Register = on => {
           </Box>
         )}
         {items.length === 0 && <Text dimColor>まだ通知はありません。ほかの mod がトーストやステータス行を出すと、ここに残ります</Text>}
+        {notice !== '' && (
+          <Text key="notice" dimColor>
+            {notice}
+          </Text>
+        )}
         {shown.map(({ item, index }) => {
           const isUnread = item.at > readAt
+          const lead = `${isUnread ? '未読 ' : ''}${when(item.at, now)} ${modLabel(item.plugin)}`
+          const tail = item.kind === 'status' ? ' (ステータス)' : ''
+          // 出した mod のコマンドが分かる行だけ押せる。本体と、今は入っていない mod の行は文字のまま
+          const command = Object.hasOwn(commands, item.plugin) ? commands[item.plugin] : undefined
           return (
             <Box key={`item:${index}:${item.at}`} flexDirection="column">
-              <Text key={`head:${index}`} color={isUnread ? 'warning' : undefined} dimColor={!isUnread}>
-                {`${isUnread ? '未読 ' : ''}${when(item.at, now)} ${modLabel(item.plugin)}${item.kind === 'status' ? ' (ステータス)' : ''}`}
-              </Text>
+              {command === undefined ? (
+                <Text key={`head:${index}`} color={isUnread ? 'warning' : undefined} dimColor={!isUnread}>
+                  {`${lead}${tail}`}
+                </Text>
+              ) : (
+                <Button key={`open:${index}`} label={`${lead} を開く${tail}`} onPress={() => openMod($, command)} />
+              )}
               <Text>{item.text}</Text>
             </Box>
           )

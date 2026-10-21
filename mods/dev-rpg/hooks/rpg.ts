@@ -132,6 +132,35 @@ export const gearEffect = (slot: RpgSlot, rarity: Rarity) => {
 
 const sameEquip = (a: RpgEquip, b: RpgEquip) => SLOTS.every(k => a[k]?.id === b[k]?.id)
 
+// ---------------------------------------------------------------- daily-quest のごほうび
+
+/** 受け取ったお題 (`${date}:${id}`) を覚えておく数 */
+export const KEEP_CLAIMED = 60
+/** 1 つのお題でもらえる経験値の上限 (外から来る数は信用しない) */
+const MAX_QUEST_XP = 500
+
+/**
+ * daily-quest の state の today から、こなしたお題のうちまだ受け取っていない物。
+ * daily-quest が無い・形が違う時は空。題名は制御文字を落として短くする
+ */
+export function questRewards(today: unknown, claimed: readonly string[]): { key: string; title: string; exp: number }[] {
+  if (typeof today !== 'object' || today === null) return []
+  const { date, quests } = today as { date?: unknown; quests?: unknown }
+  if (typeof date !== 'string' || !Array.isArray(quests)) return []
+  return quests.flatMap(q => {
+    if (typeof q !== 'object' || q === null) return []
+    const { id, title, done, reward } = q as Record<string, unknown>
+    const exp = (reward as { exp?: unknown } | undefined)?.exp
+    if (done !== true || typeof id !== 'string' || typeof exp !== 'number' || !Number.isFinite(exp)) return []
+    const key = clean(`${date}:${id}`).slice(0, 80)
+    if (claimed.includes(key)) return []
+    return [{ key, title: short(clean(String(title ?? '')), 30), exp: Math.max(0, Math.min(MAX_QUEST_XP, Math.floor(exp))) }]
+  })
+}
+
+/** store の questClaimed を読む (壊れていれば空) */
+export const claimedFrom = (raw: unknown): string[] => (Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string').slice(-KEEP_CLAIMED) : [])
+
 // ---------------------------------------------------------------- 成長 (SP で能力とスキル)
 
 export const STATS: readonly RpgStat[] = ['str', 'vit', 'int', 'agi']
@@ -388,6 +417,41 @@ export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): Rpg
   out.day = day
   out.dayTurns = Math.max(0, (store.day === day ? store.dayTurns : 0) + mineToday)
   return out
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** raw のうち known に無い欄 (この版が知らない、新しい版が書いた物)。物でなければ空 */
+export function unknownOf(raw: unknown, known: Iterable<string>): Record<string, unknown> {
+  if (!isObj(raw)) return {}
+  const k = new Set(known)
+  return Object.fromEntries(Object.entries(raw).filter(([key]) => !k.has(key)))
+}
+
+const CARD_KEYS = ['id', 'rarity', 'slot', 'name']
+
+/**
+ * store に書く形。書く直前に読んだ raw のうち、この版の知らない欄 (新しい版の欄・知らない実績やスキルやボス・枠・カードの欄) を残して mine を重ねる。
+ * 古い版のまま動いているセッションが、新しい版の記録を消さないように
+ */
+export function withUnknown(raw: unknown, mine: RpgSaved): Record<string, unknown> {
+  const o = isObj(raw) ? raw : {}
+  const eq = isObj(o.equip) ? o.equip : {}
+  const equip = unknownOf(eq, SLOTS)
+  for (const k of SLOTS) {
+    const c = mine.equip[k]
+    const was = eq[k]
+    if (c) equip[k] = { ...(isObj(was) && was.id === c.id ? unknownOf(was, CARD_KEYS) : {}), ...c }
+  }
+  return {
+    ...unknownOf(o, Object.keys(INITIAL_SAVED)),
+    ...mine,
+    achievements: { ...unknownOf(o.achievements, ACHIEVEMENTS.map(a => a.id)), ...mine.achievements },
+    learned: { ...unknownOf(o.learned, SKILLS.map(s => s.id)), ...mine.learned },
+    defeated: { ...unknownOf(o.defeated, BOSS_IDS), ...mine.defeated },
+    alloc: { ...unknownOf(o.alloc, STATS), ...mine.alloc },
+    equip,
+  }
 }
 
 /**

@@ -7,7 +7,7 @@ import { newGame, play } from './game2048'
 import { applyLights, look as lookLights, newLights, SIDE as LIGHTS_SIDE } from './lights'
 import { applyMemory, look as lookMemory, newMemory } from './memory'
 import { COLS, look, newMines, reveal, ROWS, toggleFlag } from './mines'
-import { addStats, EMPTY_STATS, statsFromSaved } from './stats'
+import { addStats, EMPTY_STATS, keepUnknown, statsFromSaved } from './stats'
 import type { StatsDelta } from './stats'
 import { applySudoku, boxOf, look as lookSudoku, newSudoku, selectCell } from './sudoku'
 import {
@@ -68,17 +68,18 @@ let ownsMain = false
 let chain: Promise<unknown> = Promise.resolve()
 const serial = (f: () => Promise<unknown>) => (chain = chain.then(f, f))
 
-/** store の記録。キーが無ければ空、読めない時 (例外・形が違う) は undefined */
-async function readStore($: $): Promise<GameStats | undefined> {
+/** store の記録と生の値。キーが無ければ空、読めない時 (例外・形が違う) は stats が undefined */
+async function readStore($: $): Promise<{ stats: GameStats | undefined; raw: unknown }> {
   try {
-    return statsFromSaved(await $.store.get(STORE_KEY))
+    const raw = await $.store.get(STORE_KEY)
+    return { stats: statsFromSaved(raw), raw }
   } catch {
-    return undefined
+    return { stats: undefined, raw: undefined }
   }
 }
 
 async function load($: $) {
-  const saved = await readStore($)
+  const saved = (await readStore($)).stats
   if (saved) await update($, STATS, () => saved)
   else await update($, NOTE, () => BROKEN)
 }
@@ -86,13 +87,14 @@ async function load($: $) {
 /** 増えた分だけを、書く直前に読み直した store に足して書く (別のセッションの分を消さない) */
 const record = ($: $, d: StatsDelta) =>
   serial(async () => {
-    const saved = await readStore($)
+    const { stats: saved, raw } = await readStore($)
     if (!saved) {
       await update($, NOTE, () => BROKEN)
       return
     }
     const next = addStats(saved, d)
-    const isSaved = await $.store.set(STORE_KEY, next).then(
+    // 知らない欄 (新しい版が足した物) は読み直した生の値から残す
+    const isSaved = await $.store.set(STORE_KEY, keepUnknown(raw, next)).then(
       () => true,
       () => false,
     )

@@ -276,6 +276,19 @@ test('別のセッションが増やした今日の本数を、古い写しで�
   expect(await todayAlt(vs)).toBe('今日の完了 6 本')
 })
 
+test('知らない欄 (新しい版が書いた物) は、集中を 1 本終えた後も store に読んだまま残る', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const saved = storeSpy(on)
+  saved.done = { [todayKey()]: 1, futureField: 1, futureGoal: { minutes: 50 } }
+  bottom(on)
+  await start($)
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  // 書いたこと (今日が 1 本増えた) と、知らない欄が残ったこと
+  expect(saved.done).toEqual({ [todayKey()]: 2, futureField: 1, futureGoal: { minutes: 50 } })
+})
+
 test('store の本数が数でなければ 0 として数える', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   const saved = storeSpy(on)

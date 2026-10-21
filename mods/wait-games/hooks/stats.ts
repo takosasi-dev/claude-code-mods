@@ -24,6 +24,17 @@ export function statsFromSaved(raw: unknown): GameStats | undefined {
   return Object.keys(puzzles).length > 0 ? { ...out, puzzles } : out
 }
 
+/**
+ * 書く値に、読み直した生の値のうち自分の知らない欄を残す (入れ子の物の中も)。
+ * 新しい版のセッションが足した欄を、古い版のまま動いているセッションが消さないように
+ */
+export function keepUnknown<T>(raw: unknown, mine: T): T {
+  if (!isObj(raw) || !isObj(mine)) return mine
+  const out: Record<string, unknown> = { ...raw }
+  for (const [k, v] of Object.entries(mine)) out[k] = keepUnknown(raw[k], v)
+  return out as T
+}
+
 /** 押して解くゲームを 1 回解いた */
 export type PuzzleWin = { kind: RecordKind; moves: number; ms: number }
 

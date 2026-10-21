@@ -17,8 +17,10 @@ export type AquaView = {
   days: number
 }
 
-/** 魚の種類。並びは珍しさの順 (後ろほど珍しい) */
-export type FishKind = 'maru' | 'shima' | 'mizutama' | 'hirenaga' | 'ougi' | 'akari'
+/** この版の知っている魚の種類。並びは珍しさの順 (後ろほど珍しい) */
+export type KnownFishKind = 'maru' | 'shima' | 'mizutama' | 'hirenaga' | 'ougi' | 'akari' | 'hoshi' | 'tsuno' | 'niji' | 'ryugu'
+/** 魚の種類。新しい版が足した種類 (この版の知らない文字列) も消さずに持ち回る */
+export type FishKind = KnownFishKind | (string & {})
 /** 育ちの段階 */
 export type FishStage = '稚魚' | '若魚' | '成魚' | '大物'
 

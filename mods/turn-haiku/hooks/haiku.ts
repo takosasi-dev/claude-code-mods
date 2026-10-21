@@ -43,13 +43,40 @@ const SYSTEM =
   'Claude Code の 1 ターンでした作業を、日本語の俳句にします。' +
   '五七五の一句を 1 行だけ書く。季語を 1 つ入れる。絵文字は使わない。説明・前置き・題・かぎかっこは書かない。'
 
+export type Season = '春' | '夏' | '秋' | '冬'
+
+/** 月 (1〜12) の季節。3〜5 月が春、6〜8 月が夏、9〜11 月が秋、ほかは冬 */
+export const seasonOf = (month: number): Season =>
+  month >= 3 && month <= 5 ? '春' : month >= 6 && month <= 8 ? '夏' : month >= 9 && month <= 11 ? '秋' : '冬'
+
+/** JST の月 (1〜12)。動いている環境のタイムゾーンに頼らない */
+export const jstMonth = (ms: number) => new Date(ms + 9 * 3600_000).getUTCMonth() + 1
+
+/** 季節ごとの季語。ターンごとに 3 つを候補として渡す */
+export const KIGO: Record<Season, readonly string[]> = {
+  春: ['春風', '花冷え', '菜の花', '朧月', '蛙', '燕', '春雨', '雪解け', '若草', '蝶', '春の宵', '桜', '山笑う', '長閑', '春一番', '花曇り', '陽炎', 'つくし'],
+  夏: ['夕立', '蝉', '風鈴', '青葉', '夏の月', '蛍', '入道雲', '炎天', '打ち水', '麦茶', '短夜', '花火', '西日', '青田', '涼し', '夏草', '扇風機', '向日葵'],
+  秋: ['秋の夜', '名月', '虫の声', '稲穂', '紅葉', '秋風', '夜長', '鰯雲', '柿', '秋晴れ', '赤とんぼ', '野分', '夜寒', '新米', '爽やか', '秋の暮', '銀杏', '月見'],
+  冬: ['木枯らし', '初霜', '雪', '小春日和', '冬の月', '炬燵', '落ち葉', '冬木立', '息白し', '寒椿', '時雨', '年の暮', '冬籠', '枯野', '冬晴れ', '湯たんぽ', '初雪', '大根'],
+}
+
+/** そのターンの季語の候補 3 つ (ターンの id から決まる。詠み直しても同じ) */
+export function kigoFor(turnId: string, month: number): string[] {
+  const list = [...KIGO[seasonOf(month)]]
+  const r = rng(seedOf(turnId))
+  const out: string[] = []
+  while (out.length < 3 && list.length > 0) out.push(list.splice(Math.floor(r() * list.length), 1)[0]!)
+  return out
+}
+
 /** model.complete に渡す system と prompt */
 export function askFor(t: HaikuTurn, month: number) {
   const tools = t.tools.length ? t.tools.map(([name, n]) => `${name} ${n} 回`).join('、') : 'なし'
   const files = t.files.length ? t.files.join('、') : 'なし'
   const secs = Math.round(t.durationMs / 1000)
   const prompt = [
-    `今は ${month} 月。`,
+    `今は ${month} 月 (${seasonOf(month)})。`,
+    `季語はこの中から 1 つ選んでください: ${kigoFor(t.turnId, month).join('、')}`,
     'このターンの作業:',
     `- 使ったツール: ${tools}`,
     `- 触ったファイル: ${files}`,
@@ -101,7 +128,8 @@ export function poemsOf(raw: unknown): HaikuPoem[] {
     if (typeof o.id !== 'string' || typeof o.text !== 'string' || typeof o.at !== 'number' || !Number.isFinite(o.at)) continue
     const text = [...clean(o.text)].slice(0, MAX_CHARS).join('')
     if (text.trim() === '') continue
-    out.push({ id: clean(o.id).slice(0, 200), at: o.at, text })
+    // 知らない欄 (新しい版が足した欄) は残す
+    out.push({ ...o, id: clean(o.id).slice(0, 200), at: o.at, text })
   }
   return out
 }

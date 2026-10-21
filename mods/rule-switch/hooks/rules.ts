@@ -56,6 +56,15 @@ export function fromSaved(raw: unknown): RuleSwitchSave | undefined {
   return { on, custom: custom.slice(0, MAX_CUSTOM) }
 }
 
+/**
+ * store に書く形。書く直前に読んだ raw のうち、この版の知らない欄 (新しい版が足した物) を残して mine を重ねる。
+ * 古い版のまま動いているセッションが、新しい版の記録を消さないように
+ */
+export function withUnknown(raw: unknown, mine: RuleSwitchSave): Record<string, unknown> {
+  const known = Object.keys(EMPTY)
+  return { ...(isPlain(raw) ? Object.fromEntries(Object.entries(raw).filter(([k]) => !known.includes(k))) : {}), ...mine }
+}
+
 /** 画面に並べる順: 決まったルール、自分のルール */
 export const rulesOf = (save: RuleSwitchSave): Rule[] => [
   ...BUILTIN.map(b => ({ ...b, isOn: save.on[b.id] === true, isCustom: false })),

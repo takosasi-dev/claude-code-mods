@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { addDraw, BOOK_GOALS, bookLines, bookSvg, CARDS, cardOf, cardSvg, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, rates, statsSvg, wrap } from '../hooks/gacha'
+import { addDraw, BOOK_GOALS, bookLines, bookSvg, CARDS, cardOf, cardSvg, claimedFrom, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, questRewards, rates, statsSvg, wrap } from '../hooks/gacha'
 import { setTheme } from '../hooks/style'
 import type { GachaCard, GachaSave } from '../types'
 
@@ -24,9 +24,13 @@ const PANE = {
 } as const
 
 /** エンジンの代わりに一番下で答える。store は手元の Map、トーストは集める */
-const boot = async ($: Engine, on: On, init?: unknown) => {
+const boot = async ($: Engine, on: On, init?: unknown, opts: { quest?: () => unknown; claimed?: string[] } = {}) => {
   const clock = mock.clock(on, { now: NOW })
+  // daily-quest の state の代わり (無ければ daily-quest が入っていない)
+  const quest = opts.quest
+  if (quest) on('state.get', { plugin: 'daily-quest', key: 'today' }, () => ({ value: { value: quest() as never, version: 1 } }))
   const m = new Map<string, unknown>(init === undefined ? [] : [['save', init]])
+  if (opts.claimed) m.set('questClaimed', opts.claimed)
   on('store.get', (_$, e) => ({ value: m.get(e.key) }))
   on('store.set', (_$, e) => {
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
@@ -46,7 +50,7 @@ const boot = async ($: Engine, on: On, init?: unknown) => {
     return command === 'fail' ? { isError: true as const, result: 'x', text: 'x' } : { result: 'ok' as never }
   })
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
-  return { clock, toasts, saved: () => fromSaved(m.get('save')), raw: () => m.get('save') }
+  return { clock, toasts, saved: () => fromSaved(m.get('save')), raw: () => m.get('save'), claimed: () => m.get('questClaimed') }
 }
 
 let n = 0
@@ -64,20 +68,20 @@ const highCount = (s: GachaSave) =>
   Object.entries(s.book).reduce((k, [id, v]) => k + (['SR', 'SSR'].includes(cardOf(id)?.rarity ?? '') ? v.count : 0), 0)
 
 test('カードの表・確率・抽選の境目', () => {
-  expect(CARDS).toHaveLength(40)
+  expect(CARDS).toHaveLength(60)
   const count = (r: string) => CARDS.filter(c => c.rarity === r).length
-  expect([count('N'), count('R'), count('SR'), count('SSR')]).toEqual([16, 12, 8, 4])
-  expect(new Set(CARDS.map(c => c.id)).size).toBe(40)
-  expect(new Set(CARDS.map(c => c.name)).size).toBe(40)
+  expect([count('N'), count('R'), count('SR'), count('SSR')]).toEqual([24, 18, 12, 6])
+  expect(new Set(CARDS.map(c => c.id)).size).toBe(60)
+  expect(new Set(CARDS.map(c => c.name)).size).toBe(60)
   for (const isClean of [false, true]) expect(Object.values(rates(isClean)).reduce((a, b) => a + b, 0)).toBe(100)
 
   const r = (x: number, isClean = false) => pull(x, 0, isClean).rarity
   expect([r(0), r(0.0199), r(0.02), r(0.1199), r(0.12), r(0.3999), r(0.4), r(0.9999)]).toEqual(['SSR', 'SSR', 'SR', 'SR', 'R', 'R', 'N', 'N'])
   // ノーミスなら SSR 3% / SR 13%
   expect([r(0.029, true), r(0.03, true), r(0.159, true), r(0.16, true), r(0.44, true)]).toEqual(['SSR', 'SR', 'SR', 'R', 'N'])
-  expect(pull(0.5, 0.9999, false).id).toBe('n16')
+  expect(pull(0.5, 0.9999, false).id).toBe('n24')
   expect(pull(0.5, 0, false).id).toBe('n01')
-  expect(pull(0, 0.5, false).id).toBe('x03')
+  expect(pull(0, 0.5, false).id).toBe('x04')
 
   // 引いた後の形・手動の日またぎ
   const card = CARDS[0]!
@@ -122,14 +126,15 @@ test('カードの絵: レア度で枠と光が変わり、めくれる', () => 
   expect(cardSvg(undefined)).toMatch(/まだ引いていません/)
   for (const svg of [ssr, sr, nn, statsSvg(EMPTY, 3), bookSvg(EMPTY)]) expect(svg).not.toMatch(/<svg[^>]*\swidth=/)
 
-  const s = addDraw(EMPTY, CARDS[39]!, NOW, { isClean: false, isManual: false })
+  const s = addDraw(EMPTY, cardOf('x04')!, NOW, { isClean: false, isManual: false })
   const book = bookSvg(s)
   expect(book).toMatch(/障害ゼロの一年/)
-  expect(book.match(/？？？/g)).toHaveLength(39)
+  expect(book.match(/？？？/g)).toHaveLength(59)
+  expect(book.length).toBeLessThan(131_072)
   const stats = statsSvg(s, 3)
-  expect(stats).toMatch(/>3%</)
-  expect(stats).toMatch(/1 \/ 40 種/)
-  expect(stats).toMatch(/1\/4種/)
+  expect(stats).toMatch(/>2%</)
+  expect(stats).toMatch(/1 \/ 60 種/)
+  expect(stats).toMatch(/1\/6種/)
 })
 
 for (const surface of SURFACES) {
@@ -162,7 +167,7 @@ for (const surface of SURFACES) {
       expect(svgs).toHaveLength(2)
       expect(String(svgs[0]?.props.source)).toContain(latest.name.slice(0, 4))
       expect(String(svgs[1]?.props.source)).toMatch(/累計 30 回/)
-      expect(String(svgs[1]?.props.alt)).toMatch(/^図鑑 \d+ \/ 40 種/)
+      expect(String(svgs[1]?.props.alt)).toMatch(/^図鑑 \d+ \/ 60 種/)
     } else {
       expect(await ui.find({ type: 'Svg' })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: `【${latest.rarity}】${latest.name}` })).toBeDefined()
@@ -222,7 +227,7 @@ test('store の図鑑はセッションをまたいで読まれる', async ($, o
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: '【SSR】一発で通ったテスト' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^累計 5 回/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^SSR 1\/4種 2枚/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^SSR 1\/6種 2枚/ })).toBeDefined()
 })
 
 test('/gacha を登録して開く。取れなければ /turn-gacha', async ($, on) => {
@@ -317,7 +322,7 @@ test('他の mod が読めるよう、セッションの始まりに state の c
     return r
   })
   await boot($, on, { book: { x01: { count: 2, firstAt: NOW } }, total: 2, manualDay: '', manualUsed: 0, history: [] })
-  expect(written.cards as GachaCard[]).toHaveLength(40)
+  expect(written.cards as GachaCard[]).toHaveLength(60)
   expect((written.cards as GachaCard[]).find(c => c.id === 'x01')).toEqual({ id: 'x01', rarity: 'SSR', slot: 'weapon', name: '一発で通ったテスト' })
   expect((written.save as GachaSave).book).toEqual({ x01: { count: 2, firstAt: NOW } })
   await turn($)
@@ -330,8 +335,9 @@ test('図鑑の実績: 集まり具合で数え、図鑑の画面に出す。初
   let s = EMPTY
   for (const c of CARDS.filter(x => x.rarity === 'N')) s = addDraw(s, c, NOW, { isClean: false, isManual: false })
   expect(goalsMet(s).map(g => g.id)).toEqual(['first', 'n-all'])
-  s = addDraw(s, CARDS[39]!, NOW, { isClean: false, isManual: false })
-  for (const c of CARDS.filter(x => x.rarity === 'R').slice(0, 3)) s = addDraw(s, c, NOW, { isClean: false, isManual: false })
+  s = addDraw(s, cardOf('x04')!, NOW, { isClean: false, isManual: false })
+  // 図鑑の半分は 60 種の半分の 30 種: N 24 + SSR 1 + R 5
+  for (const c of CARDS.filter(x => x.rarity === 'R').slice(0, 5)) s = addDraw(s, c, NOW, { isClean: false, isManual: false })
   expect(goalsMet(s).map(g => g.id)).toEqual(['first', 'ssr-first', 'n-all', 'half'])
   let full = EMPTY
   for (const c of CARDS) full = addDraw(full, c, NOW, { isClean: false, isManual: false })
@@ -339,7 +345,11 @@ test('図鑑の実績: 集まり具合で数え、図鑑の画面に出す。初
   const book = bookSvg(s)
   expect(book).toContain('種、実績 4 / 6')
   expect(book).toContain('N コンプ')
-  expect(book).toContain('SR を 8 種そろえる')
+  expect(book).toContain('SR を 12 種そろえる')
+  // 実績の数はカードの表から数える
+  expect(bookSvg(EMPTY)).toContain('30 種そろえる')
+  expect(bookSvg(EMPTY)).toContain('N を 24 種そろえる')
+  expect(book).toContain('全 60 種')
   expect(bookLines(s)[0]).toEqual({ text: '実績 はじめの一枚 達成', color: 'yellow' })
 
   await boot($, on)
@@ -364,4 +374,72 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(await source()).toMatch(/fill="#0d1117"/)
   setTheme(false)
+})
+
+// ---------------------------------------------------------------- daily-quest のごほうび
+
+const quest = (id: string, done: boolean, pulls: number, title = `お題 ${id}`) => ({ id, title, goal: 5, progress: done ? 5 : 1, done, reward: { exp: 30, pulls } })
+
+test('お題のごほうび: 形の違う物と受け取り済みは捨て、題名の制御文字は落とす', () => {
+  expect(questRewards(undefined, [])).toEqual([])
+  expect(questRewards({ date: 1, quests: [] }, [])).toEqual([])
+  const today = {
+    date: '2026-10-20',
+    quests: [quest('a', true, 2, `ab${String.fromCharCode(7)}c`), quest('b', false, 1), quest('c', true, 99), { id: 'd', done: true, reward: {} }, null],
+  }
+  expect(questRewards(today, [])).toEqual([
+    { key: '2026-10-20:a', title: 'abc', pulls: 2 },
+    { key: '2026-10-20:c', title: 'お題 c', pulls: 5 },
+  ])
+  expect(questRewards(today, ['2026-10-20:a']).map(r => r.key)).toEqual(['2026-10-20:c'])
+  expect(claimedFrom(['x', 3, 'y'])).toEqual(['x', 'y'])
+  expect(claimedFrom('broken')).toEqual([])
+})
+
+test('こなしたお題のごほうびを 1 回だけ受け取り、その回数だけ引いて一言で知らせる', async ($, on) => {
+  let today = { date: '2026-10-20', quests: [quest('turns-5', true, 2, 'ターンを 5 回終える'), quest('edits-5', false, 1)] }
+  const { saved, claimed } = await boot($, on, undefined, { quest: () => today })
+  // セッションの始まりで、もうこなしていた分を受け取る
+  expect(saved().total).toBe(2)
+  expect(claimed()).toEqual(['2026-10-20:turns-5'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await turn($)
+  // ターンの 1 枚だけ。同じお題では 2 度引かない
+  expect(saved().total).toBe(3)
+  today = { ...today, quests: [today.quests[0]!, { ...today.quests[1]!, done: true, progress: 5 }] }
+  await turn($)
+  expect(saved().total).toBe(5)
+  expect(claimed()).toEqual(['2026-10-20:turns-5', '2026-10-20:edits-5'])
+  expect(await ui.find({ type: 'Text', text: /^お題「お題 edits-5」のごほうびで 1 回引いた/ })).toBeDefined()
+  // 手動の回数は減らない
+  expect(manualLeft(saved(), NOW)).toBe(3)
+})
+
+test('別のセッションが受け取ったお題は受け取らない', async ($, on) => {
+  const today = { date: '2026-10-20', quests: [quest('turns-5', true, 2)] }
+  const { saved, claimed } = await boot($, on, undefined, { quest: () => today, claimed: ['2026-10-20:turns-5'] })
+  await turn($)
+  expect(saved().total).toBe(1)
+  expect(claimed()).toEqual(['2026-10-20:turns-5'])
+})
+
+test('daily-quest が入っていなくても落ちず、ターンの 1 枚だけ引く', async ($, on) => {
+  const { saved, claimed } = await boot($, on)
+  await turn($)
+  expect(saved().total).toBe(1)
+  expect(claimed()).toBeUndefined()
+})
+
+test('知らない欄 (新しい版が書いた物) は、1 ターン後も store に残る。知らないカードの所持も', async ($, on) => {
+  const init = {
+    ...EMPTY,
+    total: 4,
+    futureField: 1,
+    book: { x01: { count: 1, firstAt: NOW, futureGlow: 1 }, zz99: { count: 3, firstAt: NOW } },
+  }
+  const { saved, raw } = await boot($, on, init)
+  await turn($)
+  // 書いたこと (1 枚引いた) と、知らない欄が残ったこと
+  expect(saved().total).toBe(5)
+  expect(raw() as object).toMatchObject({ futureField: 1, book: { x01: { firstAt: NOW, futureGlow: 1 }, zz99: { count: 3, firstAt: NOW } } })
 })

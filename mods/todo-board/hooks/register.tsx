@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { TodoFilter, TodoItem, TodoSnapshot } from '../types'
-import { KINDS, PATTERN, causePrompt, fixPrompt, headFit, itemId, kindColor, paneLines, paneSvg, parseGrep } from './todo'
+import { KINDS, PATTERN, causePrompt, fixPrompt, headFit, itemId, kindColor, paneLines, paneSvg, parseGrep, tally, walk } from './todo'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'todo-board'
@@ -20,35 +20,44 @@ const HISTORY = atom({ plugin: 'todo-board', key: 'history' } as const, [])
 const FILTER = atom({ plugin: 'todo-board', key: 'filter' } as const, 'ALL')
 const SELECTED = atom({ plugin: 'todo-board', key: 'selected' } as const, '')
 const NOTE = atom({ plugin: 'todo-board', key: 'note' } as const, '')
+const RUNNING = atom({ plugin: 'todo-board', key: 'running' } as const, false)
 
 // ponytail: 読み込みの連番はモジュール変数。リロードをまたいだ読み込みの前後は見ない
 let loads = 0
 let ownsMain = false
 
-// git は読むだけ。書き込む操作は呼ばない
+// git は読むだけ。index を書かない (--no-optional-locks)、fsmonitor も起こさない
 const git = ($: EngineInterface, cwd: string, args: string[]) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', ...args], { cwd, timeoutMs: 15_000 })
+  $.process.run(['git', '--no-optional-locks', '-c', 'core.fsmonitor=false', ...args], { cwd, timeoutMs: 15_000 })
 
 async function load($: EngineInterface) {
   const mine = ++loads
-  const cwd = await $.session.cwd()
+  await update($, RUNNING, () => true)
+  const cwd = await $.session.cwd().catch(() => '')
   let snap: TodoSnapshot
   try {
-    const inside = await git($, cwd, ['rev-parse', '--is-inside-work-tree'])
-    if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') snap = { kind: 'not-repo', cwd }
-    else {
+    if (cwd === '') throw new Error('作業フォルダが分かりません')
+    // git が無い・git の外なら、フォルダを歩く
+    const inside = await git($, cwd, ['rev-parse', '--is-inside-work-tree']).catch(() => undefined)
+    if (inside?.exitCode === 0 && inside.stdout.trim() === 'true') {
       // --untracked: 追跡していない新しいファイルも見る (.gitignore の物は見ない)
       const r = await git($, cwd, ['grep', '-n', '-I', '-z', '--no-color', '--untracked', '-E', PATTERN])
       // 1 は「見つからない」。それより大きいのが失敗
       if (r.exitCode > 1) throw new Error(r.stderr.trim() || 'git grep が失敗しました')
       const at = await $.clock.now()
-      snap = { kind: 'repo', cwd, loadedAt: at, isCut: r.isStdoutTruncated, ...parseGrep(r.exitCode === 0 ? r.stdout : '') }
+      const isCut = r.isStdoutTruncated
+      snap = { kind: 'repo', cwd, via: 'git', cut: isCut ? 'output' : '', loadedAt: at, isCut, ...parseGrep(r.exitCode === 0 ? r.stdout : '') }
+    } else {
+      const w = await walk({ list: p => $.fs.list(p), read: p => $.fs.read(p), now: () => $.clock.now() }, cwd)
+      const at = await $.clock.now()
+      snap = { kind: 'repo', cwd, via: 'walk', scanned: w.scanned, cut: w.cut, loadedAt: at, isCut: w.cut !== '', ...tally(w.rows) }
     }
   } catch (err) {
     snap = { kind: 'error', cwd, message: err instanceof Error ? err.message : String(err) }
   }
   // 後から始めた読み込みがあれば、その結果が新しいので書かない
   if (mine !== loads) return
+  await update($, RUNNING, () => false)
   const prev = await read($, SNAP)
   await update($, SNAP, () => snap)
   // 推移は同じフォルダの中だけ。フォルダが変わったら消す
@@ -81,6 +90,9 @@ async function schedule($: EngineInterface) {
     void (async () => {
       isPending = false
       if (!(await isOpen($))) return
+      // ponytail: フォルダを歩く読み方は 1 回に数秒かかるので、ツールの後には読み直さない (「再読込」で読む)
+      const snap = await read($, SNAP)
+      if (snap.kind === 'repo' && snap.via === 'walk') return
       lastAuto = await $.clock.now()
       await load($)
     })().catch(() => {})
@@ -93,8 +105,9 @@ const reload = async ($: EngineInterface) => {
 }
 
 const openPane = async ($: EngineInterface) => {
-  await reload($)
   await $.ui.open({ id: PANE, title: TITLE })
+  // 読むのは裏で。フォルダを歩くのに数秒かかっても、コマンドの返事は待たせない
+  void reload($).catch(() => {})
   return { text: 'TODO のペインを開きました。' }
 }
 
@@ -135,7 +148,9 @@ export const register: Register = on => {
     const filter = await read($, FILTER)
     const selected = await read($, SELECTED)
     const note = await read($, NOTE)
+    const running = await read($, RUNNING)
     const lines = paneLines(snap, history)
+    const setFilter = (v: TodoFilter) => () => void update($, FILTER, () => v)
 
     let list = null
     if (snap.kind === 'repo' && snap.total > 0) {
@@ -143,15 +158,14 @@ export const register: Register = on => {
       const shown = hits.slice(0, SHOW)
       const more = (filter === 'ALL' ? snap.total : snap.counts[filter]) - shown.length
       const open = snap.items.find(it => itemId(it) === selected)
-      const options = [
-        { value: 'ALL', label: `すべて (${snap.total})` },
-        ...KINDS.map(k => ({ value: k, label: `${k} (${snap.counts[k]})` })),
-      ]
       list = (
         <Box key="list" flexDirection="column" gap={1}>
-          {'Select' in t ? (
-            <t.Select key="filter" label="種類" options={options} value={filter} onSelect={v => void update($, FILTER, () => v as TodoFilter)} />
-          ) : null}
+          <Box key="filters" flexDirection="row" flexWrap="wrap" columnGap={1}>
+            <Button key="filter-ALL" label={`全部 ${snap.total}`} variant={filter === 'ALL' ? 'primary' : undefined} onPress={setFilter('ALL')} />
+            {KINDS.map(k => (
+              <Button key={`filter-${k}`} label={`${k} ${snap.counts[k]}`} variant={filter === k ? 'primary' : undefined} onPress={setFilter(k)} />
+            ))}
+          </Box>
           {open ? (
             <Box key="detail" flexDirection="column">
               <Text bold color={kindColor(open.kind)}>{`${open.kind}  ${loc(open)}`}</Text>
@@ -187,7 +201,10 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        <Button key="reload" label="再読込" variant="primary" onPress={() => void reload($)} />
+        <Box key="actions" flexDirection="row" gap={1}>
+          <Button key="reload" label="再読込" variant="primary" onPress={() => void reload($)} />
+          {running && <Text key="running" dimColor>読んでいます…</Text>}
+        </Box>
         {note !== '' && <Text dimColor>{note}</Text>}
         {list}
       </Box>

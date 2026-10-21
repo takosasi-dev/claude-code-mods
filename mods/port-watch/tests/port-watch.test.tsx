@@ -121,6 +121,8 @@ async function start($: Parameters<TestBody>[0], on: On, surface: (typeof SURFAC
   await $.session.start({ cwd, surface: 'vscode', isInteractive: true })
   await clock.advance(1000)
   await $.command.run({ command: 'ports', args: '', origin: { kind: 'composer' }, presentation })
+  // 読むのは裏なので、終わるのを待ってから描く
+  await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface })
   return { clock, ui }
 }
@@ -217,6 +219,32 @@ for (const surface of SURFACES) {
     expect(await ui.find({ type: 'Text', text: /^○ 3000  node\.exe$/ })).toBeDefined()
   })
 }
+
+test('/ports は netstat を待たずに返り、読み終わったら一覧が出る', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const world: World = { netstat: NS_BASE, calls: [] }
+  // netstat を 3 秒かかる形にする (tasklist などはすぐ)
+  on('session.cwd', () => ({ value: WIN_CWD }))
+  on('process.run', async (_$, e) => {
+    world.calls.push([...e.argv])
+    if (e.argv[0] === 'netstat') await clock.sleep(3000)
+    const stdout = e.argv[0] === 'netstat' ? NS_BASE : e.argv[0] === 'tasklist' ? TASKLIST : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.panes', () => ({ value: [] }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  await $.session.start({ cwd: WIN_CWD, surface: 'vscode', isInteractive: true })
+  const ran = await $.command.run({ command: 'ports', args: '', origin: { kind: 'composer' }, presentation })
+  // 待っていたら、時計を進めない限り netstat が終わらず、ここに来ない
+  expect(ran).toMatchObject({ text: 'ポートのペインを開きました。' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '読み込み中…' })).toBeDefined()
+  await clock.advance(3000)
+  expect(await ui.find({ type: 'Text', text: /^○ 3000  node\.exe$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '読み込み中…' })).toBeUndefined()
+})
 
 test('URL を写す', async ($, on) => {
   const world: World = { netstat: NS_BASE, calls: [] }
