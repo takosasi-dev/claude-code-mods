@@ -340,7 +340,7 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - mod-check が版と「読み込みを拒まれた」を出せるのは、mod-check より後に読み込まれた mod だけです。「state まだ」は壊れているという意味ではありません(開いた時にしか値を書かない mod があります)。reply-frame・danger-frame・long-turn-toast はコマンドも state も持たないので「確かめられない」と出ます
 - compact-cue は Claude の返事のたびに使用量を読み、自動 compact が走る位置を 100% として数えます(位置が分からない時はモデルの窓に対する割合)。最初の返事の前は「─」、compact の直後は compact 後の数を出します。区切りはコマンドの形(`git commit`・`npm test`・`pytest` など)と、`memoDir` の下へ書いたかで見分けます
 - ship-guard が見るのは Bash と PowerShell のツールだけです。引用符で囲んだパスから呼ぶ git(`& "C:\...\git.exe" push`)や、スクリプトの中の push は見分けられません。確認として数えるのは、問いか答えが公開の話(push・公開・リリースなど)で、答えが断り(やめる・しない など)でない時だけで、そのターンと次のターンまで効きます。`claude -p` のように聞けない場では止めます
-- ship-guard の公開前のチェックは、どのリモートにもまだ無いコミット(最大 200)を `git log -p` で読みます。読む場所は push の前の `cd` か `git -C` の先です。メールは noreply・example.com などを気にせず、`allowedEmails` に入れた物も気にしません。`C:\Users\<名前>` の `<名前>` が 1 字や見本の名前(user・runner など)なら気にしません
+- ship-guard の公開前のチェックは、どのリモートにもまだ無いコミット(最大 200)を `git log -p` で読みます。読む場所は push の前の `cd` か `git -C` の先です。メールは noreply・example.com などを気にせず、`allowedEmails` に入れた物も気にしません。`<ドライブ>:\Users\<名前>` の `<名前>` が 1 字や見本の名前(user・runner など)なら気にしません
 - rule-watch が見るのは、メインの返事の最後の文(ツールの間に書いた文は見ません)です。英語かどうかは、コード・パス・URL を除いた地の文の字で決めます。メモの見張りは `memoDir` を入れた時だけで、そのフォルダへの Write / Edit と、そのフォルダを指すシェルのコマンドを「書いた」とみなします
 - enc-guard の .ps1 の BOM は、Write なら書く前に、Edit なら書いた後にファイルを読んで確かめます。Out-File と `>` は見ません(この環境の PowerShell では UTF-8 の BOM 付きになるため)
 - release-draft は、Claude が最後に `git commit` した場所(`cd` の先)を読みます。コミットがまだ無ければセッションの場所です。版は、タグの時の中身と今の作業ツリーを比べます(まだコミットしていない版上げも出ます)

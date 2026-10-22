@@ -92,7 +92,7 @@ const isAllowedEmail = (email: string, allowed: string[]) => {
   })
 }
 
-// 見本でよく使う名前 (C:\Users\<名前> の <名前> がこれなら気にしない)
+// 見本でよく使う名前 (<ドライブ>:\Users\<名前> の <名前> がこれなら気にしない)
 const PLACEHOLDER = /^(?:public|default|default user|all users|user|users|username|yourname|your-name|your_name|name|me|you|someone|runner|shared|admin|administrator|example|foo|bar|xxx+|\.\.\.|…)$/i
 const HOME = /(?:\b[A-Za-z]:[\\/]+|(?<![\w.])\/[A-Za-z]\/|(?<![\w.])\/)(?:Users|home)[\\/]+([^\\/\s"'`<>:*?|,;)\]}]+)/g
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}\b/g
