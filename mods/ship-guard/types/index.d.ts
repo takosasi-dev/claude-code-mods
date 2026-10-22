@@ -9,6 +9,8 @@ export type GuardEntry = {
   /** コマンドの頭 200 字 */
   command: string
   outcome: GuardOutcome
+  /** 公開前のチェック (git push の時) で気になった所。無ければ無し */
+  findings?: string[]
 }
 
 /** 公開してよいという確認。turn のターンと、その次のターンまで効く */

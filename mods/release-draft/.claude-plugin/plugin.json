@@ -1,0 +1,7 @@
+{
+  "name": "release-draft",
+  "version": "0.1.0",
+  "description": "前のタグから今までのコミットと、版が上がった plugin.json・package.json を集めて、CHANGELOG の下書き (Added / Changed / Fixed) と次の版の候補を /release のペインに出す。ボタンで「これで CHANGELOG を書いて」と Claude に頼む (git は読むだけ)",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts"
+}

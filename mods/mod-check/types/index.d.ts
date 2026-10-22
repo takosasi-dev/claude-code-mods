@@ -77,6 +77,7 @@ declare module 'claude-code' {
     'devlog-pane': { log: unknown }
     'done-chime': { settings: unknown; note: unknown }
     'edit-log': { entries: unknown; selected: unknown; detail: unknown; note: unknown }
+    'enc-guard': { log: unknown; counts: unknown }
     'face-band': { now: unknown; isHidden: unknown; look: unknown }
     'fail-log': { entries: unknown; total: unknown; confirming: unknown }
     'file-map': { files: unknown; filter: unknown }
@@ -88,7 +89,9 @@ declare module 'claude-code' {
     'pre-check': { report: unknown; test: unknown; open: unknown }
     'project-board': { projects: unknown; loadedAt: unknown; error: unknown; sort: unknown; filter: unknown; detail: unknown }
     'prompt-book': { items: unknown; draft: unknown; tag: unknown; sort: unknown; armed: unknown; notice: unknown; isFlashing: unknown }
+    'release-draft': { report: unknown; repo: unknown }
     'rule-switch': { save: unknown; armed: unknown; note: unknown }
+    'rule-watch': { misses: unknown; counts: unknown; history: unknown; asks: unknown; memoPending: unknown }
     'session-recap': { turns: unknown; startedAt: unknown; pending: unknown; selected: unknown; summary: unknown; notice: unknown; command: unknown }
     'session-timeline': { turns: unknown }
     'ship-guard': { isOff: unknown; log: unknown; permit: unknown; turn: unknown }

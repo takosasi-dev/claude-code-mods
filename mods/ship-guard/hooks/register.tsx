@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GuardEntry, GuardOutcome } from '../types'
-import { LOG_MAX, NO, YES, approvedIn, askText, denyText, isValid, outwardOf, paneLines, paneSvg } from './guard'
+import { LOG_FORMAT, LOG_MAX, NO, YES, approvedIn, askText, denyText, isValid, listOf, outwardOf, paneLines, paneSvg, rangeOf, repoDirOf, resolveDir, scanPush } from './guard'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'ship-guard'
@@ -17,11 +17,31 @@ const TURN = atom({ plugin: 'ship-guard', key: 'turn' } as const, 0)
 type $ = EngineInterface
 
 let ownsMain = false
+// 設定は register で userConfig から入れる
+const cfg = { isChecking: true, allowed: [] as string[], words: [] as string[] }
 
-async function record($: $, label: string, command: string, outcome: GuardOutcome) {
+async function record($: $, label: string, command: string, outcome: GuardOutcome, findings: string[] = []) {
   const at = await $.clock.now()
-  const entry: GuardEntry = { at, label, command: command.trim().slice(0, 200), outcome }
+  const entry: GuardEntry = { at, label, command: command.trim().slice(0, 200), outcome, ...(findings.length > 0 ? { findings } : {}) }
   await update($, LOG, log => [...log, entry].slice(-LOG_MAX))
+}
+
+/**
+ * git push の前に、送るコミット (どのリモートにもまだ無い物、最大 200) の作者と足した行を読む。
+ * git は読むだけ。リポジトリの設定が指すコマンド (fsmonitor・textconv・外部 diff) は走らせない
+ */
+async function preflight($: $, command: string): Promise<string[]> {
+  if (!cfg.isChecking) return []
+  const dir = resolveDir(repoDirOf(command), await $.session.cwd())
+  const argv = ['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', 'log', '-p', '-U0', '--no-color', '--no-renames', '--no-textconv', '--no-ext-diff', LOG_FORMAT, '-n', '200', ...rangeOf(command)]
+  try {
+    const r = await $.process.run(argv, { cwd: dir, env: { GIT_OPTIONAL_LOCKS: '0' }, timeoutMs: 20_000 })
+    if (r.exitCode !== 0) return [`送るコミットを読めませんでした (${dir}: ${(r.stderr.trim().split('\n')[0] ?? '').slice(0, 80) || `終了コード ${r.exitCode}`})`]
+    const found = scanPush(r.stdout, { allowed: cfg.allowed, words: cfg.words })
+    return r.isStdoutTruncated ? [...found, '差分が長いので途中までしか見ていません'] : found
+  } catch (err) {
+    return [`送るコミットを読めませんでした (${(err instanceof Error ? err.message : String(err)).slice(0, 80)})`]
+  }
 }
 
 async function grant($: $, about: string) {
@@ -32,29 +52,31 @@ async function grant($: $, about: string) {
 
 /**
  * シェルのツールの見張り。外に出す操作で、直前 (このターンか前のターン) に確認が無ければ、その場で聞く。
+ * git push は先に公開前のチェックをして、気になる所があれば確認済みでも聞き直す (公開の許可は、漏れの許可ではない)。
  * 聞けない・断られた時は止める。見張りなので .catch は付けない (失敗したら通さない)
  */
 async function guard<R>($: $, command: string, next: () => Promise<R>): Promise<R | { deny: string }> {
   const label = outwardOf(command)
   if (label === undefined || (await read($, OFF))) return next()
-  if (isValid(await read($, PERMIT), await read($, TURN))) {
+  const findings = label === 'git push' ? await preflight($, command) : []
+  if (findings.length === 0 && isValid(await read($, PERMIT), await read($, TURN))) {
     await record($, label, command, 'confirmed')
     return next()
   }
   let answer: string | undefined
   try {
-    answer = await $.ui.ask(askText(label, command), { options: [YES, NO], header: '公開の確認' })
+    answer = await $.ui.ask(askText(label, command, findings), { options: [YES, NO], header: '公開の確認' })
   } catch {
     answer = undefined
   }
   if (answer === YES) {
     await grant($, `その場で ${label} を許可`)
-    await record($, label, command, 'asked-yes')
+    await record($, label, command, 'asked-yes', findings)
     return next()
   }
   const outcome: GuardOutcome = answer === undefined ? 'no-ask' : 'asked-no'
-  await record($, label, command, outcome)
-  return { deny: denyText(label, outcome, answer) }
+  await record($, label, command, outcome, findings)
+  return { deny: denyText(label, outcome, answer, findings) }
 }
 
 const openPane = async ($: $) => {
@@ -62,7 +84,11 @@ const openPane = async ($: $) => {
   return { text: '外に出す操作の見張りのペインを開きました。' }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  cfg.isChecking = options.checkBeforePush !== false
+  cfg.allowed = listOf(options.allowedEmails)
+  cfg.words = listOf(options.privateWords)
+
   followTheme(on)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -121,6 +147,7 @@ export const register: Register = on => {
           <Button key="off" label="このセッションは見張らない" onPress={() => void update($, OFF, () => true)} />
         )}
         <Text dimColor>見るのは git push・gh release (create/upload/edit/delete)・gh repo create・npm/pnpm/yarn publish です。</Text>
+        {cfg.isChecking ? <Text dimColor>git push の前は、送るコミットの作者のメールと、足した行の個人のメール・ユーザー名入りのパスも確かめます。</Text> : null}
       </Box>
     )
   })

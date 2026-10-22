@@ -40,6 +40,9 @@ const ICONS: Record<string, (c: string, a: string) => string> = {
     `<rect x="6" y="7" width="5.5" height="18" rx="1.5" fill="${c}"/><rect x="13.25" y="7" width="5.5" height="12" rx="1.5" fill="${c}" opacity="0.65"/><rect x="20.5" y="7" width="5.5" height="7" rx="1.5" fill="${a}"/>`,
   'fail-log': (c, a) => `<path d="M16 5L28 26H4z" ${line(c)}/><path d="M16 12v7" ${line(a, 2.5)}/><circle cx="16" cy="22.5" r="1.6" fill="${a}"/>`,
   'ship-guard': (c, a) => `<path d="M16 26V10 M10 15.5l6-6 6 6" ${line(c, 2.5)}/><path d="M7 26h18" ${line(a, 2.5)}/>`,
+  'rule-watch': (c, a) => `<path d="M6 7h20v14H14l-6 5v-5H6z" ${line(c)}/><path d="M11 14l3.5 3.5 6.5-6.5" ${line(a, 2.5)}/>`,
+  'enc-guard': (c, a) => `<path d="M12 8l-6 8 6 8 M20 8l6 8-6 8" ${line(c, 2.5)}/><circle cx="16" cy="16" r="2.4" fill="${a}"/>`,
+  'release-draft': (c, a) => `<path d="M6 6h9l11 11-9 9L6 15z" ${line(c)}/><circle cx="11" cy="11" r="2" fill="${a}"/>`,
   // 状況
   'compact-cue': (c, a) => `<path d="M16 5a11 11 0 1 1-10.4 7.4" ${line(c, 2.5)}/><path d="M12 13l4 4 4-4 M16 17V9" ${line(a)}/>`,
   'cc-dash': (c, a) => `<path d="M6 22a10 10 0 0 1 20 0" ${line(c, 2.5)}/><path d="M16 22l5.5-6.5" ${line(a)}/><circle cx="16" cy="22" r="2.2" fill="${c}"/>`,

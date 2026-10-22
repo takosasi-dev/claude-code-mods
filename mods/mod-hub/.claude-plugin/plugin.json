@@ -1,6 +1,6 @@
 {
   "name": "mod-hub",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "/mod で画面のある mod をアイコン付きで並べ、検索・固定・最近開いた順で開く。見出しに季節の飾り",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

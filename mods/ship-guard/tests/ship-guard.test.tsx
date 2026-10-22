@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { approvedIn, outwardOf } from '../hooks/guard'
+import { approvedIn, outwardOf, rangeOf, repoDirOf, resolveDir, scanPush } from '../hooks/guard'
 
 const NOW = Date.parse('2026-10-22T05:00:00Z')
 const CWD = '/tmp/demo'
@@ -15,14 +15,36 @@ const PANE = {
 } as const
 const PUSH = `git -c credential.helper= -c credential.helper='!gh auth git-credential' push`
 
-/** reply: その場で聞かれた時の答え。undefined なら聞けない (閉じられた) */
-type World = { reply?: string; asked: string[]; ran: string[]; registered: string[] }
+/**
+ * reply: その場で聞かれた時の答え。undefined なら聞けない (閉じられた)。
+ * gitLog / gitExit: git log の出力と終了コード。git: 呼ばれた git の argv と場所
+ */
+type World = { reply?: string; asked: string[]; ran: string[]; registered: string[]; gitLog: string; gitExit: number; git: { argv: string[]; cwd?: string }[] }
+
+// ソースに本物らしい個人情報を書かない (このリポジトリを push する時に自分で引っかからないように、つないで作る)
+const AT = '@'
+const PERSONAL = `ta${'ro'}.y${AT}gmail.com`
+const HOME_WIN = ['C:', 'Users', `ke${'nta'}`, 'proj', 'a.ts'].join('\\')
+const HOME_SHOWN = ['C:', 'Users', 'ke***'].join('\\')
+const HOME_MSYS =['', 'c', 'Users', `ke${'nta'}`, 'x'].join('/')
+const NOREPLY = `123+takosasi-dev${AT}users.noreply.github.com`
+/** git log -p の 1 コミット分 */
+const commit = (hash: string, email: string, added: string[], file = 'README.md') =>
+  `\x01${hash}\x00takosasi-dev\x00${email}\x00takosasi-dev\x00${email}\n\ndiff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,0 +2,${added.length} @@\n${added.map(a => `+${a}`).join('\n')}\n`
 
 // エンジンの代役を下に置く (下の hook はテストの最初の $ より前に全部登録する)
 const setup = (on: On) => {
   mock.clock(on, { now: NOW })
-  const w: World = { reply: '実行する', asked: [], ran: [], registered: [] }
+  const w: World = { reply: '実行する', asked: [], ran: [], registered: [], gitLog: commit('a1', NOREPLY, ['ok']), gitExit: 0, git: [] }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: CWD }))
+  on('process.run', (_$, e) => {
+    w.git.push({ argv: [...e.argv], cwd: e.init?.cwd })
+    const isOk = w.gitExit === 0
+    return {
+      value: { exitCode: w.gitExit, stdout: isOk ? w.gitLog : '', stderr: isOk ? '' : 'fatal: not a git repository\n', isStdoutTruncated: false, isStderrTruncated: false },
+    }
+  })
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('command.register', (_$, e) => {
     w.registered.push(e.name)
@@ -192,4 +214,116 @@ test('ペイン: 記録と状態。「このセッションは見張らない」
   expect(w.ran).toEqual(['git push'])
   await term.press({ key: 'on' })
   expect(await shown(term)).toContain('見張り中')
+})
+
+test('純関数: push を読む場所・送る範囲', () => {
+  expect(repoDirOf(`cd "D:/github公開用/claude-code-mods" && ${PUSH} origin main --tags`)).toBe('D:/github公開用/claude-code-mods')
+  expect(repoDirOf('cd /d/repo && git status && cd sub; git push')).toBe('sub')
+  expect(repoDirOf("git -C 'C:/a b/repo' push")).toBe('C:/a b/repo')
+  expect(repoDirOf('Set-Location -LiteralPath "D:\\x"; if ($?) { git push }')).toBe('D:\\x')
+  expect(repoDirOf('git push')).toBeUndefined()
+  expect(repoDirOf('git push; cd elsewhere')).toBeUndefined()
+  expect(resolveDir(undefined, 'C:/w')).toBe('C:/w')
+  expect(resolveDir('/d/repo', 'C:/w')).toBe('D:/repo')
+  expect(resolveDir('sub', 'C:/w/')).toBe('C:/w/sub')
+  expect(resolveDir('/home/x/r', '/tmp')).toBe('/home/x/r')
+  expect(rangeOf('git push')).toEqual(['HEAD', '--not', '--remotes'])
+  expect(rangeOf('git push origin main --tags')).toEqual(['--branches', '--tags', '--not', '--remotes'])
+  expect(rangeOf('git commit -m " --tags" && git push')).toEqual(['HEAD', '--not', '--remotes'])
+})
+
+test('純関数: 公開前のチェック', () => {
+  const cfg = { allowed: [] as string[], words: [] as string[] }
+  expect(scanPush(commit('a1', NOREPLY, ['const x = 1', `noreply${AT}anthropic.com`, `me${AT}example.com`, 'react@18.3.1', 'C:\\Users\\<名前>\\x','/home/runner/work', '/home/a/x']), cfg)).toEqual([])
+  const found = scanPush(commit('a1', PERSONAL, [`mail: ${PERSONAL}`, `path ${HOME_WIN}`]) + commit('b2', PERSONAL, [`also ${HOME_MSYS}`], 'docs/b.md'), cfg)
+  expect(found).toEqual(['作者のメールが noreply ではない: ta***@gmail.com (2 コミット)', '個人のメールらしい文字列: ta***@gmail.com (README.md)', `ユーザー名入りのパス: ${HOME_SHOWN} (README.md ほか 1 件)`])
+  // 許したメールと、気にする言葉 (大文字小文字は見ない)
+  expect(scanPush(commit('a1', PERSONAL, ['by Nakano']), { allowed: ['@gmail.com'], words: ['nakano'] })).toEqual(['気にする言葉「nakano」 (README.md)'])
+  // 消した行 (-) と、ファイル名の行 (+++) は見ない
+  expect(scanPush(`\x01c3\x00a\x00${NOREPLY}\x00a\x00${NOREPLY}\n--- a/${PERSONAL}\n+++ b/x.md\n-${PERSONAL}\n`, cfg)).toEqual([])
+})
+
+test('git push: 確認済みで中身もきれいなら聞かずに通す。読む場所は cd の先', async ($, on) => {
+  const w = setup(on)
+  await begin($)
+  await startTurn($)
+  await claudeAsks($, w, 'GitHub に公開しますか？', '公開する')
+  w.asked.length = 0
+  const r = await bash($, `cd "D:/github公開用/claude-code-mods" && ${PUSH} origin main`)
+  expect(r.deny).toBeUndefined()
+  expect(w.asked).toEqual([])
+  expect(w.git.length).toBe(1)
+  expect(w.git[0]?.cwd).toBe('D:/github公開用/claude-code-mods')
+  expect(w.git[0]?.argv).toContain('log')
+  expect(w.git[0]?.argv.slice(-3)).toEqual(['HEAD', '--not', '--remotes'])
+  // gh release は読まない
+  await bash($, 'gh release create v1')
+  expect(w.git.length).toBe(1)
+})
+
+test('git push: 気になる所があれば確認済みでも聞き直し、断られたら中身ごと Claude に返す', async ($, on) => {
+  const w = setup(on)
+  await begin($)
+  await startTurn($)
+  await claudeAsks($, w, 'GitHub に公開しますか？', '公開する')
+  w.asked.length = 0
+  w.gitLog = commit('a1', PERSONAL, [`see ${HOME_WIN}`])
+  w.reply = 'やめる'
+  const r = await bash($, 'git push')
+  expect(w.asked.length).toBe(1)
+  expect(w.asked[0]).toContain('公開前のチェックで気になる所がありました。')
+  expect(w.asked[0]).toContain('・作者のメールが noreply ではない: ta***@gmail.com (1 コミット)')
+  expect(r.deny).toContain('公開前のチェックで気になった所:\n・作者のメールが noreply ではない')
+  expect(r.deny).toContain(`・ユーザー名入りのパス: ${HOME_SHOWN} (README.md)`)
+  expect(w.ran).toEqual([])
+  // ペインに数と中身
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const text = await shown(ui)
+    expect(text).toContain('断られたので止めた・気になる所 2 件')
+    expect(text).toContain('最後の公開前チェックで気になった所')
+    expect(text).not.toContain(PERSONAL)
+    await ui.unmount()
+  }
+  // 「実行する」なら通す
+  w.reply = '実行する'
+  const r2 = await bash($, 'git push')
+  expect(r2.deny).toBeUndefined()
+  expect(w.ran).toEqual(['git push'])
+})
+
+test('git push: 送るコミットを読めない時は、理由を付けてその場で聞く', async ($, on) => {
+  const w = setup(on)
+  await begin($)
+  await startTurn($)
+  await claudeAsks($, w, 'push してよい？', 'はい')
+  w.asked.length = 0
+  w.gitExit = 128
+  w.reply = undefined
+  const r = await bash($, 'git push')
+  expect(w.asked[0]).toContain(`送るコミットを読めませんでした (${CWD}: fatal: not a git repository)`)
+  expect(r.deny).toContain('AskUserQuestion で実行してよいか確かめてから')
+})
+
+test('設定: checkBeforePush を切ると読まない。気にしないメールは引っかけない', { options: { checkBeforePush: false } }, async ($, on) => {
+  const w = setup(on)
+  await begin($)
+  await startTurn($)
+  await claudeAsks($, w, 'push してよい？', 'はい')
+  w.gitLog = commit('a1', PERSONAL, ['x'])
+  await bash($, 'git push')
+  expect(w.git).toEqual([])
+  expect(w.ran).toEqual(['git push'])
+})
+
+test('設定: allowedEmails のドメインは気にしない', { options: { allowedEmails: '@gmail.com' } }, async ($, on) => {
+  const w = setup(on)
+  await begin($)
+  await startTurn($)
+  await claudeAsks($, w, 'push してよい？', 'はい')
+  w.asked.length = 0
+  w.gitLog = commit('a1', PERSONAL, [`mail ${PERSONAL}`])
+  await bash($, 'git push')
+  expect(w.asked).toEqual([])
+  expect(w.ran).toEqual(['git push'])
 })

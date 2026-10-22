@@ -577,15 +577,62 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
 
   'ship-guard': async () => {
     const m = await load('ship-guard/hooks/guard.ts')
-    const e = (k: number, label: string, command: string, outcome: string) => ({ at: NOW - k * MIN, label, command, outcome })
+    const e = (k: number, label: string, command: string, outcome: string, findings?: string[]) => ({ at: NOW - k * MIN, label, command, outcome, ...(findings ? { findings } : {}) })
+    // 公開前のチェックの言葉はつないで作る (このリポジトリを push する時に自分で引っかからないように)
+    const mail = `ta***${'@'}gmail.com`
     const log = [
-      e(95, 'git push', 'git push origin main', 'asked-no'),
       e(60, 'git push', 'git push origin main', 'confirmed'),
       e(58, 'gh release', 'gh release create v0.8.0', 'confirmed'),
       e(12, 'npm publish', 'npm publish', 'no-ask'),
+      e(8, 'git push', 'git push origin main', 'asked-no', [`作者のメールが noreply ではない: ${mail} (3 コミット)`, `個人のメールらしい文字列: ${mail} (docs/setup.md)`]),
       e(3, 'git push', 'git push --tags', 'asked-yes'),
     ]
     return [m.paneSvg({ isOff: false, log, permit: { turn: 7, at: NOW - 3 * MIN, about: 'GitHub に公開しますか？' }, turn: 7 })]
+  },
+
+  'rule-watch': async () => {
+    const m = await load('rule-watch/hooks/rules.ts')
+    const e = (k: number, rule: string, detail = '') => ({ at: NOW - k * MIN, rule, detail })
+    const history = [e(140, 'memo'), e(95, 'english'), e(41, 'question', 'このまま公開しますか？'), e(6, 'question', '次は README を直しますか？')]
+    return [
+      m.paneSvg({ misses: [{ rule: 'question', detail: '次は README を直しますか？' }], counts: { english: 1, question: 2, memo: 1 }, history, isMemoPending: false, watching: ['english', 'question', 'memo'] }),
+    ]
+  },
+
+  'enc-guard': async () => {
+    const m = await load('enc-guard/hooks/enc.ts')
+    const e = (k: number, rule: string, where: string, action = 'told') => ({ at: NOW - k * MIN, rule, where, action })
+    const log = [
+      e(120, 'py-open', "python - <<'EOF'"),
+      e(64, 'ps-encoding', 'Set-Content -Path notes.md -Value $text'),
+      e(30, 'ps1-bom', 'D:/tools/setup.ps1'),
+      e(9, 'bat-ascii', 'D:/tools/run.bat', 'blocked'),
+      e(2, 'ps-encoding', '$log | Add-Content build.log'),
+    ]
+    return [m.paneSvg({ log, counts: { 'ps-encoding': 2, 'ps1-bom': 1, 'bat-ascii': 1, 'py-open': 1 }, isBlocking: false })]
+  },
+
+  'release-draft': async () => {
+    const m = await load('release-draft/hooks/draft.ts')
+    const c = (hash: string, subject: string) => ({ hash, subject })
+    const report = {
+      kind: 'ready',
+      dir: 'D:/github/claude-code-mods',
+      loadedAt: NOW,
+      tag: 'v0.8.0',
+      commits: [c('9f2c1ab', 'release-draft 0.1.0: リリースノートの下書きを足した'), c('7d41e09', 'enc-guard 0.1.0: 文字コードの見張りを足した'), c('5b8a3f2', 'rule-watch 0.1.0: 約束ごとの見張りを足した'), c('3e19c77', 'ship-guard: push の前に作者を確かめる'), c('1a0d5e4', '直した: mod-check の数')],
+      commitCount: 5,
+      isCut: false,
+      bumps: [
+        { path: 'mods/enc-guard/.claude-plugin/plugin.json', name: 'enc-guard', to: '0.1.0' },
+        { path: 'mods/mod-check/.claude-plugin/plugin.json', name: 'mod-check', from: '0.1.1', to: '0.1.2' },
+        { path: 'mods/release-draft/.claude-plugin/plugin.json', name: 'release-draft', to: '0.1.0' },
+        { path: 'mods/rule-watch/.claude-plugin/plugin.json', name: 'rule-watch', to: '0.1.0' },
+        { path: 'mods/ship-guard/.claude-plugin/plugin.json', name: 'ship-guard', from: '0.1.0', to: '0.2.0' },
+      ],
+      fileCount: 31,
+    }
+    return [m.paneSvg({ report, today: '2026-10-22', isOverridden: true })]
   },
 }
 

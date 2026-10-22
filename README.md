@@ -49,7 +49,10 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | trophy-shelf | `/trophies` | dev-rpg・turn-gacha・aqua-pet・wait-games・daily-quest の記録を 1 枚の棚にまとめ、トロフィーを初めて取った日付つきで集める |
 | mod-check | `/mod-check` | mod がちゃんと動いているかを 1 回で確かめる。入っている・コマンドあり・予備名・見つからないの数と、mod ごとの判定(本来の名前か予備名か、本来の名前を使っている相手)、画面・テーマ・Claude Code の版をペインに出し、同じ結果を 1 行 1 mod の貼れる文で返す |
 | compact-cue | 入力欄の上に自動で出る・`/cue` | コンテキストの使用量が多くなった時、テストが通った・コミットした・引き継ぎメモを書いた直後なら「今が /compact のよい時」、編集の途中なら「区切りまで待って」と帯とトーストで知らせる。ペインは使用量のリングと作業の様子。知らせるだけで compact はしない |
-| ship-guard | 常時・`/guard` | Claude が git push・gh release・gh repo create・npm publish を打つ時、直前に AskUserQuestion で公開してよいと答えていなければ、その場で「実行しますか？」と聞き、断られたら止める。ペインは記録とオン/オフ |
+| ship-guard | 常時・`/guard` | Claude が git push・gh release・gh repo create・npm publish を打つ時、直前に AskUserQuestion で公開してよいと答えていなければ、その場で「実行しますか？」と聞き、断られたら止める。ペインは記録とオン/オフ。git push の前は、送るコミットの作者が noreply か、足した行に個人のメール・ユーザー名入りのパスが無いかも確かめ、引っかかったら確認済みでも聞き直す |
+| rule-watch | 入力欄の上に自動で出る・`/rulewatch` | Claude の返事が約束ごとから外れた時に帯で知らせる。英語で答えた・AskUserQuestion を使わずに「〜しますか？」で終わった・コミットの後に引き継ぎメモを書いていない、の 3 つ。ペインは数と記録、「Claude に伝える」で入力欄に一言入れる |
+| enc-guard | 常時・`/enc` | 文字コード・改行の罠を Claude が踏んだ時に、直し方を Claude に伝える(設定で止めるにもできる)。-Encoding の無い Set-Content / Add-Content、日本語入りで BOM の無い .ps1、ASCII 以外の字が入った .bat / .cmd、Windows で encoding= / newline= の無い Python の open |
+| release-draft | `/release` | 前のタグから今までのコミットと、版が上がった plugin.json / package.json を集めて、CHANGELOG の下書き(Added / Changed / Fixed)と次の版の候補を出す。「これで CHANGELOG を書いて」で Claude に頼む。git は読むだけ |
 | reply-frame | 常時 | 返答をオレンジ、自分の発言を青の角丸の枠で囲む |
 | danger-frame | 常時 | 危ないシェルのコマンドの行を赤い枠で囲む |
 | long-turn-toast | 常時 | 長くかかったターン(既定 120 秒超)をトーストで知らせる |
@@ -126,6 +129,11 @@ VS Code のペインに描かれる SVG の部分です(架空のデータ。ボ
 <tr>
 <td align="center" valign="top"><b>compact-cue</b><br><img src="docs/images/compact-cue.png" width="250" alt="compact-cue"></td>
 <td align="center" valign="top"><b>ship-guard</b><br><img src="docs/images/ship-guard.png" width="250" alt="ship-guard"></td>
+<td align="center" valign="top"><b>rule-watch</b><br><img src="docs/images/rule-watch.png" width="250" alt="rule-watch"></td>
+</tr>
+<tr>
+<td align="center" valign="top"><b>enc-guard</b><br><img src="docs/images/enc-guard.png" width="250" alt="enc-guard"></td>
+<td align="center" valign="top"><b>release-draft</b><br><img src="docs/images/release-draft.png" width="250" alt="release-draft"></td>
 </tr>
 </table>
 
@@ -180,7 +188,7 @@ claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
 
 mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけです。mod-hub を最初に入れてください。カテゴリーとアイコンはこのリポジトリの mod だけに付いていて、ほかの mod は「その他」に入ります。toast-inbox と mod-check も、ほかの mod より後から読み込まれる物を見るので、mod-hub の次に入れるのがおすすめです。
 
-コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub`・`/canvas-pane`・`/rule-switch`・`/wait-games`・`/spec-board`・`/ci-pane`・`/port-watch`・`/pre-check`・`/face-band`・`/done-chime`・`/turn-haiku`・`/session-timeline`・`/file-map`・`/toast-inbox`・`/usage-history`・`/fail-log`・`/compact-cue`・`/ship-guard`・`/daily-quest`・`/trophy-shelf`・`/modcheck` のように mod の名前のコマンドになります。
+コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub`・`/canvas-pane`・`/rule-switch`・`/wait-games`・`/spec-board`・`/ci-pane`・`/port-watch`・`/pre-check`・`/face-band`・`/done-chime`・`/turn-haiku`・`/session-timeline`・`/file-map`・`/toast-inbox`・`/usage-history`・`/fail-log`・`/compact-cue`・`/ship-guard`・`/rule-watch`・`/enc-guard`・`/release-draft`・`/daily-quest`・`/trophy-shelf`・`/modcheck` のように mod の名前のコマンドになります。
 
 ### まとめて入れる
 
@@ -194,7 +202,7 @@ claude plugin install toast-inbox --marketplace takosasi-dev/claude-code-mods
 claude plugin install mod-check --marketplace takosasi-dev/claude-code-mods
 ```
 
-<details><summary>開発(11 本): project-board・git-pane・edit-log・todo-board・test-runner・spec-board・ci-pane・port-watch・pre-check・fail-log・ship-guard</summary>
+<details><summary>開発(14 本): project-board・git-pane・edit-log・todo-board・test-runner・spec-board・ci-pane・port-watch・pre-check・fail-log・ship-guard・rule-watch・enc-guard・release-draft</summary>
 
 ```sh
 claude plugin install project-board --marketplace takosasi-dev/claude-code-mods
@@ -208,6 +216,9 @@ claude plugin install port-watch --marketplace takosasi-dev/claude-code-mods
 claude plugin install pre-check --marketplace takosasi-dev/claude-code-mods
 claude plugin install fail-log --marketplace takosasi-dev/claude-code-mods
 claude plugin install ship-guard --marketplace takosasi-dev/claude-code-mods
+claude plugin install rule-watch --marketplace takosasi-dev/claude-code-mods
+claude plugin install enc-guard --marketplace takosasi-dev/claude-code-mods
+claude plugin install release-draft --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
@@ -269,16 +280,16 @@ claude plugin install long-turn-toast --marketplace takosasi-dev/claude-code-mod
 
 </details>
 
-全部(43 本)をまとめて(bash / zsh):
+全部(46 本)をまとめて(bash / zsh):
 
 ```sh
-for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
+for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard rule-watch enc-guard release-draft daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
 ```
 
 PowerShell:
 
 ```powershell
-foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
+foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','rule-watch','enc-guard','release-draft','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
 ```
 
 この一覧は `node tools/plugin_dirs.mts --readme` で作り直せます(`--en` で英語版)。
@@ -321,6 +332,10 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - mod-check が版と「読み込みを拒まれた」を出せるのは、mod-check より後に読み込まれた mod だけです。「state まだ」は壊れているという意味ではありません(開いた時にしか値を書かない mod があります)。reply-frame・danger-frame・long-turn-toast はコマンドも state も持たないので「確かめられない」と出ます
 - compact-cue は Claude の返事のたびに使用量を読み、自動 compact が走る位置を 100% として数えます(位置が分からない時はモデルの窓に対する割合)。最初の返事の前は「─」、compact の直後は compact 後の数を出します。区切りはコマンドの形(`git commit`・`npm test`・`pytest` など)と、`memoDir` の下へ書いたかで見分けます
 - ship-guard が見るのは Bash と PowerShell のツールだけです。引用符で囲んだパスから呼ぶ git(`& "C:\...\git.exe" push`)や、スクリプトの中の push は見分けられません。確認として数えるのは、問いか答えが公開の話(push・公開・リリースなど)で、答えが断り(やめる・しない など)でない時だけで、そのターンと次のターンまで効きます。`claude -p` のように聞けない場では止めます
+- ship-guard の公開前のチェックは、どのリモートにもまだ無いコミット(最大 200)を `git log -p` で読みます。読む場所は push の前の `cd` か `git -C` の先です。メールは noreply・example.com などを気にせず、`allowedEmails` に入れた物も気にしません。`C:\Users\<名前>` の `<名前>` が 1 字や見本の名前(user・runner など)なら気にしません
+- rule-watch が見るのは、メインの返事の最後の文(ツールの間に書いた文は見ません)です。英語かどうかは、コード・パス・URL を除いた地の文の字で決めます。メモの見張りは `memoDir` を入れた時だけで、そのフォルダへの Write / Edit と、そのフォルダを指すシェルのコマンドを「書いた」とみなします
+- enc-guard の .ps1 の BOM は、Write なら書く前に、Edit なら書いた後にファイルを読んで確かめます。Out-File と `>` は見ません(この環境の PowerShell では UTF-8 の BOM 付きになるため)
+- release-draft は、Claude が最後に `git commit` した場所(`cd` の先)を読みます。コミットがまだ無ければセッションの場所です。版は、タグの時の中身と今の作業ツリーを比べます(まだコミットしていない版上げも出ます)
 - test-runner が拾うのは、コマンドの形がテスト(`npm test`・`pytest`・`cargo test`・`node --test`・`claude plugin test` など)か、`testCommand` と同じ頭の物です。裏で走らせた物(`run_in_background`)は数えません
 
 ## 設定が要る mod
@@ -338,6 +353,11 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 | pre-check | `testCommand` / `timeoutSeconds` | test-runner と同じ。空ならテストの項目は飛ばす |
 | compact-cue | `notifyPercent` / `urgentPercent` | 合図を出し始める使用量と、急ぎにする使用量(%、既定 50 / 75) |
 | compact-cue | `memoDir` | 引き継ぎメモのフォルダ。入れると、ここへ書いた時も区切りとみなす(空でも動く) |
+| ship-guard | `checkBeforePush` | push の前に中身を確かめる(既定 オン) |
+| ship-guard | `allowedEmails` / `privateWords` | 気にしないメール(カンマ区切り、`@example.org` でドメインごと)と、足した行や作者名に入っていたら知らせる言葉 |
+| rule-watch | `checkEnglish` / `checkQuestion` | 英語の返事・文での質問を見るか(既定 オン) |
+| rule-watch | `memoDir` / `memoGraceTurns` | 引き継ぎメモのフォルダ(空ならメモは見ない)と、コミットの後に待つターン数(既定 0) |
+| enc-guard | `mode` / `checkPython` | 見つけた時に「知らせる」か「止める」か(既定 知らせる)と、Python の open を見るか(既定 オン、Windows だけ) |
 | spec-board | `pythonPath` | python の絶対パス(PATH にあれば `python` や `py` でも可) |
 | spec-board | `specstatusScript` | SpecStatus の `specstatus.py` の絶対パス |
 
@@ -382,6 +402,7 @@ claude plugin test mods/cc-dash
 - 0.6.0 で足した mod(session-timeline・file-map・toast-inbox・usage-history)と、共通の見た目・明るいテーマも、テストと窓の無い Chrome で撮った絵までで、実画面での確認はこれからです
 - 0.7.0 で足した mod(fail-log・daily-quest・trophy-shelf・mod-check)と、時間と季節の見た目、/dash の並べ替えも、テストと窓の無い Chrome で撮った絵までです
 - 0.8.0 で足した mod(compact-cue・ship-guard)と test-runner の見張りも、テストと窓の無い Chrome で撮った絵までです
+- 0.9.0 で足した mod(rule-watch・enc-guard・release-draft)と ship-guard の公開前のチェックも、テストと窓の無い Chrome で撮った絵までです
 - 関数フックの API はまだ先行公開の段階で、Claude Code の版によって変わることがあります
 
 ## ライセンス

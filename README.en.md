@@ -51,7 +51,10 @@ The mods' on-screen text is in Japanese.
 | trophy-shelf | `/trophies` | Gathers the records of dev-rpg, turn-gacha, aqua-pet, wait-games, and daily-quest on one shelf, and collects trophies with the date each was first earned |
 | mod-check | `/mod-check` | Shows whether each mod in this collection is loaded, owns its command (or fell back to a spare name), and exposes its state; also prints a pasteable plain-text report |
 | compact-cue | band above the prompt, `/cue` | When the context fills up, tells you in the band and a toast: right after tests pass, a commit, or writing a handoff note, "now is a good time to /compact"; in the middle of editing, "wait for a break point". The pane shows a usage ring and where you are. It only tells you; it never compacts |
-| ship-guard | always, `/guard` | When Claude runs git push, gh release, gh repo create, or npm publish without first getting a yes through AskUserQuestion, asks you "run it?" on the spot and blocks it if you say no. The pane shows the record and an on/off switch |
+| ship-guard | always, `/guard` | When Claude runs git push, gh release, gh repo create, or npm publish without first getting a yes through AskUserQuestion, asks you "run it?" on the spot and blocks it if you say no. The pane shows the record and an on/off switch. Before git push, it also checks that the commits being pushed are authored with a noreply address and add no personal email or path with a user name, and asks again even after a yes if they do |
+| rule-watch | band above the prompt, `/rulewatch` | Tells you in the band when Claude's reply breaks your house rules: it answered in English, ended with a question instead of using AskUserQuestion, or committed without updating the handoff note. The pane shows counts and a log; "Tell Claude" puts a short note into the prompt |
+| enc-guard | always, `/enc` | When Claude steps into an encoding or line-ending trap, tells Claude how to fix it (or blocks it, by setting): Set-Content / Add-Content without -Encoding, a .ps1 with Japanese text but no BOM, a .bat / .cmd with non-ASCII characters, and Python's open without encoding= / newline= on Windows |
+| release-draft | `/release` | Collects the commits since the last tag and the plugin.json / package.json versions that went up, and shows a CHANGELOG draft (Added / Changed / Fixed) with a suggested next version. "Write the CHANGELOG with this" asks Claude to finish it. Reads git only |
 | reply-frame | Always on | Frames Claude's replies in orange and your messages in blue, with rounded corners |
 | danger-frame | Always on | Frames lines of dangerous shell commands in red |
 | long-turn-toast | Always on | Shows a toast for turns that took long (over 120 seconds by default) |
@@ -128,6 +131,11 @@ These are the SVG parts drawn in a VS Code pane (made-up data; buttons and such 
 <tr>
 <td align="center" valign="top"><b>compact-cue</b><br><img src="docs/images/compact-cue.png" width="250" alt="compact-cue"></td>
 <td align="center" valign="top"><b>ship-guard</b><br><img src="docs/images/ship-guard.png" width="250" alt="ship-guard"></td>
+<td align="center" valign="top"><b>rule-watch</b><br><img src="docs/images/rule-watch.png" width="250" alt="rule-watch"></td>
+</tr>
+<tr>
+<td align="center" valign="top"><b>enc-guard</b><br><img src="docs/images/enc-guard.png" width="250" alt="enc-guard"></td>
+<td align="center" valign="top"><b>release-draft</b><br><img src="docs/images/release-draft.png" width="250" alt="release-draft"></td>
 </tr>
 </table>
 
@@ -182,7 +190,7 @@ In the desktop app, open + next to the prompt, then Plugins, enter `takosasi-dev
 
 mod-hub lists only the mods loaded after mod-hub, so install mod-hub first. Categories and icons are defined only for the mods in this repository; other mods go under "Other". toast-inbox and mod-check also watch the mods loaded after them, so we recommend installing them right after mod-hub.
 
-If a command name clashes with another plugin or a built-in, the command becomes the mod's name, such as `/edit-log`, `/todo-board`, `/test-runner`, `/prompt-book`, `/live-commentary`, `/turn-gacha`, `/dev-rpg`, `/code-omikuji`, `/gitpane`, `/token-meter`, `/mod-hub`, `/canvas-pane`, `/rule-switch`, `/wait-games`, `/spec-board`, `/ci-pane`, `/port-watch`, `/pre-check`, `/face-band`, `/done-chime`, `/turn-haiku`, `/session-timeline`, `/file-map`, `/toast-inbox`, `/usage-history`, `/fail-log`, `/compact-cue`, `/ship-guard`, `/daily-quest`, `/trophy-shelf`, or `/modcheck`.
+If a command name clashes with another plugin or a built-in, the command becomes the mod's name, such as `/edit-log`, `/todo-board`, `/test-runner`, `/prompt-book`, `/live-commentary`, `/turn-gacha`, `/dev-rpg`, `/code-omikuji`, `/gitpane`, `/token-meter`, `/mod-hub`, `/canvas-pane`, `/rule-switch`, `/wait-games`, `/spec-board`, `/ci-pane`, `/port-watch`, `/pre-check`, `/face-band`, `/done-chime`, `/turn-haiku`, `/session-timeline`, `/file-map`, `/toast-inbox`, `/usage-history`, `/fail-log`, `/compact-cue`, `/ship-guard`, `/rule-watch`, `/enc-guard`, `/release-draft`, `/daily-quest`, `/trophy-shelf`, or `/modcheck`.
 
 ### Install several at once
 
@@ -196,7 +204,7 @@ claude plugin install toast-inbox --marketplace takosasi-dev/claude-code-mods
 claude plugin install mod-check --marketplace takosasi-dev/claude-code-mods
 ```
 
-<details><summary>Dev (11 mods): project-board, git-pane, edit-log, todo-board, test-runner, spec-board, ci-pane, port-watch, pre-check, fail-log, ship-guard</summary>
+<details><summary>Dev (14 mods): project-board, git-pane, edit-log, todo-board, test-runner, spec-board, ci-pane, port-watch, pre-check, fail-log, ship-guard, rule-watch, enc-guard, release-draft</summary>
 
 ```sh
 claude plugin install project-board --marketplace takosasi-dev/claude-code-mods
@@ -210,6 +218,9 @@ claude plugin install port-watch --marketplace takosasi-dev/claude-code-mods
 claude plugin install pre-check --marketplace takosasi-dev/claude-code-mods
 claude plugin install fail-log --marketplace takosasi-dev/claude-code-mods
 claude plugin install ship-guard --marketplace takosasi-dev/claude-code-mods
+claude plugin install rule-watch --marketplace takosasi-dev/claude-code-mods
+claude plugin install enc-guard --marketplace takosasi-dev/claude-code-mods
+claude plugin install release-draft --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
@@ -271,16 +282,16 @@ claude plugin install long-turn-toast --marketplace takosasi-dev/claude-code-mod
 
 </details>
 
-All 43 at once (bash / zsh):
+All 46 at once (bash / zsh):
 
 ```sh
-for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
+for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard rule-watch enc-guard release-draft daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
 ```
 
 PowerShell:
 
 ```powershell
-foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
+foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','rule-watch','enc-guard','release-draft','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
 ```
 
 Regenerate this list with `node tools/plugin_dirs.mts --readme --en` (without `--en` for the Japanese README).
@@ -323,6 +334,10 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - mod-check can show versions and "refused to load" only for mods loaded after it. "No state yet" does not mean broken (some mods write their values only when opened). reply-frame, danger-frame, and long-turn-toast have neither a command nor state, so they show as "can't check"
 - compact-cue reads the usage after each Claude reply and counts the point where auto-compact runs as 100% (or the model's window when that point is unknown). It shows "─" before the first reply, and the post-compact figure right after a compact. Break points are recognized by the shape of the command (`git commit`, `npm test`, `pytest`, ...) and by writes under `memoDir`
 - ship-guard watches only the Bash and PowerShell tools. It cannot recognize git called through a quoted path (`& "C:\...\git.exe" push`) or a push inside a script. A confirmation counts only when the question or the answer is about publishing (push, publish, release, ...) and the answer is not a refusal; it lasts for that turn and the next. Where it cannot ask (such as `claude -p`), it blocks
+- ship-guard's pre-push check reads the commits that no remote has yet (up to 200) with `git log -p`, in the folder named by the `cd` or `git -C` before the push. It ignores noreply and example.com addresses and anything in `allowedEmails`, and ignores `C:\Users\<name>` when the name is one letter or a placeholder (user, runner, ...)
+- rule-watch reads only the last text of each main reply (not text written between tool calls). English is judged from the prose letters, without code, paths, or URLs. The note check works only with `memoDir` set, and counts a Write / Edit under that folder or a shell command that names it as writing the note
+- enc-guard checks a .ps1 BOM before writing for Write and by reading the file after writing for Edit. It does not watch Out-File or `>` (in this PowerShell setup they write UTF-8 with a BOM)
+- release-draft reads the folder where Claude last ran `git commit` (the `cd` target), or the session folder before any commit. Versions compare the tag with the current working tree, so uncommitted bumps show too
 - test-runner picks up commands shaped like tests (`npm test`, `pytest`, `cargo test`, `node --test`, `claude plugin test`, ...) or starting like your `testCommand`. Background runs (`run_in_background`) are not counted
 
 ## Mods that need settings
@@ -340,6 +355,11 @@ These mods show "not set" until you set the file or folder they read. Set it in 
 | pre-check | `testCommand` / `timeoutSeconds` | Same as test-runner. If empty, the test item is skipped |
 | compact-cue | `notifyPercent` / `urgentPercent` | Usage (%) at which the cue starts and becomes urgent (default 50 / 75) |
 | compact-cue | `memoDir` | Folder of handoff notes; writing there also counts as a break point (works without it) |
+| ship-guard | `checkBeforePush` | Check the contents before push (default on) |
+| ship-guard | `allowedEmails` / `privateWords` | Emails not to flag (comma separated, `@example.org` for a whole domain) and words to flag in added lines or author names |
+| rule-watch | `checkEnglish` / `checkQuestion` | Watch for English replies and text questions (default on) |
+| rule-watch | `memoDir` / `memoGraceTurns` | Folder of handoff notes (empty skips the note check) and how many turns to wait after a commit (default 0) |
+| enc-guard | `mode` / `checkPython` | Whether to tell ("知らせる") or block ("止める") when found (default tell), and whether to check Python's open (default on, Windows only) |
 | spec-board | `pythonPath` | Absolute path to python (`python` or `py` also works if on PATH) |
 | spec-board | `specstatusScript` | Absolute path to SpecStatus's `specstatus.py` |
 
@@ -384,6 +404,7 @@ claude plugin test mods/cc-dash
 - The mods added in 0.6.0 (session-timeline, file-map, toast-inbox, usage-history), the shared look, and the light theme are likewise confirmed only by tests and pictures taken with headless Chrome; checking them on the real screen is still to come
 - The mods added in 0.7.0 (fail-log, daily-quest, trophy-shelf, mod-check), the time-of-day and seasonal looks, and reordering in /dash are also confirmed only by tests and pictures taken with headless Chrome
 - The mods added in 0.8.0 (compact-cue, ship-guard) and test-runner's watching are also confirmed only by tests and pictures taken with headless Chrome
+- The mods added in 0.9.0 (rule-watch, enc-guard, release-draft) and ship-guard's pre-push check are also confirmed only by tests and pictures taken with headless Chrome
 - The function-hook API is still in early access and may change between Claude Code versions
 
 ## License

@@ -1,0 +1,22 @@
+{
+  "name": "enc-guard",
+  "version": "0.1.0",
+  "description": "文字コード・改行の罠を Claude が踏んだ時に知らせる。-Encoding の無い Set-Content、日本語入りで BOM の無い .ps1、ASCII 以外の字が入った .bat、encoding= / newline= の無い Python の open。Claude に直し方を伝えるか、設定で止める。/enc で数と記録",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "見つけた時",
+      "description": "知らせる: 実行してから Claude に直し方を伝える。止める: 実行の前に止めて、直し方を返す (書いた後でしか分からない物は知らせるだけ)",
+      "default": "知らせる",
+      "options": ["知らせる", "止める"]
+    },
+    "checkPython": {
+      "type": "boolean",
+      "title": "Python の open を見る",
+      "description": "Windows で encoding= / newline= の無い open(..., 'w') と write_text を知らせる (Windows 以外では見ない)",
+      "default": true
+    }
+  }
+}

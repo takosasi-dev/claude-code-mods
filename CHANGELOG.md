@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0] - 2026-10-22
+
+### Added
+
+- rule-watch 0.1.0(新しい mod): Claude の返事が約束ごとから外れた時に入力欄の上の帯で知らせる。英語で答えた(コード・パス・URL を除いた地の文で判定)、AskUserQuestion を使わずに「〜しますか？」で終わった、コミットの後に引き継ぎメモ(`memoDir`)を書いていない、の 3 つ。`/rulewatch` で数と記録、「Claude に伝える」で入力欄に一言入れる(送信はしない)
+- enc-guard 0.1.0(新しい mod): 文字コード・改行の罠を Claude が踏んだ時に、直し方を結果の後ろで Claude に伝える(`mode` を「止める」にすると実行の前に止める)。-Encoding の無い Set-Content / Add-Content、日本語入りで BOM の無い .ps1、ASCII 以外の字が入った .bat / .cmd、Windows で encoding= / newline= の無い Python の open と write_text。`/enc` で数と記録
+- release-draft 0.1.0(新しい mod): 前のタグから今までのコミットと、版が上がった plugin.json / package.json(まだコミットしていない物も)を集めて、CHANGELOG の下書き(Added / Changed / Fixed)と次の版の候補を `/release` のペインに出す。「これで CHANGELOG を書いて」で Claude に頼む。Claude が最後にコミットした場所を読む。git は読むだけ
+- ship-guard 0.2.0: git push の前に、どのリモートにもまだ無いコミットを読み、作者・コミッターのメールが noreply か、足した行に個人のメール・`C:\Users\<名前>` のようなユーザー名入りのパス・`privateWords` の言葉が無いかを確かめる。引っかかったら AskUserQuestion で確認済みでも聞き直し、断られたら中身ごと Claude に返す。`checkBeforePush`・`allowedEmails`・`privateWords` の設定
+
+### Changed
+
+- mod-hub 0.5.2・mod-check 0.1.2: 新しい 3 本のカテゴリー・アイコン・確かめる表を足した(全 46 本)
+
 ## [0.8.0] - 2026-10-22
 
 ### Added

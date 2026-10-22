@@ -67,9 +67,9 @@ const boot = async ($: Engine, on: On, opts: Boot = {}) => {
 
 const ALL_ALIVE = new Set(PROBED)
 
-test('表は 43 本で todo-scan を含まず、state を読む表と食い違わない', () => {
-  expect(MODS.length).toBe(43)
-  expect(new Set(MODS.map(m => m.name)).size).toBe(43)
+test('表は 46 本で todo-scan を含まず、state を読む表と食い違わない', () => {
+  expect(MODS.length).toBe(46)
+  expect(new Set(MODS.map(m => m.name)).size).toBe(46)
   expect(MODS.some(m => m.name === 'todo-scan')).toBe(false)
   for (const n of ['fail-log', 'daily-quest', 'trophy-shelf', 'mod-check']) expect(MODS.some(m => m.name === n)).toBe(true)
   // state を見せる mod (自分を除く) と、probe.ts で読む mod が同じ
@@ -122,20 +122,20 @@ test('並びは問題のある物が先で、返事の文は記号の表を使�
   expect(rows[1]?.kind).toBe('spare')
   const text = reportText({ at: NOW, env: { surface: 'vscode', theme: 'dark', engine: '2.1.304', panes: ['mod-check'] }, rows })
   const lines = text.split('\n')
-  expect(lines.length).toBe(3 + 43)
+  expect(lines.length).toBe(3 + 46)
   expect(lines[0]).toBe('mod-check の結果 2026-10-21 21:00 (日本時間)')
   expect(lines[1]).toBe('画面 vscode  テーマ 暗い (dark)  Claude Code 2.1.304  ペイン mod-check')
-  expect(lines[2]).toBe('全 43 本  入っている 39  コマンドあり 39  予備名 1  見つからない 1  確かめられない 3')
+  expect(lines[2]).toBe('全 46 本  入っている 42  コマンドあり 42  予備名 1  見つからない 1  確かめられない 3')
   expect(lines[3]).toBe('daily-quest      見つからない')
   expect(lines[4]).toBe('agent-watch      予備名 /agent-watch state まだ /agents は組み込みのコマンド')
   expect(text).not.toMatch(/[|\[\]]/)
 })
 
 for (const surface of SURFACES) {
-  test(`${surface}: 全部入っている時は 40 本が入っていて、3 本は確かめられない`, async ($, on) => {
+  test(`${surface}: 全部入っている時は 43 本が入っていて、3 本は確かめられない`, async ($, on) => {
     await boot($, on, { alive: () => ALL_ALIVE })
     const r = await $.command.run({ command: 'mod-check', ...RUN })
-    expect(r.text).toMatch(/全 43 本 {2}入っている 40 {2}コマンドあり 40 {2}予備名 0 {2}見つからない 0 {2}確かめられない 3/)
+    expect(r.text).toMatch(/全 46 本 {2}入っている 43 {2}コマンドあり 43 {2}予備名 0 {2}見つからない 0 {2}確かめられない 3/)
     expect(r.text).toMatch(/Claude Code 2\.1\.304/)
     expect(r.text).toMatch(/aqua-pet {9}入っている \/aquarium state あり/)
 
@@ -159,7 +159,7 @@ for (const surface of SURFACES) {
 test('他の mod が 1 つも無い時は、自分だけ入っていて、ほかは見つからない', async ($, on) => {
   await boot($, on, { commands: () => SELF_ONLY })
   const r = await $.command.run({ command: 'mod-check', ...RUN })
-  expect(r.text).toMatch(/全 43 本 {2}入っている 1 {2}コマンドあり 1 {2}予備名 0 {2}見つからない 39 {2}確かめられない 3/)
+  expect(r.text).toMatch(/全 46 本 {2}入っている 1 {2}コマンドあり 1 {2}予備名 0 {2}見つからない 42 {2}確かめられない 3/)
   expect(r.text).toMatch(/mod-check {8}入っている \/mod-check state あり/)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /^git-pane +見つからない/ }))?.props.color).toBe('error')
@@ -190,7 +190,7 @@ test('調べ直すと、その時のコマンドの一覧で描き直す', async
   await boot($, on, { commands: () => commands })
   await $.command.run({ command: 'mod-check', ...RUN })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /見つからない 39/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /見つからない 42/ })).toBeDefined()
   commands = ALL_COMMANDS
   await ui.press({ key: 'again' })
   expect(await ui.find({ type: 'Text', text: /見つからない 0/ })).toBeDefined()
@@ -242,6 +242,6 @@ test('絵は幅を持たず、制御文字の混じった名前でも崩れな�
     expect(svg).not.toMatch(/<svg[^>]*\swidth=/)
     expect(svg).not.toMatch(/[\x00-\x08]/)
   }
-  expect(countRows(rows).missing).toBe(39)
+  expect(countRows(rows).missing).toBe(42)
   expect(reportText(report)).toMatch(/git-pane {9}拒まれた v1 読み込みを拒まれた: xy/)
 })

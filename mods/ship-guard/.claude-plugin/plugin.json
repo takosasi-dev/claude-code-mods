@@ -1,7 +1,27 @@
 {
   "name": "ship-guard",
-  "version": "0.1.0",
-  "description": "git push・gh release・gh repo create・npm publish を Claude が打つ時、直前に AskUserQuestion で公開してよいと答えていなければ、その場で聞いて断られたら止める。/guard で記録とオン/オフ",
+  "version": "0.2.0",
+  "description": "git push・gh release・gh repo create・npm publish を Claude が打つ時、直前に AskUserQuestion で公開してよいと答えていなければ、その場で聞いて断られたら止める。git push の前は作者が noreply か・個人のメールやユーザー名入りのパスが入っていないかも確かめる。/guard で記録とオン/オフ",
   "author": { "name": "takosasi-dev" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "checkBeforePush": {
+      "type": "boolean",
+      "title": "push の前に中身を確かめる",
+      "description": "送るコミットの作者のメールと、足した行の個人のメール・ユーザー名入りのパス・気にする言葉を確かめ、引っかかったら確認済みでも聞き直す",
+      "default": true
+    },
+    "allowedEmails": {
+      "type": "string",
+      "title": "気にしないメール",
+      "description": "noreply 以外で公開してよいメール。カンマ区切り。@example.org のように @ から書くとそのドメイン全部",
+      "default": ""
+    },
+    "privateWords": {
+      "type": "string",
+      "title": "気にする言葉",
+      "description": "足した行や作者名に入っていたら知らせる言葉 (本名・社名など)。カンマ区切り。大文字小文字は区別しない",
+      "default": ""
+    }
+  }
 }

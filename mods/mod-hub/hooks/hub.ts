@@ -27,7 +27,7 @@ export type Category = (typeof CATEGORIES)[number]
 const CATEGORY: Record<string, Category> = {
   'git-pane': '開発', 'edit-log': '開発', 'todo-board': '開発', 'test-runner': '開発', 'pre-check': '開発',
   'ci-pane': '開発', 'port-watch': '開発', 'spec-board': '開発', 'project-board': '開発', 'fail-log': '開発',
-  'ship-guard': '開発',
+  'ship-guard': '開発', 'rule-watch': '開発', 'enc-guard': '開発', 'release-draft': '開発',
   'cc-dash': '状況', 'token-meter': '状況', 'usage-pane': '状況', 'agent-watch': '状況', 'session-recap': '状況',
   'devlog-pane': '状況', 'work-bar': '状況', 'session-timeline': '状況', 'file-map': '状況', 'usage-history': '状況',
   'compact-cue': '状況',
