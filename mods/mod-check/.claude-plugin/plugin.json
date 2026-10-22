@@ -1,6 +1,6 @@
 {
   "name": "mod-check",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "/mod-check でこの mod 集の mod がちゃんと動いているかを 1 回で確かめ、貼れる文にする",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

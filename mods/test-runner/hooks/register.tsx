@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { TestRunnerResult } from '../types'
-import { HISTORY, UNSET_HINT, countResults, fixPrompt, paneLines, paneSvg, splitCommand, statusOf, tailOf } from './runner'
+import { HISTORY, UNSET_HINT, claudeResult, countResults, failingLine, fixPrompt, isCommitCommand, isTestCommand, paneLines, paneSvg, splitCommand, statusOf, tailOf } from './runner'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'test-runner'
@@ -97,6 +97,23 @@ async function runTests($: $) {
   await update($, HIST, h => [...h, { status: result.status, ms: result.ms }].slice(-HISTORY))
 }
 
+/** Claude が Bash / PowerShell で走らせたテストを拾う。落ちたままコミットしようとしたらトーストで知らせる (止めない) */
+async function watchShell<R extends { isError?: boolean; text?: string; result?: unknown; deny?: string }>($: $, command: string, isBackground: boolean, next: () => Promise<R>) {
+  if (isCommitCommand(command)) {
+    const run = await read($, RUN)
+    if (failingLine(run) !== '') $.ui.toast('テストが落ちたままコミットしようとしています。/testrun で結果を見られます', { timeoutMs: 8000 })
+  }
+  if (isBackground || !isTestCommand(command, cfg.command)) return next()
+  const startedAt = await $.clock.now()
+  const r = await next()
+  // 止められた・裏に回された物は数えない
+  const out = (r.result ?? {}) as { interrupted?: unknown; backgroundTaskId?: unknown }
+  if (r.deny !== undefined || typeof out.backgroundTaskId === 'string') return r
+  const finishedAt = await $.clock.now()
+  await keep($, claudeResult(command, typeof r.text === 'string' ? r.text : '', r.isError === true, out.interrupted === true, finishedAt - startedAt, finishedAt))
+  return r
+}
+
 async function fixIt($: $) {
   const run = await read($, RUN)
   if (run.kind !== 'done') return
@@ -106,6 +123,15 @@ async function fixIt($: $) {
   )
   await update($, NOTE, () => (filled === '' ? '入力欄に入れました(送信はしていません)' : `入力欄に入れられませんでした${filled}`))
 }
+
+/** 結果を「今の結果」と履歴に入れる。ボタンで走らせている最中は「今の結果」を上書きしない */
+async function keep($: $, result: TestRunnerResult) {
+  await update($, RUN, r => (r.kind === 'running' ? r : { kind: 'done' as const, result }))
+  await update($, HIST, h => [...h, { status: result.status, ms: result.ms }].slice(-HISTORY))
+}
+
+const SHELL_TOOLS = ['Bash', 'PowerShell']
+const drawsSomething = (tree: RenderElement) => tree.type !== 'engine'
 
 const openPane = async ($: $) => {
   await $.ui.open({ id: PANE, title: TITLE })
@@ -122,6 +148,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    // 途中で読み込まれた時も帯を聞きに来るように (docs/mod-guide.md の 3 節)
+    $.ui.invalidate('ui.render')
     // /testrun が拒まれたら (組み込みと被ったら) /test-runner にする
     const got = await $.command.register({ name: 'testrun', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'testrun'
@@ -131,6 +159,33 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'testrun' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
   on('command.run', { command: 'test-runner' }, openPane)
+
+  // Claude が走らせたテスト (サブエージェントの分も) を履歴に入れる。見ているだけなので失敗しても止めない
+  on('tool.call', ($, e, next) => {
+    const args = e as unknown as { command?: unknown; run_in_background?: unknown }
+    if (!SHELL_TOOLS.includes(String(e.tool)) || typeof args.command !== 'string') return next(e)
+    return watchShell($, args.command, args.run_in_background === true, () => next(e))
+  }).catch(($, e, next) => next(e))
+
+  // 入力欄の上の帯。最後のテストが落ちている間だけ 1 行出す
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const line = e.props.hasSurvey ? '' : failingLine(await read($, RUN))
+    if (line === '') return next(e)
+    const below = await next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const band = (
+      <Box key="test-runner" flexShrink={0}>
+        <Text color="error">{line}</Text>
+      </Box>
+    )
+    if (!drawsSomething(below)) return band
+    return (
+      <Box flexDirection="column">
+        {band}
+        <Box key="below">{below}</Box>
+      </Box>
+    )
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { MockClock } from 'claude-code/testing'
 
-import { countResults, fixPrompt, paneSvg, splitCommand, statusOf, tailOf } from '../hooks/runner'
+import { claudeResult, countResults, failingLine, fixPrompt, isCommitCommand, isTestCommand, paneSvg, splitCommand, statusOf, tailOf } from '../hooks/runner'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const CWD = '/tmp/demo'
@@ -345,4 +345,93 @@ test('「この失敗を直して」は入力欄の下書きを消さずに入�
   expect(String((await ui.find({ type: 'Code' }))?.props.source)).not.toMatch(CTRL)
   await ui.press({ key: 'fix' })
   expect(modes).toEqual(['insert'])
+})
+
+// ── Claude が走らせたテストの見張り (0.3.0)
+
+const BAND = {
+  plugin: 'test-runner',
+  component: 'AbovePrompt',
+  props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 80, scroll: { offset: 0, bodyRows: 11 }, view: {} },
+} as const
+
+/** Claude のシェルのツールの代役。fail に入れたコマンドはエラーで返す */
+const mockShell = (on: On, fail: string[], text: string) => {
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine', ref: 0 }) as never)
+  on('tool.call', (_$, e) => {
+    const command = String((e as unknown as { command?: unknown }).command ?? '')
+    if (fail.includes(command)) return { isError: true, result: `Exit code 1\n${text}`, text: `Exit code 1\n${text}` } as never
+    return { result: { stdout: text, stderr: '', interrupted: false }, text } as never
+  })
+  return toasts
+}
+
+test('純関数: テストとコミットの見分け・Claude の結果', () => {
+  for (const c of ['npm test', 'cd x && npx vitest run', 'pytest -q', 'claude.exe plugin test mods/a', 'node --test', 'make check'])
+    expect(isTestCommand(c, 'make check')).toBe(true)
+  for (const c of ['npm install', 'git commit -m "npm test"', 'echo test']) expect(isTestCommand(c, 'make check')).toBe(false)
+  expect(isCommitCommand(`git -c credential.helper='!gh' commit -m x`)).toBe(true)
+  expect(isCommitCommand('git log')).toBe(false)
+
+  const r = claudeResult('npm   test', `Exit code 1\n${JEST_FAIL}`, true, false, 1200, NOW)
+  expect(r).toMatchObject({ status: 'fail', command: 'npm test', exitCode: 1, passed: 3, failed: 1, source: 'claude' })
+  expect(claudeResult('npm test', JEST_PASS, false, false, 10, NOW)).toMatchObject({ status: 'pass', exitCode: 0, passed: 4, failed: 0 })
+  expect(claudeResult('npm test', '', true, true, 10, NOW).status).toBe('stopped')
+  expect(failingLine({ kind: 'done', result: r })).toBe('テストが落ちたままです: 失敗 1 件 npm test (/testrun で見る)')
+  expect(failingLine({ kind: 'done', result: { ...r, status: 'pass' } })).toBe('')
+  expect(failingLine({ kind: 'idle' })).toBe('')
+})
+
+test('Claude が走らせたテストを履歴に入れ、落ちている間は帯を出す。通れば消える', SET, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mockSpawn(on, clock, { child: { chunks: [] }, calls: [] })
+  const fail = ['npm test']
+  mockShell(on, fail, JEST_FAIL)
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  const band = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  expect(await band.find({ type: 'Text', text: /^テストが落ちたままです: 失敗 1 件 npm test/ })).toBeDefined()
+  const pane = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect(await svgOf(pane)).toContain('Claude が実行')
+  expect(await svgOf(pane)).toContain('>失敗<')
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: 'Claude が走らせた結果' })).toBeDefined()
+
+  // テストでないコマンドと、裏で走らせたテストは数えない
+  await $.tool.call({ tool: 'Bash', command: 'npm install' })
+  await $.tool.call({ tool: 'Bash', command: 'npm test', run_in_background: true })
+  expect(await term.find({ type: 'Text', text: /^直近 ■ / })).toBeDefined()
+
+  fail.length = 0
+  await $.tool.call({ tool: 'PowerShell', command: 'npm test' } as never)
+  expect(await band.find({ type: 'Text', text: /^テストが落ちたまま/ })).toBeUndefined()
+  expect(await term.find({ type: 'Text', text: /^直近 ■● / })).toBeDefined()
+})
+
+test('落ちたままコミットしようとしたらトーストで知らせる (止めない)', SET, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mockSpawn(on, clock, { child: { chunks: [] }, calls: [] })
+  const toasts = mockShell(on, ['pytest'], '1 failed, 2 passed')
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m a' })
+  expect(toasts).toEqual([])
+  await $.tool.call({ tool: 'Bash', command: 'pytest' })
+  const r = await $.tool.call({ tool: 'Bash', command: 'git add -A && git commit -m b' })
+  expect(r.deny).toBeUndefined()
+  expect(toasts).toEqual(['テストが落ちたままコミットしようとしています。/testrun で結果を見られます'])
+})
+
+test('ボタンで走らせている最中は、Claude の結果で「今の結果」を上書きしない', SET, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mockSpawn(on, clock, { child: { chunks: ['slow\n'], wait: 60_000, code: 0 }, calls: [] })
+  mockShell(on, [], JEST_PASS)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  void ui.press({ key: 'run' })
+  await clock.advance(10)
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(await ui.find({ type: 'Button', key: 'stop' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^直近 ● / })).toBeDefined()
 })

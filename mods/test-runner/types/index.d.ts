@@ -13,6 +13,8 @@ export type TestRunnerResult = {
   /** 出力から拾えた数。拾えなければ無し */
   passed?: number
   failed?: number
+  /** claude なら Claude が Bash / PowerShell で走らせた物を拾った結果。無ければボタン */
+  source?: 'claude'
 }
 
 export type TestRunnerRun =

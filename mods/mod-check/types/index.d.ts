@@ -71,6 +71,7 @@ declare module 'claude-code' {
     'cc-dash': { tab: unknown; startedAt: unknown; turnCount: unknown; turnDurations: unknown; runningSince: unknown; calls: unknown; toolCounts: unknown; toolTotal: unknown; errorCount: unknown; usage: unknown; layout: unknown; isArranging: unknown }
     'ci-pane': { snap: unknown; isLoading: unknown }
     'code-omikuji': { today: unknown; play: unknown; plays: unknown; history: unknown; mode: unknown; isOpened: unknown; note: unknown }
+    'compact-cue': { context: unknown; phase: unknown; lastBreak: unknown; told: unknown }
     'daily-quest': { today: unknown; streak: unknown; totalDone: unknown; saved: unknown; pending: unknown; turnErrors: unknown; note: unknown }
     'dev-rpg': { hero: unknown; tab: unknown; isConfirmingReset: unknown; news: unknown; battle: unknown }
     'devlog-pane': { log: unknown }
@@ -90,6 +91,7 @@ declare module 'claude-code' {
     'rule-switch': { save: unknown; armed: unknown; note: unknown }
     'session-recap': { turns: unknown; startedAt: unknown; pending: unknown; selected: unknown; summary: unknown; notice: unknown; command: unknown }
     'session-timeline': { turns: unknown }
+    'ship-guard': { isOff: unknown; log: unknown; permit: unknown; turn: unknown }
     'spec-board': { snap: unknown; isLoading: unknown; detail: unknown }
     'test-runner': { run: unknown; history: unknown; note: unknown }
     'toast-inbox': { items: unknown; readAt: unknown; filter: unknown; confirmClear: unknown; commands: unknown; notice: unknown }

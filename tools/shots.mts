@@ -564,6 +564,29 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
     // 全 41 行だと長いので、問題のある行が先に来る並びの上 12 行だけ
     return [m.summarySvg(report), m.rowsSvg(report.rows.slice(0, 12))]
   },
+
+  'compact-cue': async () => {
+    const m = await load('compact-cue/hooks/cue.ts')
+    const base = { notifyAt: 50, urgentAt: 75, memoDir: 'D:\\notes\\handoff' }
+    // 区切り (コミットの後) で 62%、と、編集の途中で 81%
+    return [
+      m.paneSvg({ ...base, ctx: { percent: 62, tokens: 496_000, window: 800_000, isAutoLimit: true }, phase: 'clean', lastBreak: { kind: 'commit', at: NOW - 3 * MIN } }),
+      m.paneSvg({ ...base, ctx: { percent: 81, tokens: 810_000, window: 1_000_000 }, phase: 'mid', lastBreak: { kind: 'test', at: NOW - 25 * MIN } }),
+    ]
+  },
+
+  'ship-guard': async () => {
+    const m = await load('ship-guard/hooks/guard.ts')
+    const e = (k: number, label: string, command: string, outcome: string) => ({ at: NOW - k * MIN, label, command, outcome })
+    const log = [
+      e(95, 'git push', 'git push origin main', 'asked-no'),
+      e(60, 'git push', 'git push origin main', 'confirmed'),
+      e(58, 'gh release', 'gh release create v0.8.0', 'confirmed'),
+      e(12, 'npm publish', 'npm publish', 'no-ask'),
+      e(3, 'git push', 'git push --tags', 'asked-yes'),
+    ]
+    return [m.paneSvg({ isOff: false, log, permit: { turn: 7, at: NOW - 3 * MIN, about: 'GitHub に公開しますか？' }, turn: 7 })]
+  },
 }
 
 // ---- HTML と PNG ----

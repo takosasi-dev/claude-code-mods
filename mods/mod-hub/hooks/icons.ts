@@ -39,7 +39,9 @@ const ICONS: Record<string, (c: string, a: string) => string> = {
   'project-board': (c, a) =>
     `<rect x="6" y="7" width="5.5" height="18" rx="1.5" fill="${c}"/><rect x="13.25" y="7" width="5.5" height="12" rx="1.5" fill="${c}" opacity="0.65"/><rect x="20.5" y="7" width="5.5" height="7" rx="1.5" fill="${a}"/>`,
   'fail-log': (c, a) => `<path d="M16 5L28 26H4z" ${line(c)}/><path d="M16 12v7" ${line(a, 2.5)}/><circle cx="16" cy="22.5" r="1.6" fill="${a}"/>`,
+  'ship-guard': (c, a) => `<path d="M16 26V10 M10 15.5l6-6 6 6" ${line(c, 2.5)}/><path d="M7 26h18" ${line(a, 2.5)}/>`,
   // 状況
+  'compact-cue': (c, a) => `<path d="M16 5a11 11 0 1 1-10.4 7.4" ${line(c, 2.5)}/><path d="M12 13l4 4 4-4 M16 17V9" ${line(a)}/>`,
   'cc-dash': (c, a) => `<path d="M6 22a10 10 0 0 1 20 0" ${line(c, 2.5)}/><path d="M16 22l5.5-6.5" ${line(a)}/><circle cx="16" cy="22" r="2.2" fill="${c}"/>`,
   'token-meter': (c, a) => `<path d="M8 10h16 M8 16h11" ${line(c, 3)}/><path d="M8 22h6" ${line(a, 3)}/>`,
   'usage-pane': (c, a) => `<circle cx="16" cy="16" r="9.5" ${line(c)}/><path d="M16 16V6.5a9.5 9.5 0 0 1 9.5 9.5z" fill="${a}"/>`,

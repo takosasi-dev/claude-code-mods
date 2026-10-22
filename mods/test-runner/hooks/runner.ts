@@ -66,6 +66,55 @@ export function countResults(out: string): { passed?: number; failed?: number } 
   return {}
 }
 
+// ── Claude が走らせたテストを拾う
+
+/** 引用符の中身とヒアドキュメントの本文を Q に置き換える (コミットの文の中の言葉を拾わない) */
+const unquote = (command: string) =>
+  command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, ' Q').replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, 'Q')
+
+/** コマンドの区切り (&& ; | など) で分けた 1 つずつ。頭の VAR=値 と & は落とす */
+const segments = (command: string) =>
+  unquote(command)
+    .split(/&&|\|\||[;|\n`{}]|\$\(|\(/)
+    .map(s => s.trim().replace(/^(?:[\w.]+=\S*\s+)*(?:&\s*)?/, ''))
+    .filter(s => s !== '')
+
+const TEST_COMMAND =
+  /^(?:\S*[\\/])?(?:(?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+(?:run\s+)?test\b|npx\s+(?:vitest|jest)\b|vitest\b|jest\b|pytest\b|python\d*(?:\.exe)?\s+-m\s+pytest\b|cargo\s+test\b|go\s+test\b|node(?:\.exe)?\s+--test\b|dotnet\s+test\b|(?:\.[\\/])?gradlew?(?:\.bat)?\s+test\b|mvn\s+test\b|ctest\b|claude(?:\.exe)?\s+plugin\s+test\b)/i
+
+/** テストを走らせるコマンドか。設定したコマンド (testCommand) と同じ頭で始まる物も含める */
+export function isTestCommand(command: string, configured = '') {
+  const own = configured.trim().replace(/\s+/g, ' ').toLowerCase()
+  return segments(command).some(s => TEST_COMMAND.test(s) || (own !== '' && s.replace(/\s+/g, ' ').toLowerCase().startsWith(own)))
+}
+
+/** git commit か */
+export const isCommitCommand = (command: string) =>
+  segments(command).some(s => /^(?:\S*[\\/])?git(?:\.exe)?\b(?:\s+(?:-[cC]\s+\S+|--?[\w-]+(?:=\S+)?))*\s+commit\b/i.test(s))
+
+/** Claude の Bash / PowerShell の結果から 1 回分を組む。エラーで返ったら失敗、止められたら中断 */
+export function claudeResult(command: string, text: string, isError: boolean, isInterrupted: boolean, ms: number, finishedAt: number): TestRunnerResult {
+  const code = /exit code[:\s]+(-?\d+)/i.exec(text.slice(0, 2000))
+  return {
+    status: isInterrupted ? 'stopped' : isError ? 'fail' : 'pass',
+    command: command.trim().replace(/\s+/g, ' '),
+    exitCode: isError ? (code ? Number(code[1]) : null) : 0,
+    ms,
+    finishedAt,
+    tail: tailOf(text),
+    ...countResults(text),
+    source: 'claude',
+  }
+}
+
+/** 落ちたままのテストの帯の 1 行。落ちていなければ空 */
+export function failingLine(run: TestRunnerRun) {
+  if (run.kind !== 'done' || (run.result.status !== 'fail' && run.result.status !== 'timeout')) return ''
+  const r = run.result
+  const n = r.failed ? ` 失敗 ${r.failed} 件` : ''
+  return `テストが落ちたままです:${n} ${headFit(r.command, 48)} (/testrun で見る)`
+}
+
 /** 終わり方から状態を決める */
 export const statusOf = (exitCode: number | null, stoppedBy: 'user' | 'timeout' | undefined): TestRunnerStatus =>
   stoppedBy === 'user' ? 'stopped' : stoppedBy === 'timeout' ? 'timeout' : exitCode === 0 ? 'pass' : 'fail'
@@ -262,7 +311,8 @@ function historyCard(history: TestRunnerMark[], y0: number) {
 /** ペインに出す SVG 1 枚 */
 export function paneSvg(run: TestRunnerRun, history: TestRunnerMark[], command: string) {
   const accent = run.kind === 'running' ? C.yellow : run.kind === 'error' ? C.red : run.kind === 'idle' ? C.dim : colorOf(run.result.status)
-  return svgDoc(382, headCard(run, command) + historyCard(history, 236), accent, '')
+  const sub = run.kind === 'done' && run.result.source === 'claude' ? 'Claude が実行' : ''
+  return svgDoc(382, headCard(run, command) + historyCard(history, 236), accent, sub)
 }
 
 export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boolean }
@@ -281,6 +331,7 @@ export function paneLines(run: TestRunnerRun, history: TestRunnerMark[], command
     const r = run.result
     const color = r.status === 'pass' ? 'green' : r.status === 'stopped' ? undefined : 'red'
     lines.push({ text: `${LABEL[r.status]} / 所要 ${seconds(r.ms)} / 終了コード ${r.exitCode ?? '─'}`, color, isBold: true })
+    if (r.source === 'claude') lines.push({ text: 'Claude が走らせた結果', isDim: true })
     if (r.passed !== undefined || r.failed !== undefined) lines.push({ text: `通過 ${r.passed ?? 0} / 失敗 ${r.failed ?? 0}` })
     lines.push({ text: r.command, isDim: true })
   }

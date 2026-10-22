@@ -23,7 +23,7 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | session-recap | `/session-recap` | セッションのふりかえり。ターンの帯のタイムラインと、押した時だけ作る要約 |
 | edit-log | `/edits` | このセッションで Claude が Edit / Write などの編集ツールで変えたファイルの時系列。押すと git の差分(HEAD と比べる)と「レビューして」 |
 | todo-board | `/todos` | 今のフォルダの TODO / FIXME / HACK / XXX の件数・推移・一覧。git の外はフォルダを歩いて読む。種類のボタンで絞り、押すと「片付けて」 |
-| test-runner | `/testrun` | 設定したテストのコマンドをボタンで走らせる。信号と直近 20 回の結果、失敗したら「直して」 |
+| test-runner | `/testrun` | 設定したテストのコマンドをボタンで走らせる。信号と直近 20 回の結果、失敗したら「直して」。Claude が走らせたテストも拾い、落ちている間は入力欄の上に 1 行出す。落ちたままコミットしようとしたらトーストで知らせる |
 | prompt-book | `/prompts` | よく使う依頼文を保存して、ボタンで入力欄へ。タグ・使った回数・並び替え |
 | live-commentary | `/jikkyo` | Claude の動きをスポーツ実況風にステータス行へ。口調は熱血・冷静・関西 |
 | turn-gacha | `/gacha` | ターンが終わるたびにガチャ。N / R / SR / SSR のカード 60 種と図鑑、集まり具合の実績 6 個。出たカードは dev-rpg で装備にできる。daily-quest のお題をこなすと、おまけで引ける |
@@ -48,6 +48,8 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | daily-quest | `/quest` | 日替わりのお題 3 つ(ターン・ファイルを直す・テスト・コミットなど 8 種から)。進みの棒・ごほうび・連続日数・直近 7 日。ごほうびは dev-rpg が経験値、turn-gacha がおまけの抽選で受け取る |
 | trophy-shelf | `/trophies` | dev-rpg・turn-gacha・aqua-pet・wait-games・daily-quest の記録を 1 枚の棚にまとめ、トロフィーを初めて取った日付つきで集める |
 | mod-check | `/mod-check` | mod がちゃんと動いているかを 1 回で確かめる。入っている・コマンドあり・予備名・見つからないの数と、mod ごとの判定(本来の名前か予備名か、本来の名前を使っている相手)、画面・テーマ・Claude Code の版をペインに出し、同じ結果を 1 行 1 mod の貼れる文で返す |
+| compact-cue | 入力欄の上に自動で出る・`/cue` | コンテキストの使用量が多くなった時、テストが通った・コミットした・引き継ぎメモを書いた直後なら「今が /compact のよい時」、編集の途中なら「区切りまで待って」と帯とトーストで知らせる。ペインは使用量のリングと作業の様子。知らせるだけで compact はしない |
+| ship-guard | 常時・`/guard` | Claude が git push・gh release・gh repo create・npm publish を打つ時、直前に AskUserQuestion で公開してよいと答えていなければ、その場で「実行しますか？」と聞き、断られたら止める。ペインは記録とオン/オフ |
 | reply-frame | 常時 | 返答をオレンジ、自分の発言を青の角丸の枠で囲む |
 | danger-frame | 常時 | 危ないシェルのコマンドの行を赤い枠で囲む |
 | long-turn-toast | 常時 | 長くかかったターン(既定 120 秒超)をトーストで知らせる |
@@ -121,6 +123,10 @@ VS Code のペインに描かれる SVG の部分です(架空のデータ。ボ
 <td align="center" valign="top"><b>trophy-shelf</b><br><img src="docs/images/trophy-shelf.png" width="250" alt="trophy-shelf"></td>
 <td align="center" valign="top"><b>mod-check</b><br><img src="docs/images/mod-check.png" width="250" alt="mod-check"></td>
 </tr>
+<tr>
+<td align="center" valign="top"><b>compact-cue</b><br><img src="docs/images/compact-cue.png" width="250" alt="compact-cue"></td>
+<td align="center" valign="top"><b>ship-guard</b><br><img src="docs/images/ship-guard.png" width="250" alt="ship-guard"></td>
+</tr>
 </table>
 
 ### 動く絵
@@ -174,7 +180,7 @@ claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
 
 mod-hub に並ぶのは、mod-hub より後に読み込まれる mod だけです。mod-hub を最初に入れてください。カテゴリーとアイコンはこのリポジトリの mod だけに付いていて、ほかの mod は「その他」に入ります。toast-inbox と mod-check も、ほかの mod より後から読み込まれる物を見るので、mod-hub の次に入れるのがおすすめです。
 
-コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub`・`/canvas-pane`・`/rule-switch`・`/wait-games`・`/spec-board`・`/ci-pane`・`/port-watch`・`/pre-check`・`/face-band`・`/done-chime`・`/turn-haiku`・`/session-timeline`・`/file-map`・`/toast-inbox`・`/usage-history`・`/fail-log`・`/daily-quest`・`/trophy-shelf`・`/modcheck` のように mod の名前のコマンドになります。
+コマンドの名前がほかのプラグインや組み込みと被った時は、`/edit-log`・`/todo-board`・`/test-runner`・`/prompt-book`・`/live-commentary`・`/turn-gacha`・`/dev-rpg`・`/code-omikuji`・`/gitpane`・`/token-meter`・`/mod-hub`・`/canvas-pane`・`/rule-switch`・`/wait-games`・`/spec-board`・`/ci-pane`・`/port-watch`・`/pre-check`・`/face-band`・`/done-chime`・`/turn-haiku`・`/session-timeline`・`/file-map`・`/toast-inbox`・`/usage-history`・`/fail-log`・`/compact-cue`・`/ship-guard`・`/daily-quest`・`/trophy-shelf`・`/modcheck` のように mod の名前のコマンドになります。
 
 ### まとめて入れる
 
@@ -188,7 +194,7 @@ claude plugin install toast-inbox --marketplace takosasi-dev/claude-code-mods
 claude plugin install mod-check --marketplace takosasi-dev/claude-code-mods
 ```
 
-<details><summary>開発(10 本): project-board・git-pane・edit-log・todo-board・test-runner・spec-board・ci-pane・port-watch・pre-check・fail-log</summary>
+<details><summary>開発(11 本): project-board・git-pane・edit-log・todo-board・test-runner・spec-board・ci-pane・port-watch・pre-check・fail-log・ship-guard</summary>
 
 ```sh
 claude plugin install project-board --marketplace takosasi-dev/claude-code-mods
@@ -201,11 +207,12 @@ claude plugin install ci-pane --marketplace takosasi-dev/claude-code-mods
 claude plugin install port-watch --marketplace takosasi-dev/claude-code-mods
 claude plugin install pre-check --marketplace takosasi-dev/claude-code-mods
 claude plugin install fail-log --marketplace takosasi-dev/claude-code-mods
+claude plugin install ship-guard --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
 
-<details><summary>状況(10 本): cc-dash・work-bar・token-meter・session-recap・agent-watch・session-timeline・file-map・usage-history・usage-pane・devlog-pane</summary>
+<details><summary>状況(11 本): cc-dash・work-bar・token-meter・session-recap・agent-watch・session-timeline・file-map・usage-history・usage-pane・devlog-pane・compact-cue</summary>
 
 ```sh
 claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
@@ -218,6 +225,7 @@ claude plugin install file-map --marketplace takosasi-dev/claude-code-mods
 claude plugin install usage-history --marketplace takosasi-dev/claude-code-mods
 claude plugin install usage-pane --marketplace takosasi-dev/claude-code-mods
 claude plugin install devlog-pane --marketplace takosasi-dev/claude-code-mods
+claude plugin install compact-cue --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
@@ -261,16 +269,16 @@ claude plugin install long-turn-toast --marketplace takosasi-dev/claude-code-mod
 
 </details>
 
-全部(41 本)をまとめて(bash / zsh):
+全部(43 本)をまとめて(bash / zsh):
 
 ```sh
-for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history fail-log daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
+for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
 ```
 
 PowerShell:
 
 ```powershell
-foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','fail-log','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
+foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
 ```
 
 この一覧は `node tools/plugin_dirs.mts --readme` で作り直せます(`--en` で英語版)。
@@ -311,6 +319,9 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - trophy-shelf はほかの mod の記録を読むだけです。入っていない mod の棚は「入っていません」と出ます。一度取ったトロフィーは、その mod を外しても残ります
 - cc-dash の「自分の並び」は記録に残るので、全セッションで共有されます
 - mod-check が版と「読み込みを拒まれた」を出せるのは、mod-check より後に読み込まれた mod だけです。「state まだ」は壊れているという意味ではありません(開いた時にしか値を書かない mod があります)。reply-frame・danger-frame・long-turn-toast はコマンドも state も持たないので「確かめられない」と出ます
+- compact-cue は Claude の返事のたびに使用量を読み、自動 compact が走る位置を 100% として数えます(位置が分からない時はモデルの窓に対する割合)。最初の返事の前は「─」、compact の直後は compact 後の数を出します。区切りはコマンドの形(`git commit`・`npm test`・`pytest` など)と、`memoDir` の下へ書いたかで見分けます
+- ship-guard が見るのは Bash と PowerShell のツールだけです。引用符で囲んだパスから呼ぶ git(`& "C:\...\git.exe" push`)や、スクリプトの中の push は見分けられません。確認として数えるのは、問いか答えが公開の話(push・公開・リリースなど)で、答えが断り(やめる・しない など)でない時だけで、そのターンと次のターンまで効きます。`claude -p` のように聞けない場では止めます
+- test-runner が拾うのは、コマンドの形がテスト(`npm test`・`pytest`・`cargo test`・`node --test`・`claude plugin test` など)か、`testCommand` と同じ頭の物です。裏で走らせた物(`run_in_background`)は数えません
 
 ## 設定が要る mod
 
@@ -325,6 +336,8 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 | test-runner | `testCommand` | テストのコマンド(例 `npm test`。シェルを通さず空白で区切る) |
 | test-runner | `timeoutSeconds` | 時間の上限(秒、既定 300) |
 | pre-check | `testCommand` / `timeoutSeconds` | test-runner と同じ。空ならテストの項目は飛ばす |
+| compact-cue | `notifyPercent` / `urgentPercent` | 合図を出し始める使用量と、急ぎにする使用量(%、既定 50 / 75) |
+| compact-cue | `memoDir` | 引き継ぎメモのフォルダ。入れると、ここへ書いた時も区切りとみなす(空でも動く) |
 | spec-board | `pythonPath` | python の絶対パス(PATH にあれば `python` や `py` でも可) |
 | spec-board | `specstatusScript` | SpecStatus の `specstatus.py` の絶対パス |
 
@@ -368,6 +381,7 @@ claude plugin test mods/cc-dash
 - 0.5.0 で足した mod(spec-board・ci-pane・port-watch・pre-check・face-band・done-chime・turn-haiku)は、テストまでで、実画面での確認はこれからです
 - 0.6.0 で足した mod(session-timeline・file-map・toast-inbox・usage-history)と、共通の見た目・明るいテーマも、テストと窓の無い Chrome で撮った絵までで、実画面での確認はこれからです
 - 0.7.0 で足した mod(fail-log・daily-quest・trophy-shelf・mod-check)と、時間と季節の見た目、/dash の並べ替えも、テストと窓の無い Chrome で撮った絵までです
+- 0.8.0 で足した mod(compact-cue・ship-guard)と test-runner の見張りも、テストと窓の無い Chrome で撮った絵までです
 - 関数フックの API はまだ先行公開の段階で、Claude Code の版によって変わることがあります
 
 ## ライセンス

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0] - 2026-10-22
+
+### Added
+
+- compact-cue 0.1.0(新しい mod): コンテキストの使用量が `notifyPercent`(既定 50%)を超えた時、テストが通った・コミットした・引き継ぎメモ(`memoDir`)を書いた直後なら「今が /compact のよい時です」、編集の途中なら「区切りまで待って」と入力欄の上の帯に出す。区切りに入った時はトーストでも 1 回知らせ、`urgentPercent`(既定 75%)を超えたら急ぎの言葉にする。`/cue` で使用量のリングと作業の様子。知らせるだけで compact はしない
+- ship-guard 0.1.0(新しい mod): Claude が git push・gh release(create/upload/edit/delete)・gh repo create・npm/pnpm/yarn publish を打つ時、そのターンか前のターンに AskUserQuestion で公開してよいと答えていなければ、その場で「実行しますか？」と聞く。断られた・聞けない時は止めて、理由を Claude に返す。`/guard` で記録とオン/オフ
+- test-runner 0.3.0: Claude が Bash / PowerShell で走らせたテストも拾って履歴に入れる。最後のテストが落ちている間は入力欄の上に 1 行出し、落ちたままコミットしようとしたらトーストで知らせる(止めない)
+
+### Changed
+
+- mod-hub 0.5.1・mod-check 0.1.1: 新しい 2 本のカテゴリー・アイコン・確かめる表を足した(全 43 本)
+
 ## [0.7.0] - 2026-10-21
 
 ### Added

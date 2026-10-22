@@ -1,0 +1,29 @@
+{
+  "name": "compact-cue",
+  "version": "0.1.0",
+  "description": "コンテキストが埋まってきた時に、テスト・コミットの区切りなら「今が /compact のよい時」、作業の途中なら「区切りまで待って」と入力欄の上の帯とトーストで知らせる。/cue で使用量のリングと作業の様子 (知らせるだけで compact はしない)",
+  "author": { "name": "takosasi-dev" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "notifyPercent": {
+      "type": "number",
+      "title": "知らせ始める使用量 (%)",
+      "description": "コンテキストの使用量がこれを超えたら合図を出す",
+      "default": 50,
+      "min": 1
+    },
+    "urgentPercent": {
+      "type": "number",
+      "title": "急ぎにする使用量 (%)",
+      "description": "これを超えたら「今 /compact してください」「次の区切りで必ず」にする",
+      "default": 75,
+      "min": 1
+    },
+    "memoDir": {
+      "type": "string",
+      "title": "引き継ぎメモのフォルダ",
+      "description": "この下のファイルを書いたら区切りとみなす (絶対パス)。空ならメモは見ない",
+      "default": ""
+    }
+  }
+}
