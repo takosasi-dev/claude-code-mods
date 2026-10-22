@@ -1,6 +1,6 @@
 {
   "name": "fail-log",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "/errors で、ツールが失敗した記録(ツール・入力の頭・エラーの 1 行目・時刻)を残し、よく落ちる物の棒グラフと最近の一覧をペインに描く",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

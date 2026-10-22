@@ -48,7 +48,7 @@ export function seeds(now: number): PromptBookItem[] {
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0)
 
-/** store から読んだ値を形を確かめて戻す。配列でなければ undefined (まだ保存が無い) */
+/** store から読んだ値を形を確かめて戻す。配列でなければ undefined (まだ保存が無い)。知らない欄はそのまま残す */
 export function fromSaved(v: unknown): PromptBookItem[] | undefined {
   if (!Array.isArray(v)) return undefined
   const out: PromptBookItem[] = []
@@ -58,7 +58,9 @@ export function fromSaved(v: unknown): PromptBookItem[] | undefined {
     if (typeof r.body !== 'string' || r.body.trim() === '') continue
     const id = typeof r.id === 'string' && r.id !== '' && !out.some(o => o.id === r.id) ? r.id : `old${i}`
     const tags = Array.isArray(r.tags) ? parseTags(r.tags.filter(t => typeof t === 'string').join(',')) : []
+    // 知らない欄 (新しい版が足した欄) は残す
     out.push({
+      ...r,
       id,
       title: titleOf(typeof r.title === 'string' ? r.title : '', r.body),
       body: r.body,

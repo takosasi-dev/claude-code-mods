@@ -323,8 +323,13 @@ test('/agents を登録できればそれでペインを開く', async ($, on) =
   const world = newWorld()
   const registered: string[] = []
   engine(on, world, name => void registered.push(name))
+  on('command.run', { command: 'agent-watch' }, () => ({ text: 'ほかの agent-watch' }))
   await start($)
   expect(registered).toEqual(['agents'])
+  // /agents を持てた時は、/agent-watch をその名前の持ち主に回す (横取りしない)
+  const other = await $.command.run({ command: 'agent-watch', args: '', origin: { kind: 'composer' }, presentation })
+  expect(other).toMatchObject({ text: 'ほかの agent-watch' })
+  expect(world.isOpen).toBe(false)
   const r = await $.command.run({ command: 'agents', args: '', origin: { kind: 'composer' }, presentation })
   expect(r).toMatchObject({ text: 'サブエージェントのペインを開きました。' })
   expect(world.isOpen).toBe(true)

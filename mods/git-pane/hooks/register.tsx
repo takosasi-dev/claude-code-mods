@@ -24,9 +24,10 @@ const COMMIT_MSG =
 
 // git を読むだけ。書き込む操作 (commit・add・stash など) は呼ばない。
 // GIT_OPTIONAL_LOCKS=0: status が読むついでに index を書き直さない (Claude の git add/commit と index.lock でぶつからない)。
-// core.fsmonitor=false: リポジトリの設定が指すコマンドを走らせない
+// core.fsmonitor=false・log.showSignature=false: リポジトリの設定が指すコマンド (fsmonitor・gpg.program) を走らせない。
+// ponytail: filter.<name>.clean は止める -c が無い (status・diff-files が作業ツリーを読む時に走りうる)。mod-guide の限界に書く
 const git = ($: EngineInterface, cwd: string, args: string[]) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', ...args], {
+  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', ...args], {
     cwd,
     env: { GIT_OPTIONAL_LOCKS: '0' },
     timeoutMs: 15_000,
@@ -121,7 +122,8 @@ export const register: Register = on => {
 
   // /git を持てなかった時は、その名前の持ち主 (組み込みなど) に回す
   on('command.run', { command: 'git' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'gitpane' }, async $ => openPane($))
+  // /git を持てた時は /gitpane を登録していないので、同じ名前の別のコマンドに回す
+  on('command.run', { command: 'gitpane' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)

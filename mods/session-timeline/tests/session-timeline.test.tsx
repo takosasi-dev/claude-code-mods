@@ -161,9 +161,12 @@ test('/timeline を登録して開く。取れなければ /session-timeline に
     return e.name === 'timeline' && isTaken ? { deny: '組み込みと被っています' } : { value: { command: e.name } }
   })
   on('command.run', { command: 'timeline' }, () => ({ text: 'ほかの timeline' }))
+  on('command.run', { command: 'session-timeline' }, () => ({ text: 'ほかの session-timeline' }))
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['timeline'])
   expect(await $.command.run({ command: 'timeline', ...RUN })).toMatchObject({ text: 'タイムラインを開きました。' })
+  // /timeline を持てた時は、/session-timeline をその名前の持ち主に回す (横取りしない)
+  expect(await $.command.run({ command: 'session-timeline', ...RUN })).toMatchObject({ text: 'ほかの session-timeline' })
   isTaken = true
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['timeline', 'timeline', 'session-timeline'])

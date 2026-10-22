@@ -197,8 +197,10 @@ export const listOf = (raw: unknown) =>
     .map(x => baseName(x.trim()))
     .filter(x => x !== '')
 
-// 頭に付いても中身は後ろのコマンド (env X=1 cmd、nohup cmd など)
-const PREFIX = new Set(['env', 'nohup', 'exec', 'time', 'command', 'sudo', 'nice', 'call', '.'])
+// 頭に付いても中身は後ろのコマンド (env X=1 cmd、nohup cmd、then cmd、! cmd、xargs cmd など)
+const PREFIX = new Set(['env', 'nohup', 'exec', 'time', 'command', 'sudo', 'nice', 'call', '.', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', 'xargs'])
+// xargs の、値を後ろの語に取るオプション
+const XARGS_VALUE = /^-[nILPdEsa]$/
 // 文字や検索を出すだけのコマンド (grep Media.SoundPlayer src などを数えない)
 const TEXTUAL = new Set(['echo', 'printf', 'write-host', 'write-output', 'write-verbose', 'grep', 'egrep', 'rg', 'select-string', 'sls', 'findstr', 'git', 'gh'])
 const INFO = /^(?:--?version|-v|--?help|-h|-\?)$/i
@@ -207,20 +209,100 @@ const BROWSERS = new Set(['chrome', 'msedge', 'chromium', 'chromium-browser', 'g
 const PLAYERS = new Set(['ffplay', 'afplay', 'aplay', 'paplay', 'say'])
 const CODE_INFO = /^--(?:version|list-extensions|install-extension|uninstall-extension|help|status|locate-shell-integration-path)$|^-[vh]$/i
 
-/** 頭の VAR=値・前置き (env・nohup など) を飛ばした、コマンドの名前の位置 */
-function headAt(words: Word[]) {
+// ── claude -p の隔離 (環境変数の状態)
+
+/** 決めた CLAUDE_CONFIG_DIR・ANTHROPIC_BASE_URL の値 (決めていなければ undefined) と、CLAUDE_CODE_PLUGIN_DIRS を消したか */
+export type Env = { configDir?: string; baseUrl?: string; pluginDirsGone: boolean }
+export const NO_ENV: Env = { pluginDirsGone: false }
+
+/** 変数を決める (value が undefined なら消す)。見張る 3 つのほかは何もしない */
+function setVar(env: Env, name: string, value: string | undefined): Env {
+  const v = value === '$null' ? '' : value
+  const n = name.toUpperCase()
+  if (n === 'CLAUDE_CONFIG_DIR') return { ...env, configDir: v }
+  if (n === 'ANTHROPIC_BASE_URL') return { ...env, baseUrl: v }
+  if (n === 'CLAUDE_CODE_PLUGIN_DIRS') return { ...env, pluginDirsGone: v === undefined || v === '' }
+  return env
+}
+
+/** 本物の ~/.claude を指さない、空でない CLAUDE_CONFIG_DIR か */
+const isOwnConfigDir = (v: string | undefined) => v !== undefined && v.trim() !== '' && !/(?:^|[\\/])\.claude[\\/]?$/i.test(v.trim())
+/** モデルを呼ばない (この PC の中を指す) ANTHROPIC_BASE_URL か */
+const isLocalUrl = (v: string | undefined) => v !== undefined && /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(v.trim())
+
+/** claude -p を隔離して走らせる環境か。一時の CLAUDE_CONFIG_DIR・この PC の中の ANTHROPIC_BASE_URL・CLAUDE_CODE_PLUGIN_DIRS を消す、の 3 つ */
+export const isIsolated = (env: Env) => isOwnConfigDir(env.configDir) && isLocalUrl(env.baseUrl) && env.pluginDirsGone
+
+/**
+ * 頭の VAR=値・前置き (env・nohup・then・xargs・timeout など)・PowerShell の $x = を飛ばした、コマンドの名前の位置。
+ * local はこの区切りだけに効く環境 (VAR=値 cmd・env -u)、persist は後ろの区切りにも残る環境 ($env:X = ...)
+ */
+function headAt(words: Word[], shell: Shell, env: Env) {
+  let local = env
+  let persist = env
   let k = 0
   while (k < words.length) {
     const w = words[k]?.bare ?? ''
-    if (/^[A-Za-z_]\w*=/.test(w)) k++
-    else if (PREFIX.has(baseName(w))) {
+    const name = baseName(w)
+    const ps = shell === 'powershell' ? /^\$(\w+(?::\w+)?)(?:=(.*))?$/s.exec(words[k]?.text ?? '') : null
+    if (ps && (ps[2] !== undefined || words[k + 1]?.bare === '=')) {
+      // $env:X = 値 は後ろにも残る。$p = New-Object ... は代入の後ろがコマンド
+      const v = ps[2] ?? words[k + 2]?.text ?? ''
+      const envName = /^env:(\w+)$/i.exec(ps[1] ?? '')?.[1]
+      if (envName !== undefined) {
+        local = setVar(local, envName, v)
+        persist = setVar(persist, envName, v)
+      }
+      k += ps[2] !== undefined ? 1 : 2
+    } else if (/^[A-Za-z_]\w*=/.test(w)) {
+      const t = words[k]?.text ?? ''
+      local = setVar(local, t.slice(0, t.indexOf('=')), t.slice(t.indexOf('=') + 1))
       k++
-      // env -u NAME / -i
-      while (/^-/.test(words[k]?.bare ?? '')) k += words[k]?.bare === '-u' ? 2 : 1
-    } else if (baseName(w) === 'timeout' && words.length > k + 1) k += /^\d/.test(words[k + 1]?.text ?? '') ? 2 : 1
-    else break
+    } else if (PREFIX.has(name)) {
+      k++
+      while (/^-/.test(words[k]?.bare ?? '')) {
+        const o = words[k]?.text ?? ''
+        if (name === 'env') {
+          // env -u NAME・-uNAME・--unset=NAME・-i (全部消す)
+          const m = /^(?:-u|--unset=?)(.*)$/.exec(o)
+          if (m) {
+            const target = m[1] === '' ? words[k + 1]?.text : m[1]
+            local = setVar(local, target ?? '', undefined)
+            k += m[1] === '' ? 2 : 1
+            continue
+          }
+          if (o === '-i' || o === '-' || o === '--ignore-environment') local = { pluginDirsGone: true }
+          k++
+        } else if (name === 'xargs') k += XARGS_VALUE.test(o) ? 2 : 1
+        else k += o === '-u' ? 2 : 1
+      }
+    } else if (name === 'timeout' && words.length > k + 1) {
+      // timeout -s KILL -k 5 --preserve-status 10 cmd
+      k++
+      while (/^-/.test(words[k]?.text ?? '')) k += /^(?:-s|-k|--signal|--kill-after)$/.test(words[k]?.text ?? '') ? 2 : 1
+      if (/^\d/.test(words[k]?.text ?? '')) k++
+    } else break
   }
-  return k
+  return { at: k, local, persist }
+}
+
+/** その区切りが後ろに残す環境 (export X=…・unset X・Remove-Item Env:X) */
+function persistOf(name: string, args: Word[], env: Env): Env {
+  let out = env
+  if (name === 'export') {
+    for (const w of args) {
+      if (!/^[A-Za-z_]\w*=/.test(w.bare)) continue
+      out = setVar(out, w.text.slice(0, w.text.indexOf('=')), w.text.slice(w.text.indexOf('=') + 1))
+    }
+  } else if (name === 'unset') {
+    for (const w of args) if (!/^-/.test(w.text)) out = setVar(out, w.text, undefined)
+  } else if (['remove-item', 'ri', 'rm', 'del', 'erase'].includes(name)) {
+    for (const w of args) {
+      const m = /^env:[\\/]?(\w+)$/i.exec(w.text)
+      if (m) out = setVar(out, m[1] ?? '', undefined)
+    }
+  }
+  return out
 }
 
 const WINDOW_FIX = '開くと窓が出ます。開くのは依頼者に任せ、パスを伝えてください (中身を確かめるなら読むだけにする)'
@@ -238,15 +320,39 @@ const hasHidden = (args: Word[]) =>
 const hasFlag = (args: Word[], re: RegExp) => args.some(w => re.test(w.text))
 const hasDummyAudio = (args: Word[]) => args.some((w, k) => /^--audio-driver(?:=dummy)?$/i.test(w.text) && (/=dummy$/i.test(w.text) || (args[k + 1]?.text ?? '').toLowerCase() === 'dummy'))
 
-/** 入れ子のシェル (powershell -Command "...", cmd /c ..., bash -c "...") の中身と、そのシェル */
+/** -EncodedCommand の中身 (base64 の UTF-16LE)。ほどけなければ空 */
+export function decodeEncoded(b64: string) {
+  try {
+    const bin = atob(b64)
+    let s = ''
+    for (let i = 0; i + 1 < bin.length; i += 2) s += String.fromCharCode(bin.charCodeAt(i) | (bin.charCodeAt(i + 1) << 8))
+    return s
+  } catch {
+    return ''
+  }
+}
+
+/** powershell の -e・-ec・-en…(-EncodedCommand の頭) か (-ex は -ExecutionPolicy なので違う) */
+const isEncodedFlag = (t: string) => {
+  const m = /^[-/](\w+)$/.exec(t)
+  const s = m?.[1]?.toLowerCase() ?? ''
+  return s === 'e' || s === 'ec' || (s.length >= 2 && 'encodedcommand'.startsWith(s))
+}
+
+/** 入れ子のシェル (powershell -Command "...", -EncodedCommand ..., iex "...", cmd /c ..., bash -c "...") の中身と、そのシェル */
 function innerOf(name: string, args: Word[]): { command: string; shell: Shell } | undefined {
   const after = (re: RegExp) => {
     const k = args.findIndex(w => re.test(w.text))
     return k < 0 ? undefined : args.slice(k + 1).map(w => w.text).join(' ')
   }
   if (name === 'powershell' || name === 'pwsh') {
+    const enc = args.findIndex(w => isEncodedFlag(w.text))
+    if (enc >= 0) return { command: decodeEncoded(args[enc + 1]?.text ?? ''), shell: 'powershell' }
     const command = after(/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?:?$/i)
     return command === undefined ? undefined : { command, shell: 'powershell' }
+  }
+  if (name === 'iex' || name === 'invoke-expression') {
+    return { command: args.filter(w => !/^-c(?:ommand)?:?$/i.test(w.text)).map(w => w.text).join(' '), shell: 'powershell' }
   }
   if (name === 'cmd') {
     const command = after(/^\/[ck]$/i)
@@ -259,19 +365,32 @@ function innerOf(name: string, args: Word[]): { command: string; shell: Shell } 
   return undefined
 }
 
-/** 1 つの区切りの中で見つけた物 */
-function inSegment(words: Word[], shell: Shell, windowApps: readonly string[], envOk: boolean, depth: number): Found[] {
-  const at = headAt(words)
+/** 1 つの区切りの中で見つけた物と、後ろの区切りに残す環境 */
+function inSegment(words: Word[], shell: Shell, windowApps: readonly string[], env: Env, depth: number): { found: Found[]; env: Env } {
+  const { at, local, persist } = headAt(words, shell, env)
   const head = words[at]
-  if (head === undefined) return []
+  if (head === undefined) return { found: [], env: persist }
   const name = baseName(head.text)
   const args = words.slice(at + 1)
+  const after = persistOf(name, args, persist)
+  return { found: findIn(head, name, args, shell, windowApps, local, depth), env: after }
+}
+
+const WINDOW_APPS = new Set(['notepad', 'mshta', 'xdg-open'])
+const PYTHONS = /^(?:python[\d.]*w?|py|pythonw)$/
+// playwright のうち窓を開くコマンド (codegen・open と、その別名 cr・ff・wk、記録や報告の表示)
+const PLAYWRIGHT_WINDOW = /^(?:codegen|open|cr|ff|wk|show-trace|show-report)$/i
+const CLAUDE_PKG = /^@anthropic-ai\/claude-code(?:@\S*)?$/i
+const CLAUDE_SUB = new Set(['plugin', 'mcp'])
+const PRINT = /^-[A-Za-z]*p|^--print(?:=|$)/
+
+function findIn(head: Word, name: string, args: Word[], shell: Shell, windowApps: readonly string[], env: Env, depth: number): Found[] {
   const found: Found[] = []
   const win = (what: string, fix: string) => found.push({ group: 'window', what, fix })
   const snd = (what: string, fix: string) => found.push({ group: 'sound', what, fix })
 
   const inner = innerOf(name, args)
-  if (inner && depth < 3) return classifyIn(inner.command, inner.shell, windowApps, envOk, depth + 1)
+  if (inner && depth < 3) return classifyIn(inner.command, inner.shell, windowApps, env, depth + 1)
 
   if (windowApps.includes(name)) win(`${name} は窓のアプリ (設定 windowApps)`, '窓のアプリは自分で起動しないでください。確かめは自動テストか窓の出ないやり方にして、実画面は依頼者に頼んでください')
   const isInfo = hasFlag(args, INFO)
@@ -289,9 +408,20 @@ function inSegment(words: Word[], shell: Shell, windowApps: readonly string[], e
     win('godot に --headless が無い', '--headless を付けてください (窓も音も出ません)')
     if (!hasDummyAudio(args)) snd('godot に --audio-driver Dummy も --headless も無い', '--headless か --audio-driver Dummy を付けてください')
   }
+  if (WINDOW_APPS.has(name)) win(`${name} で窓を開く`, WINDOW_FIX)
+  if (name === 'rundll32') {
+    if (hasFlag(args, /messagebeep/i)) snd('rundll32 の MessageBeep で音を鳴らす', SOUND_FIX)
+    if (hasFlag(args, /^(?:FileProtocolHandler|OpenURL|ShellExec_RunDLL)$/i)) win('rundll32 でファイルや URL を開く', WINDOW_FIX)
+  }
   const all = [head, ...args]
-  if (hasFlag(all, /^--headed$/) && all.some(w => /playwright/i.test(w.text))) win('playwright を --headed で動かす', '--headed を外してください (headless で動かす)')
+  const pw = all.findIndex(w => /(?:^|[\\/@])playwright(?:@\S*)?$/i.test(w.text))
+  if (pw >= 0 || all.some(w => /playwright/i.test(w.text))) {
+    if (hasFlag(all, /^--headed$/)) win('playwright を --headed で動かす', '--headed を外してください (headless で動かす)')
+    if (hasFlag(all, /^--ui$/)) win('playwright を --ui で動かす', '--ui を外してください (headless で動かし、結果はレポートのファイルで読む)')
+    if (pw >= 0 && PLAYWRIGHT_WINDOW.test(all[pw + 1]?.text ?? '')) win(`playwright ${all[pw + 1]?.text} で窓を開く`, WINDOW_FIX)
+  }
   if (RUNNERS.has(name) && all.some(w => /\bheadless\s*[:=]\s*false\b/i.test(w.text))) win('ブラウザを headless: false で動かす', 'headless: true (Python は headless=True) にしてください')
+  if ((PYTHONS.test(name) || name === 'uv') && all.some(w => /\bwinsound\b/.test(w.text))) snd('python の winsound で音を鳴らす', SOUND_FIX)
 
   if (PLAYERS.has(name) && !isInfo && !(name === 'aplay' && hasFlag(args, /^-[lL]$/))) {
     snd(`${name} で音を鳴らす`, name === 'say' ? SOUND_FIX : `${name} で鳴らさず、ffprobe か ffmpeg -i <file> -f null - で中身を確かめてください`)
@@ -304,25 +434,28 @@ function inSegment(words: Word[], shell: Shell, windowApps: readonly string[], e
     if (/\bmedia\.(?:soundplayer|systemsounds)\b/i.test(seen)) snd('SoundPlayer / SystemSounds で音を鳴らす', SOUND_FIX)
     if (/speechsynthesizer|\bsapi\.spvoice\b/i.test(seen)) snd('読み上げ (SpeechSynthesizer / SAPI) で声を出す', SOUND_FIX)
     if (/::playsound\b/i.test(seen)) snd('PlaySound で音を鳴らす', SOUND_FIX)
+    if (/\[(?:system\.)?diagnostics\.process\]::start\b/i.test(seen)) win('[Diagnostics.Process]::Start で起動する', WINDOW_FIX)
   }
 
-  if (name === 'claude' && !isInfo && args[0]?.text !== 'plugin' && hasFlag(args, /^(?:-p|--print)$/) && !envOk) {
+  // npx @anthropic-ai/claude-code -p も claude と同じ
+  const pkg = (name === 'npx' || name === 'bunx' || name === 'pnpx') && args.find(w => !/^-/.test(w.text))
+  const claudeArgs = name === 'claude' ? args : pkg && CLAUDE_PKG.test(pkg.text) ? args.slice(args.indexOf(pkg) + 1) : undefined
+  if (claudeArgs && !hasFlag(claudeArgs, INFO) && !CLAUDE_SUB.has(claudeArgs[0]?.text ?? '') && hasFlag(claudeArgs, PRINT) && !isIsolated(env)) {
     found.push({ group: 'headless', what: 'claude -p を隔離なしで走らせる', fix: CLAUDE_FIX })
   }
   return found
 }
 
-/** コマンドの中で CLAUDE_CONFIG_DIR と ANTHROPIC_BASE_URL の両方を決めているか (X=... か $env:X = ...) */
-export function isIsolated(segs: Word[][]) {
-  const bare = segs.map(ws => ws.map(w => w.bare).join(' ')).join('\n')
-  const sets = (name: string) => new RegExp(String.raw`(?:^|\s)(?:\$env:)?${name}\s*=`, 'im').test(bare)
-  return sets('CLAUDE_CONFIG_DIR') && sets('ANTHROPIC_BASE_URL')
-}
-
-function classifyIn(command: string, shell: Shell, windowApps: readonly string[], envOk: boolean, depth: number): Found[] {
-  const segs = parse(command, shell)
-  const ok = envOk || isIsolated(segs)
-  return segs.flatMap(ws => inSegment(ws, shell, windowApps, ok, depth))
+/** 区切りを頭から順に見る。export X=… や $env:X = … は後ろの区切りにも効く */
+function classifyIn(command: string, shell: Shell, windowApps: readonly string[], outer: Env, depth: number): Found[] {
+  let env = outer
+  const found: Found[] = []
+  for (const ws of parse(command, shell)) {
+    const r = inSegment(ws, shell, windowApps, env, depth)
+    env = r.env
+    found.push(...r.found)
+  }
+  return found
 }
 
 /**
@@ -330,7 +463,7 @@ function classifyIn(command: string, shell: Shell, windowApps: readonly string[]
  * 文字列・コメント・ヒアドキュメントの中は数えない。windowApps は いつも窓とみなす名前
  */
 export function classify(command: string, shell: 'bash' | 'powershell', windowApps: readonly string[] = []): Found[] {
-  const found = classifyIn(command, shell, windowApps, false, 0)
+  const found = classifyIn(command, shell, windowApps, NO_ENV, 0)
   return found.filter((f, k) => found.findIndex(x => x.what === f.what) === k)
 }
 
@@ -342,7 +475,8 @@ const ACTIONS: readonly RunAction[] = ['blocked', 'asked-yes', 'asked-no', 'told
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0)
 
-const isEntry = (v: unknown): v is RunEntry =>
+/** この版が描ける記録の 1 件か (知らない action・group の行は描かないが、store には残す) */
+export const isEntry = (v: unknown): v is RunEntry =>
   isObj(v) &&
   typeof v.at === 'number' &&
   typeof v.command === 'string' &&
@@ -351,7 +485,13 @@ const isEntry = (v: unknown): v is RunEntry =>
   v.groups.length > 0 &&
   v.groups.every(g => GROUPS.includes(g as RunGroup))
 
-/** store の生の値を読む。読めない所は既定にする (記録の 1 件は元の物のまま持つので、知らない欄も残る) */
+/** 表に出す記録。この版が描ける行だけ、新しい LOG_MAX 件 */
+export const shownLog = (s: RunSaved) => s.log.filter(isEntry).slice(-LOG_MAX)
+
+/**
+ * store の生の値を読む。読めない所は既定にする。記録の行は物ならそのまま持つ
+ * (知らない欄・知らない action の行も書き戻す。描く時に shownLog で濾す)
+ */
 export function fromRaw(raw: unknown): RunSaved {
   const o = isObj(raw) ? raw : {}
   const off = isObj(o.off) ? o.off : {}
@@ -359,9 +499,14 @@ export function fromRaw(raw: unknown): RunSaved {
   return {
     off: { window: off.window === true, sound: off.sound === true, headless: off.headless === true },
     counts: { window: num(counts.window), sound: num(counts.sound), headless: num(counts.headless) },
-    log: Array.isArray(o.log) ? o.log.filter(isEntry).slice(-LOG_MAX) : [],
+    log: Array.isArray(o.log) ? (o.log.filter(isObj) as RunEntry[]) : [],
   }
 }
+
+/** 書き戻してよい形か (無い・この形の物)。違えば書かない (書くと記録を消してしまう) */
+export const isWritable = (raw: unknown) =>
+  raw === undefined ||
+  (isObj(raw) && (raw.off === undefined || isObj(raw.off)) && (raw.counts === undefined || isObj(raw.counts)) && (raw.log === undefined || Array.isArray(raw.log)))
 
 /** raw のうち known に無い欄 (この版が知らない、新しい版が書いた物)。物でなければ空 */
 export function unknownOf(raw: unknown, known: Iterable<string>): Record<string, unknown> {
@@ -438,9 +583,10 @@ const ACTION: Record<RunAction, { word: string; color: () => string }> = {
   told: { word: '伝えた', color: () => C.yellow },
 }
 
-const clock = (ms: number) => {
-  const d = new Date(ms)
-  return [d.getHours(), d.getMinutes()].map(n => String(n).padStart(2, '0')).join(':')
+/** 日本時間 (JST) の時:分 */
+export const clock = (ms: number) => {
+  const d = new Date(ms + 9 * 3_600_000)
+  return [d.getUTCHours(), d.getUTCMinutes()].map(n => String(n).padStart(2, '0')).join(':')
 }
 const groupsOf = (e: RunEntry) => e.groups.map(g => GROUP_NAME[g]).join('・')
 
@@ -448,7 +594,8 @@ export type PaneInput = { saved: RunSaved; mode: Mode }
 
 /** ペインの SVG 1 枚。記録は新しい順に全部 (最大 50) */
 export function paneSvg(i: PaneInput) {
-  const { off, counts, log } = i.saved
+  const { off, counts } = i.saved
+  const log = shownLog(i.saved)
   const total = GROUPS.reduce((a, g) => a + counts[g], 0)
   const allOff = GROUPS.every(g => off[g])
   const accent = allOff ? C.dim : C.green
@@ -485,7 +632,8 @@ export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boo
 
 /** Svg の alt と terminal で使う文の行 */
 export function paneLines(i: PaneInput): Line[] {
-  const { off, counts, log } = i.saved
+  const { off, counts } = i.saved
+  const log = shownLog(i.saved)
   const allOff = GROUPS.every(g => off[g])
   const lines: Line[] = [
     { text: allOff ? '見張っていません' : '見張り中', isBold: true, color: allOff ? undefined : 'success' },

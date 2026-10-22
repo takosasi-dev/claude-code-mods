@@ -10,6 +10,8 @@ const NOW = Date.parse('2026-10-22T03:00:00Z')
 const DAY = 86_400_000
 const DIR = 'D:/backup'
 const OPTIONS = { options: { backupDir: DIR } }
+// 何日も時計を進めるので、同時に走らせると既定の 5 秒を超えることがある
+const SLOW = { ...OPTIONS, timeoutMs: 20_000 }
 const PANE = {
   plugin: 'dev-rpg',
   component: 'Pane',
@@ -80,7 +82,7 @@ const turn = async ($: Engine) => {
 
 const SAVED = { ...INITIAL_SAVED, xp: xpToReach(12), turns: 40, futureField: 1 }
 
-test('控えは JST の日に 1 回だけ、store の生の値 (知らない欄ごと) を書く。日が変わればまた書く', OPTIONS, async ($, on) => {
+test('控えは JST の日に 1 回だけ、store の生の値 (知らない欄ごと) を書く。日が変わればまた書く', SLOW, async ($, on) => {
   const s = await boot($, on, SAVED)
   for (let i = 0; i < 3; i++) await turn($)
   expect(s.writes).toHaveLength(1)
@@ -115,13 +117,35 @@ test('「控えから戻す」で日付を選び、確かめてから戻すと�
   expect(s.stored().xp).not.toBe(old.xp)
   await ui.press({ key: 'restore:2026-10-19' })
   await ui.press({ key: 'restore:yes' })
-  expect(s.stored()).toEqual(old)
-  expect(s.hero()).toMatchObject({ xp: old.xp, turns: 300, deepest: 12 })
+  // 控えの値を知らない欄ごと戻し、世代だけ上げる (別の窓が戻す前の差分を足さないように)
+  expect(s.stored()).toEqual({ ...old, epoch: 1 })
+  expect(s.hero()).toMatchObject({ xp: old.xp, turns: 300, deepest: 12, epoch: 1, synced: { epoch: 1 } })
   expect(await ui.find({ type: 'Text', text: '2026-10-19 の記録に戻しました' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'restore:yes' })).toBeUndefined()
   // その後のターンは戻した記録に足す
   await turn($)
   expect(s.stored()).toMatchObject({ xp: old.xp + 10, turns: 301, futureField: 1 })
+})
+
+// 監査の再現 (audit/store/t2.mjs)。共通の手 (listBackups / backupDaily) が壊れた枠を飛ばす・上書きすること
+test('控えの枠が 1 つ壊れていても、残りの控えが一覧に出て、壊れた枠の曜日も書き直される', SLOW, async ($, on) => {
+  const old = { ...INITIAL_SAVED, xp: xpToReach(20) }
+  const files = new Map([
+    [`${DIR}/dev-rpg/hero-1.json`, JSON.stringify({ day: '2026-10-19', value: old })],
+    [`${DIR}/dev-rpg/hero-2.json`, '{"day":"2026-10-1'],
+    [`${DIR}/dev-rpg/hero-5.json`, 'null'],
+    [`${DIR}/dev-rpg/hero-6.json`, JSON.stringify({ day: `2026-10-18${String.fromCharCode(7)}`, value: old })],
+  ])
+  // NOW (2026-10-22 JST) は木曜 = 枠 4。壊れた枠 2 の曜日 (2026-10-27 火曜 JST) にも控えを書く
+  const s = await boot($, on, SAVED, files)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'restore' })
+  // 今日の分 (同じファイルの前の試験で今日の控えを書いていれば、この試験では書かない) と 10-19。壊れた枠・日付に制御文字のある枠は出ない
+  const days = (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('restore:2'))
+  expect(days.filter(k => k !== 'restore:2026-10-22')).toEqual(['restore:2026-10-19'])
+  await s.clock.advance(5 * DAY)
+  await turn($)
+  expect(JSON.parse(s.files.get(`${DIR}/dev-rpg/hero-2.json`)!)).toMatchObject({ day: '2026-10-27' })
 })
 
 test('新しい版が入ったら (plugin.json の版が変わったら) 記録を書かず、トーストで 1 回だけ開き直しを頼む', OPTIONS, async ($, on) => {

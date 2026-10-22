@@ -1,7 +1,15 @@
 {
   "name": "toast-inbox",
-  "version": "0.2.1",
-  "description": "/inbox でほかの mod が出したトーストとステータス行を 100 件まで残し、未読・mod ごとの件数・絞り込みで見返す。行を押すと出した mod を開く",
+  "version": "0.3.0",
+  "description": "/inbox でほかの mod が出したトースト (設定でステータス行も) を 100 件まで残し、未読・mod ごとの件数・絞り込みで見返す。行を押すと出した mod を開く",
   "author": { "name": "takosasi-dev" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "keepStatus": {
+      "type": "boolean",
+      "title": "ステータス行も残す",
+      "description": "オンにすると、ほかの mod のステータス行も受け箱に残す (実況のように何度も出す mod があると埋まるので、既定はオフでトーストだけ残す)",
+      "default": false
+    }
+  }
 }

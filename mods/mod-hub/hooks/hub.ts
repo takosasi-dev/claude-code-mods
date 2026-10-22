@@ -86,18 +86,17 @@ export const splitPins = (list: readonly Launcher[], pins: readonly string[]) =>
 
 export const RECENT_MAX = 20
 
-/** 開いた記録を先頭に足す (同じ名前の古い記録は抜く) */
+/** 開いた記録を先頭に足す (同じ名前の古い記録は抜く。その知らない欄は新しい記録に残す) */
 export const pushRecent = (recent: readonly ModHubRecent[], name: string, at: number): ModHubRecent[] =>
-  [{ name, at }, ...recent.filter(r => r.name !== name)].slice(0, RECENT_MAX)
+  [{ ...recent.find(r => r.name === name), name, at }, ...recent.filter(r => r.name !== name)].slice(0, RECENT_MAX)
 
 /** $.store から読んだ物の形を確かめる。違えば undefined */
 export const asPins = (v: unknown): string[] | undefined =>
   Array.isArray(v) && v.every(x => typeof x === 'string') ? (v as string[]) : undefined
 
+/** 読んだ記録はそのまま (知らない欄も残す)。数で切るのは足す時 (pushRecent) だけ */
 export const asRecent = (v: unknown): ModHubRecent[] | undefined =>
-  Array.isArray(v) && v.every(x => typeof x?.name === 'string' && typeof x?.at === 'number')
-    ? (v as ModHubRecent[]).slice(0, RECENT_MAX)
-    : undefined
+  Array.isArray(v) && v.every(x => typeof x?.name === 'string' && typeof x?.at === 'number') ? (v as ModHubRecent[]) : undefined
 
 /** 見出しの右下に置く季節の小さな飾り (中心 346,66・大きさ 30 ほど) */
 // 色は C から読むので、描くたびに作る (テーマに付いていく)

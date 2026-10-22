@@ -1,6 +1,6 @@
 // テストの出力を読み、ペインの SVG と terminal 用の行を組む。どれも純関数
 import type { TestRunnerMark, TestRunnerResult, TestRunnerRun, TestRunnerStatus } from '../types'
-import { C, HEADER_H, countUp, frame, header } from './style'
+import { C, HEADER_H, clean as cleanText, countUp, esc, frame, header } from './style'
 
 const MONO = 'ui-monospace, Consolas, monospace'
 export const HISTORY = 20
@@ -13,7 +13,7 @@ export const splitCommand = (s: string) => s.trim().split(/\s+/).filter(Boolean)
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
 // 色の後に残った制御文字も落とす。Code は制御文字を含むと描かれない (タブと改行は残す)
-const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g
 const clean = (out: string) => out.replace(ANSI, '').replace(/\r(?!\n)/g, '\n').replace(CTRL, '').split(/\r?\n/)
 
 /** 出力の末尾 n 行 (色の制御文字と末尾の空行は落とす) */
@@ -92,17 +92,21 @@ export function isTestCommand(command: string, configured = '') {
 export const isCommitCommand = (command: string) =>
   segments(command).some(s => /^(?:\S*[\\/])?git(?:\.exe)?\b(?:\s+(?:-[cC]\s+\S+|--?[\w-]+(?:=\S+)?))*\s+commit\b/i.test(s))
 
-/** Claude の Bash / PowerShell の結果から 1 回分を組む。エラーで返ったら失敗、止められたら中断 */
+/**
+ * Claude の Bash / PowerShell の結果から 1 回分を組む。エラーで返ったら失敗、止められたら中断。
+ * 終了コードが 0 でも、出力の数で失敗が 1 件以上なら失敗 (npm test | tail のようにパイプで終了コードが消える)
+ */
 export function claudeResult(command: string, text: string, isError: boolean, isInterrupted: boolean, ms: number, finishedAt: number): TestRunnerResult {
   const code = /exit code[:\s]+(-?\d+)/i.exec(text.slice(0, 2000))
+  const counts = countResults(text)
   return {
-    status: isInterrupted ? 'stopped' : isError ? 'fail' : 'pass',
-    command: command.trim().replace(/\s+/g, ' '),
+    status: isInterrupted ? 'stopped' : isError || (counts.failed ?? 0) > 0 ? 'fail' : 'pass',
+    command: cleanText(command).replace(/\s+/g, ' '),
     exitCode: isError ? (code ? Number(code[1]) : null) : 0,
     ms,
     finishedAt,
     tail: tailOf(text),
-    ...countResults(text),
+    ...counts,
     source: 'claude',
   }
 }
@@ -133,9 +137,9 @@ export function cardOf(run: TestRunnerRun, command: string): { tone: string; tit
   return { tone: 'warning', title: '途中で止めました', sub }
 }
 
-/** 終わり方から状態を決める */
-export const statusOf = (exitCode: number | null, stoppedBy: 'user' | 'timeout' | undefined): TestRunnerStatus =>
-  stoppedBy === 'user' ? 'stopped' : stoppedBy === 'timeout' ? 'timeout' : exitCode === 0 ? 'pass' : 'fail'
+/** 終わり方から状態を決める。終了コードが 0 でも、出力の数で失敗が 1 件以上なら失敗 */
+export const statusOf = (exitCode: number | null, stoppedBy: 'user' | 'timeout' | undefined, failed = 0): TestRunnerStatus =>
+  stoppedBy === 'user' ? 'stopped' : stoppedBy === 'timeout' ? 'timeout' : exitCode === 0 && failed === 0 ? 'pass' : 'fail'
 
 /** 「この失敗を直して」に入れる出力の末尾の文字数 */
 export const PROMPT_TAIL = 4000
@@ -158,9 +162,10 @@ export function fixPrompt(r: TestRunnerResult) {
 
 export const seconds = (ms: number) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} 秒` : ms < 120_000 ? `${Math.round(ms / 1000)} 秒` : `${Math.floor(ms / 60_000)} 分 ${Math.round((ms % 60_000) / 1000)} 秒`)
 
+/** 日本時間 (JST) の時:分:秒 */
 export const clockLabel = (ms: number) => {
-  const d = new Date(ms)
-  return [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':')
+  const d = new Date(ms + 9 * 3_600_000)
+  return [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map(n => String(n).padStart(2, '0')).join(':')
 }
 
 const LABEL: Record<TestRunnerStatus, string> = { pass: '通過', fail: '失敗', stopped: '止めました', timeout: '時間切れ' }
@@ -168,9 +173,10 @@ const LABEL: Record<TestRunnerStatus, string> = { pass: '通過', fail: '失敗'
 const colorOf = (status: TestRunnerStatus) => ({ pass: C.green, fail: C.red, stopped: C.dim, timeout: C.red })[status]
 const MARK: Record<TestRunnerStatus, string> = { pass: '●', fail: '■', stopped: '○', timeout: '■' }
 
-// 全角は 2、半角は 1 と数えた幅で、頭を残して末尾を … にする
+// 全角は 2、半角は 1 と数えた幅で、頭を残して末尾を … にする。外から来た文字なので制御文字も落とす (Text と帯に出す前)
 const wide = (ch: string) => /[⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch)
-export function headFit(s: string, max: number) {
+export function headFit(raw: string, max: number) {
+  const s = cleanText(raw)
   if ([...s].reduce((n, ch) => n + (wide(ch) ? 2 : 1), 0) <= max) return s
   let out = ''
   let n = 1
@@ -181,8 +187,6 @@ export function headFit(s: string, max: number) {
   }
   return `${out}…`
 }
-
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 /** 共通の見出し帯の下に body を置く(body は見出しを除いた座標で書く)。信号の光り方の defs も入れる。
  * 光沢の白(#ffffff)は灯の玉の絵の中身なので、テーマで変えない */
@@ -340,18 +344,18 @@ export function paneLines(run: TestRunnerRun, history: TestRunnerMark[], command
   const lines: Line[] = []
   if (run.kind === 'idle') {
     if (command === '') lines.push({ text: UNSET_HINT, color: 'yellow' })
-    else lines.push({ text: '未実行', isBold: true }, { text: command, isDim: true })
+    else lines.push({ text: '未実行', isBold: true }, { text: cleanText(command), isDim: true })
   } else if (run.kind === 'running') {
-    lines.push({ text: `実行中 (開始 ${clockLabel(run.startedAt)})`, color: 'yellow', isBold: true }, { text: run.command, isDim: true })
+    lines.push({ text: `実行中 (開始 ${clockLabel(run.startedAt)})`, color: 'yellow', isBold: true }, { text: cleanText(run.command), isDim: true })
   } else if (run.kind === 'error') {
-    lines.push({ text: `起動できません: ${run.message}`, color: 'red' }, { text: run.command, isDim: true })
+    lines.push({ text: `起動できません: ${cleanText(run.message)}`, color: 'red' }, { text: cleanText(run.command), isDim: true })
   } else {
     const r = run.result
     const color = r.status === 'pass' ? 'green' : r.status === 'stopped' ? undefined : 'red'
     lines.push({ text: `${LABEL[r.status]} / 所要 ${seconds(r.ms)} / 終了コード ${r.exitCode ?? '─'}`, color, isBold: true })
     if (r.source === 'claude') lines.push({ text: 'Claude が走らせた結果', isDim: true })
     if (r.passed !== undefined || r.failed !== undefined) lines.push({ text: `通過 ${r.passed ?? 0} / 失敗 ${r.failed ?? 0}` })
-    lines.push({ text: r.command, isDim: true })
+    lines.push({ text: cleanText(r.command), isDim: true })
   }
   if (history.length > 0) lines.push({ text: `直近 ${history.map(h => MARK[h.status]).join('')} (● 通過 / ■ 失敗 / ○ 中断)`, isDim: true })
   return lines

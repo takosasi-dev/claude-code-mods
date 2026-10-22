@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DraftBump, DraftReport } from '../types'
-import { MAX_BUMPS, MAX_COMMITS, askText, commitDirOf, draftText, isCommit, isVersionFile, paneLines, paneSvg, parseLog, resolveDir, versionOf } from './draft'
-import { followTheme, readTheme, short } from './style'
+import { MAX_BUMPS, MAX_COMMITS, askText, commitDirOf, draftText, isCommit, isVersionFile, paneLines, paneSvg, parseLog, resolveDir, tagOf, versionOf } from './draft'
+import { clean, followTheme, jstDay, readTheme, short } from './style'
 
 const PANE = 'release-draft'
 const TITLE = 'リリースノートの下書き'
@@ -22,10 +22,11 @@ let loadSeq = 0
 const SHELL_TOOLS = ['Bash', 'PowerShell']
 
 // git を読むだけ。書き込む操作は呼ばない。
-// GIT_OPTIONAL_LOCKS=0 で index を書き直さない。core.fsmonitor=false と --no-textconv / --no-ext-diff で
-// リポジトリの設定が指すコマンドを走らせない。--literal-pathspecs でパスをワイルドカードとして読まない
+// GIT_OPTIONAL_LOCKS=0 と diff-index で index を書き直さない。core.fsmonitor=false と log.showSignature=false で
+// リポジトリの設定が指すコマンド (fsmonitor・gpg.program) を走らせない。--literal-pathspecs でパスをワイルドカードとして読まない。
+// ponytail: filter.<name>.clean は止める -c が無い (diff-index が作業ツリーを読む時に走りうる)。mod-guide の限界に書く
 const git = ($: $, cwd: string, args: string[]) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '--literal-pathspecs', ...args], {
+  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '--literal-pathspecs', ...args], {
     cwd,
     env: { GIT_OPTIONAL_LOCKS: '0' },
     timeoutMs: 20_000,
@@ -41,13 +42,15 @@ async function readReport($: $): Promise<DraftReport> {
     if (top.exitCode !== 0) return { kind: 'not-repo', dir }
     const root = top.stdout.trim()
     const described = await git($, root, ['describe', '--tags', '--abbrev=0'])
-    const tag = described.exitCode === 0 && described.stdout.trim() !== '' ? described.stdout.trim() : null
-    const range = tag ? `${tag}..HEAD` : 'HEAD'
+    const tag = tagOf(described.exitCode === 0 ? described.stdout : '')
+    // rev は refs/tags/ を付けて渡し、前に --end-of-options を置く (タグ名を git のオプションとして読ませない)
+    const ref = tag ? `refs/tags/${tag}` : null
+    const range = ref ? `${ref}..HEAD` : 'HEAD'
     const [log, count, changed, untracked] = await Promise.all([
-      git($, root, ['log', '--no-merges', '--format=%h%x00%s', '-n', String(tag ? MAX_COMMITS : 50), range]),
-      tag ? git($, root, ['rev-list', '--count', '--no-merges', range]) : undefined,
-      // タグと作業ツリーを比べる (まだコミットしていない版上げも拾う)
-      tag ? git($, root, ['diff', '--name-only', '--no-renames', '--no-textconv', '--no-ext-diff', tag]) : undefined,
+      git($, root, ['log', '--no-merges', '--format=%h%x00%s', '-n', String(tag ? MAX_COMMITS : 50), '--end-of-options', range]),
+      ref ? git($, root, ['rev-list', '--count', '--no-merges', '--end-of-options', range]) : undefined,
+      // タグと作業ツリーを比べる (まだコミットしていない版上げも拾う)。git diff は index を書くので diff-index
+      ref ? git($, root, ['diff-index', '--name-only', '--no-renames', '--end-of-options', ref]) : undefined,
       git($, root, ['ls-files', '--others', '--exclude-standard']),
     ])
     const commits = log.exitCode === 0 ? parseLog(log.stdout) : []
@@ -58,10 +61,10 @@ async function readReport($: $): Promise<DraftReport> {
     if (tag) {
       const paths = [...tracked, ...fresh].filter(isVersionFile).slice(0, MAX_BUMPS)
       const read1 = async (path: string) => {
-        const old = tracked.includes(path) ? await git($, root, ['show', `${tag}:${path}`]) : undefined
+        const old = tracked.includes(path) ? await git($, root, ['show', '--end-of-options', `${ref}:${path}`]) : undefined
         const from = old && old.exitCode === 0 ? versionOf(old.stdout) : undefined
         const now = versionOf(await $.fs.read(`${root.replace(/[\\/]+$/, '')}/${path}`).catch(() => undefined))
-        if (now && now.version !== from?.version) bumps.push({ path, name: now.name || from?.name || path, ...(from ? { from: from.version } : {}), to: now.version })
+        if (now && now.version !== from?.version) bumps.push({ path, name: now.name || from?.name || clean(path), ...(from ? { from: from.version } : {}), to: now.version })
       }
       for (const path of paths) await read1(path)
     }
@@ -92,10 +95,7 @@ async function load($: $) {
 
 const isOpen = async ($: $) => (await $.ui.panes()).some(p => p.id === PANE)
 
-const todayOf = (ms: number) => {
-  const d = new Date(ms)
-  return [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n, k) => (k === 0 ? String(n) : String(n).padStart(2, '0'))).join('-')
-}
+const todayOf = jstDay
 
 async function ask($: $) {
   const report = await read($, REPORT)
@@ -123,7 +123,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'release' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'release-draft' }, openPane)
+  // 本来の名前を持てた時は予備名を登録していないので、同じ名前の別のコマンドに回す
+  on('command.run', { command: 'release-draft' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   // Claude がコミットしたら、その場所を覚えて (cd してからのコミットが多いので)、ペインが開いていれば読み直す
   on('tool.call', async ($, e, next) => {
@@ -133,7 +134,8 @@ export const register: Register = on => {
     if (typeof command !== 'string' || !isCommit(command)) return r
     const dir = resolveDir(commitDirOf(command), await $.session.cwd())
     await update($, REPO, () => dir)
-    if (await isOpen($)) await load($)
+    // 読み直しは待たない (git を何本も呼ぶので、ツールの結果を返すのを遅らせない)
+    if (await isOpen($)) void load($).catch(() => {})
     return r
   }).catch(($, e, next) => next(e))
 

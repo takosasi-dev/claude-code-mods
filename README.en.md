@@ -44,7 +44,7 @@ The mods' on-screen text is in Japanese.
 | turn-haiku | `/haiku` | Every time a turn ends, turns what was done into a 5-7-5 haiku on a vertical tanzaku card. Offers seasonal kigo (season words) as candidates. A list of past haiku |
 | session-timeline | `/timeline` | The turns and tool calls of this session as a horizontal band chronology. Colored by tool type, red marks for failures, thin bands for subagents, a yellow edge on turns of a minute or more |
 | file-map | `/filemap` | The files read or written in this session as rectangles grouped by folder (a treemap). Bigger means touched more; orange was written, blue was only read |
-| toast-inbox | `/inbox` | An inbox that keeps up to 100 toasts and status lines from other mods. Unread count, counts per mod, filter by mod, mark all as read, clear. Press a notification to open the pane of the mod that sent it |
+| toast-inbox | `/inbox` | An inbox that keeps up to 100 toasts from other mods (status lines too, if you turn it on). Unread count, counts per mod, filter by mod, mark all as read, clear. Press a notification to open the pane of the mod that sent it |
 | usage-history | `/history` | A record of your usage across days. Bars of turns or output tokens per day (7 / 30 days), total and daily average, and a heatmap of weekday by hour. Shares the last 7 days with other mods (week-card). Daily backups |
 | fail-log | `/errors` | Keeps up to 200 failed tool calls. Bars of "frequent failures" grouping similar ones, a recent list, and counts for today and overall. Subagent failures are shown in purple |
 | daily-quest | `/quest` | Three daily tasks (from 8 kinds such as turns, editing files, tests, and commits). Progress bars, rewards, streak, and the last 7 days. Rewards go to dev-rpg as experience and to turn-gacha as bonus pulls. Records are backed up daily and can be restored from the pane |
@@ -353,6 +353,10 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - rule-watch counts a dev log as written by Write / Edit and by paths in shell commands. Writes through MCP tools are not counted
 - In the dev-rpg dungeon you take one step per turn and fight the floor's enemy automatically after 8 steps. If you fall, you keep half of the bag's experience
 - week-card starts its daily snapshots on the day you install it, so the growth numbers appear from the next day. It computes the dev-rpg level with a copy of dev-rpg's formula
+- ship-guard counts as approval only an AskUserQuestion that Claude itself asked, where the question asks about publishing and the answer is yes ("no", a "yes" to an unrelated question, or another mod's prompt do not count)
+- From 0.10.1, mods that write records do not write when the record cannot be read (they used to overwrite it with the local copy, which could erase it)
+- fail-log masks secret-looking parts of failed commands and errors (`Bearer …`, `TOKEN=…`, URL userinfo, `ghp_` and so on) before keeping them. Secrets with no recognizable shape may still be kept
+- Do not trust the `.git/config` of a repository you received from someone else. The git-reading mods turn off `fsmonitor`, `textconv` and `log.showSignature`, but cannot stop a `.gitattributes` `filter` clean command
 
 ## Mods that need settings
 
@@ -369,6 +373,7 @@ These mods show "not set" until you set the file or folder they read. Set it in 
 | pre-check | `testCommand` / `timeoutSeconds` | Same as test-runner. If empty, the test item is skipped |
 | compact-cue | `notifyPercent` / `urgentPercent` | Usage (%) at which the cue starts and becomes urgent (default 50 / 75) |
 | compact-cue | `memoDir` | Folder of handoff notes; writing there also counts as a break point (works without it) |
+| toast-inbox | `keepStatus` | Also keep other mods' status lines (default off, since mods like live commentary update them constantly) |
 | ship-guard | `checkBeforePush` | Check the contents before push (default on) |
 | ship-guard | `allowedEmails` / `privateWords` | Emails not to flag (comma separated, `@example.org` for a whole domain) and words to flag in added lines or author names |
 | rule-watch | `checkEnglish` / `checkQuestion` | Watch for English replies and text questions (default on) |

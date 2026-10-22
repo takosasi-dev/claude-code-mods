@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { RunAction, RunGroup, RunSaved } from '../types'
-import { EMPTY, GROUPS, GROUP_NAME, NO, YES, addEntry, askText, classify, denyText, fromRaw, headOf, listOf, modeOf, noteText, paneLines, paneSvg, withUnknown } from './guard'
+import type { RunAction, RunEntry, RunGroup, RunSaved } from '../types'
+import { EMPTY, GROUPS, GROUP_NAME, LOG_MAX, NO, YES, addEntry, askText, classify, denyText, fromRaw, headOf, isWritable, listOf, modeOf, noteText, paneLines, paneSvg, withUnknown } from './guard'
 import type { Found, Mode } from './guard'
 import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
@@ -30,11 +30,20 @@ async function load($: $) {
 // ponytail: 書き込みはこのセッションの中で 1 本ずつ (読み直し → 書く の間に別の書き込みを挟まない)。別のセッションとは読み直しで合わせる
 let chain: Promise<unknown> = Promise.resolve()
 
-/** 書く直前に読み直し、知らない欄を残して書く。古い版のままなら書かない */
+let toldBroken = false
+
+/** 書く直前に読み直し、知らない欄を残して書く。古い版のまま・読めない (reject・形が違う) なら書かない */
 function save($: $, change: (s: RunSaved) => RunSaved): Promise<boolean> {
   const run = async () => {
     if (!(await mayWrite($, await $.clock.now()))) return false
     const raw = await $.store.get(KEY)
+    if (!isWritable(raw)) {
+      if (!toldBroken) {
+        toldBroken = true
+        $.ui.toast('run-guard: 記録を読めなかったので、記録は書いていません (見張りは続けます)', { timeoutMs: 8000 })
+      }
+      return false
+    }
     const mine = change(fromRaw(raw))
     await $.store.set(KEY, withUnknown(raw, mine))
     await update($, SAVED, () => mine)
@@ -45,11 +54,20 @@ function save($: $, change: (s: RunSaved) => RunSaved): Promise<boolean> {
   return p
 }
 
+// 書けなかった記録 (読めない・古い版・store が拒んだ)。次に書ける時に一緒に足す
+let pending: RunEntry[] = []
+
 async function record($: $, found: Found[], command: string, action: RunAction) {
   const groups = [...new Set(found.map(f => f.group))]
   try {
     const at = await $.clock.now()
-    await save($, s => addEntry(s, { at, groups, command: headOf(command), action }))
+    pending = [...pending, { at, groups, command: headOf(command), action }].slice(-LOG_MAX)
+    let took: RunEntry[] = []
+    const ok = await save($, s => {
+      took = pending
+      return took.reduce(addEntry, s)
+    })
+    if (ok) pending = pending.filter(e => !took.includes(e))
   } catch {
     // 記録が書けなくても見張りは続ける
   }
@@ -123,7 +141,8 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'runguard' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'run-guard' }, openPane)
+  // /runguard を持てた時は予備名を開かない (同じ名前の別のコマンドを横取りしない)
+  on('command.run', { command: 'run-guard' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   on('tool.call', { tool: 'Bash' }, ($, e, next) => guard($, e.command, 'bash', () => next(e)))
   on('tool.call', { tool: 'PowerShell' }, ($, e, next) => guard($, e.command, 'powershell', () => next(e)))
@@ -157,7 +176,7 @@ export const register: Register = (on, options) => {
             ),
           )}
         </Box>
-        <Text dimColor>見るのは Bash と PowerShell のコマンドです。窓は Start-Process (-WindowStyle Hidden なし)・start・ii・explorer・code・godot や chrome (--headless なし)、音は Beep・SoundPlayer・読み上げ・ffplay など、headless は CLAUDE_CONFIG_DIR と ANTHROPIC_BASE_URL を決めずに走らせる claude -p です。</Text>
+        <Text dimColor>見るのは Bash と PowerShell のコマンドです。窓は Start-Process (-WindowStyle Hidden なし)・start・ii・explorer・code・godot や chrome (--headless なし)、音は Beep・SoundPlayer・読み上げ・ffplay など、headless は一時の CLAUDE_CONFIG_DIR・127.0.0.1 の ANTHROPIC_BASE_URL・CLAUDE_CODE_PLUGIN_DIRS を消す、の 3 つをそろえずに走らせる claude -p です。</Text>
       </Box>
     )
   })

@@ -47,10 +47,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await readTheme($)
     // /tokens が組み込みにあると拒まれる。その時は /token-meter にし、/tokens は組み込みに任せる
-    ownsTokens = await $.command
-      .register({ name: 'tokens', description: 'ターンごとのトークン数とキャッシュの当たり率をペインに表示' })
-      .then(() => true)
-      .catch(() => false)
+    const got = await $.command.register({ name: 'tokens', description: 'ターンごとのトークン数とキャッシュの当たり率をペインに表示' }).catch(() => undefined)
+    ownsTokens = got?.command === 'tokens'
     if (!ownsTokens) {
       await $.command.register({ name: 'token-meter', description: 'ターンごとのトークン数とキャッシュの当たり率をペインに表示' }).catch(() => {})
     }
@@ -58,7 +56,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'tokens' }, ($, e, next) => (ownsTokens ? open($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'token-meter' }, open)
+  // /tokens を持てた時は /token-meter を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'token-meter' }, ($, e, next) => (ownsTokens ? next(e) : open($))).catch(($, e, next) => next(e))
 
   // /clear で数え直す
   on('session.end', async ($, e, next) => {

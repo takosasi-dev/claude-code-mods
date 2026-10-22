@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { MockClock } from 'claude-code/testing'
 
-import { claudeResult, countResults, failingLine, fixPrompt, isCommitCommand, isTestCommand, paneSvg, splitCommand, statusOf, tailOf } from '../hooks/runner'
+import { cardOf, claudeResult, clockLabel, countResults, failingLine, fixPrompt, isCommitCommand, isTestCommand, paneLines, paneSvg, splitCommand, statusOf, tailOf } from '../hooks/runner'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const CWD = '/tmp/demo'
@@ -287,6 +287,16 @@ test('/testrun が拒まれたら /test-runner で開き、/testrun は横取り
   expect(opened).toEqual(['test-runner'])
 })
 
+test('/testrun を持てた時は、予備名の /test-runner を横取りしない', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', { command: 'test-runner' }, () => ({ text: '別の test-runner' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const other = await $.command.run({ command: 'test-runner', args: '', origin: { kind: 'composer' }, presentation })
+  expect(other).toMatchObject({ text: '別の test-runner' })
+})
+
 // ── v0.1.1 で直した物
 const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/
 
@@ -360,7 +370,7 @@ const BAND = {
   props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 80, scroll: { offset: 0, bodyRows: 11 }, view: {} },
 } as const
 
-/** Claude のシェルのツールの代役。fail に入れたコマンドはエラーで返す */
+/** Claude のシェルのツールの代役。fail に入れたコマンドは text をエラーで返し、ほかは通った出力 (JEST_PASS) を返す */
 const mockShell = (on: On, fail: string[], text: string) => {
   const toasts: string[] = []
   on('ui.toast', (_$, e) => {
@@ -371,7 +381,7 @@ const mockShell = (on: On, fail: string[], text: string) => {
   on('tool.call', (_$, e) => {
     const command = String((e as unknown as { command?: unknown }).command ?? '')
     if (fail.includes(command)) return { isError: true, result: `Exit code 1\n${text}`, text: `Exit code 1\n${text}` } as never
-    return { result: { stdout: text, stderr: '', interrupted: false }, text } as never
+    return { result: { stdout: JEST_PASS, stderr: '', interrupted: false }, text: JEST_PASS } as never
   })
   return toasts
 }
@@ -390,6 +400,29 @@ test('純関数: テストとコミットの見分け・Claude の結果', () =>
   expect(failingLine({ kind: 'done', result: r })).toBe('テストが落ちたままです: 失敗 1 件 npm test (/testrun で見る)')
   expect(failingLine({ kind: 'done', result: { ...r, status: 'pass' } })).toBe('')
   expect(failingLine({ kind: 'idle' })).toBe('')
+
+  // 監査の再現: パイプで終了コードが 0 でも、数で失敗が 1 件以上なら落ちている
+  const out = 'FAIL src/a.test.ts\nTests:       2 failed, 10 passed, 12 total\n'
+  expect(isTestCommand('npm test 2>&1 | tail -20')).toBe(true)
+  const piped = claudeResult('npm test 2>&1 | tail -20', out, false, false, 1000, 0)
+  expect(piped).toMatchObject({ status: 'fail', passed: 10, failed: 2 })
+  expect(cardOf({ kind: 'done', result: piped }, '').title).toBe('落ちています(2 件)')
+  expect(failingLine({ kind: 'done', result: piped })).toContain('失敗 2 件')
+  expect(claudeResult('npx vitest run | Select-Object -Last 20', JEST_PASS, false, false, 1, 0).status).toBe('pass')
+  // 数が拾えない時は今までどおり終了コードで決める
+  expect(claudeResult('npm test | tail', 'built ok\n', false, false, 1, 0).status).toBe('pass')
+  expect([statusOf(0, undefined, 2), statusOf(0, undefined, 0), statusOf(null, 'user', 2)]).toEqual(['fail', 'pass', 'stopped'])
+
+  // コマンドの制御文字 (C0・DEL・C1) は帯・カード・行に出す前に落とす
+  const dirty = claudeResult('npm\x1btest\x85 --x\x7f', 'Tests: 1 failed\n', true, false, 1, 0)
+  const DIRTY = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
+  expect(DIRTY.test(failingLine({ kind: 'done', result: dirty }))).toBe(false)
+  expect(DIRTY.test(cardOf({ kind: 'done', result: dirty }, '').sub)).toBe(false)
+  for (const run of [{ kind: 'done' as const, result: { ...dirty, command: 'npm\x1btest' } }, { kind: 'error' as const, command: 'a\x07b', message: 'spawn\x1b[31m ENOENT\x9b' }])
+    for (const l of paneLines(run, [], 'npm\x1btest')) expect([l.text, DIRTY.test(l.text)]).toEqual([l.text, false])
+  expect(DIRTY.test(tailOf('a\x85b\x9bc'))).toBe(false)
+  // 時刻は日本時間
+  expect(clockLabel(Date.parse('2026-10-22T15:30:05Z'))).toBe('00:30:05')
 })
 
 test('Claude が走らせたテストを履歴に入れ、落ちている間は帯を出す。通れば消える', SET, async ($, on) => {

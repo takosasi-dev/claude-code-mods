@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { addDay, fillText, fortune, isResult, jstDate, objOf, paneLines, paneSvg, toDays } from './omikuji'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'code-omikuji'
 const TITLE = 'おみくじ'
@@ -23,13 +23,22 @@ let ownsMain = false
 
 /** 今日の本番を決めて store と state に置く。同じ日なら store の分をそのまま使う (形が合わなければ作り直す) */
 async function drawToday($: EngineInterface) {
-  const date = jstDate(await $.clock.now())
-  const saved = await $.store.get('today')
+  const now = await $.clock.now()
+  const date = jstDate(now)
+  // 読めない時 (例外・形が違う) は引いて見せるだけで、store には書かない (上書きしない)
+  const BROKEN = Symbol('broken')
+  const saved: unknown = await $.store.get('today').catch(() => BROKEN)
+  const kept: unknown = await $.store.get('history').catch(() => BROKEN)
   // 引き直す時も、知らない欄 (新しい版が足した欄) は残して書く
   const today = isResult(saved) && saved.date === date ? saved : { ...objOf(saved), ...fortune(date) }
-  const history = addDay(toDays(await $.store.get('history')), { date, rank: today.rank })
-  if (today !== saved) await $.store.set('today', today)
-  await $.store.set('history', history)
+  const history = addDay(toDays(kept), { date, rank: today.rank })
+  const isPlain = typeof saved === 'object' && saved !== null && !Array.isArray(saved)
+  const canWrite = saved !== BROKEN && kept !== BROKEN && (saved === undefined || isPlain) && (kept === undefined || Array.isArray(kept))
+  // 新しい版が入ったのに古い版のまま動いている時も書かない
+  if (canWrite && (await mayWrite($, now))) {
+    if (today !== saved) await $.store.set('today', today).catch(() => {})
+    await $.store.set('history', history).catch(() => {})
+  }
   await update($, TODAY, () => today)
   await update($, HISTORY, () => history)
   return today
@@ -118,6 +127,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    await rememberVersion($).catch(() => {})
     // /omikuji が拒まれたら (組み込みと被ったら) /code-omikuji にする
     const got = await $.command.register({ name: 'omikuji', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'omikuji'
@@ -129,7 +139,8 @@ export const register: Register = on => {
 
   // /omikuji を持てなかった時は、元の /omikuji に回す
   on('command.run', { command: 'omikuji' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'code-omikuji' }, async $ => openPane($))
+  // /omikuji を持てた時は /code-omikuji を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'code-omikuji' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { EditLogDetail, EditLogEntry } from '../types'
 import { detailLines, detailSvg, diffBody, fileStats, linesOf, overviewLines, overviewSvg, parentDir, plain, relPath } from './editlog'
-import { followTheme, readTheme } from './style'
+import { clean, followTheme, readTheme } from './style'
 
 const PANE = 'edit-log'
 const TITLE = '変更ログ'
@@ -34,16 +34,17 @@ async function record($: $, tool: string, input: Record<string, unknown>, isErro
   await update($, ENTRIES, list => {
     const id = (list[list.length - 1]?.id ?? 0) + 1
     // file は git に渡すのでそのまま。label は画面と入力欄の文にだけ使うので制御文字を落とす
-    const entry: EditLogEntry = { id, at, file, label: plain(relPath(cwd, file)), tool, isError, lines: linesOf(tool, input), isSub }
+    const entry: EditLogEntry = { id, at, file, label: clean(relPath(cwd, file)), tool, isError, lines: linesOf(tool, input), isSub }
     return [...list, entry].slice(-KEEP)
   })
 }
 
 // git を読むだけ。書き込む操作は呼ばない。
 // --literal-pathspecs: パスの [ ] * を形として読まない。core.fsmonitor=false: リポジトリが指すコマンドを走らせない。
-// GIT_OPTIONAL_LOCKS=0: 読むついでに index を書き直さない
+// GIT_OPTIONAL_LOCKS=0: 読むついでに index を書き直さない。log.showSignature=false: gpg.program を走らせない。
+// ponytail: filter.<name>.clean は止める -c が無い (diff-files が作業ツリーを読む時に走りうる)。mod-guide の限界に書く
 const git = ($: $, cwd: string, args: string[]) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '--literal-pathspecs', ...args], {
+  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '--literal-pathspecs', ...args], {
     cwd,
     env: { GIT_OPTIONAL_LOCKS: '0' },
     timeoutMs: 15_000,
@@ -133,7 +134,8 @@ export const register: Register = on => {
 
   // /edits を持てなかった時は、その名前の持ち主 (組み込みなど) に回す
   on('command.run', { command: 'edits' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'edit-log' }, openPane)
+  // /edits を持てた時は /edit-log を登録していないので、同じ名前の別のコマンドに回す
+  on('command.run', { command: 'edit-log' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   // /clear で記録を空にする
   on('session.end', async ($, e, next) => {

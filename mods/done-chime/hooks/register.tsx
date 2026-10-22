@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DoneChimeSettings } from '../types'
-import { followTheme, readTheme } from './style'
-import { DEFAULTS, SOUNDS, THRESHOLDS, VOLUMES, cleanSettings, isWindowsPath, powershellArgv, shouldChime, summary, waveSvg, wavBase64 } from './wav'
+import { clean, followTheme, mayWrite, readTheme, rememberVersion } from './style'
+import { DEFAULTS, SOUNDS, THRESHOLDS, VOLUMES, cleanSettings, isWindowsPath, powershellArgv, powershellExe, shouldChime, summary, waveSvg, wavBase64 } from './wav'
 
 const PANE = 'done-chime'
 const TITLE = '終わりの音'
@@ -15,9 +15,8 @@ const NOTE = atom({ plugin: 'done-chime', key: 'note' } as const, '')
 
 type $ = EngineInterface
 
-// 制御文字を落とす (エンジンは制御文字を含む Text の子を拒み、ペインが閉じる)
-const clean = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim()
-const head = (s: string) => clean(s).slice(0, 200)
+// 制御文字 (C0・DEL・C1) を落とす (エンジンは制御文字を含む Text の子を拒み、ペインが閉じる)
+const head = (s: string) => clean(s).replace(/\s+/g, ' ').slice(0, 200)
 
 // /chime を自分で取れたか (取れなければ /done-chime にして、/chime は横取りしない)
 let ownsMain = false
@@ -32,7 +31,11 @@ const serial = <T,>(f: () => Promise<T>) => {
 
 const change = async <K extends (typeof KEYS)[number]>($: $, key: K, value: DoneChimeSettings[K]) => {
   await update($, SETTINGS, s => ({ ...s, [key]: value }))
-  const ok = await serial(() => $.store.set(key, value)).then(
+  // 古い版のまま動いているなら書かない (mayWrite がトーストで開き直しを頼む)
+  const ok = await serial(async () => {
+    if (!(await mayWrite($, await $.clock.now()))) throw new Error('stale')
+    await $.store.set(key, value)
+  }).then(
     () => true,
     () => false,
   )
@@ -46,7 +49,9 @@ const play = async ($: $, s: DoneChimeSettings) => {
   let note = ''
   try {
     if (isWindowsPath(cwd)) {
-      const r = await $.process.run(powershellArgv(base64), { timeoutMs: 10_000 })
+      // 絶対パスで、mod のフォルダから起こす (作業フォルダに置かれた powershell.exe などを起こさない)
+      const exe = powershellExe(await $.env.get('SystemRoot').catch(() => undefined))
+      const r = await $.process.run(powershellArgv(base64, exe), { cwd: $.plugin.root, timeoutMs: 10_000 })
       if (r.exitCode !== 0) note = `鳴らせませんでした(終了コード ${r.exitCode}): ${head(r.stderr || r.stdout)}`
     } else {
       await $.audio.play({ base64, mime: 'audio/wav' })
@@ -68,6 +73,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await readTheme($)
     const started = await next(e)
+    await rememberVersion($)
     const got = await $.command.register({ name: 'chime', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'chime'
     if (!ownsMain) await $.command.register({ name: 'done-chime', description: DESCRIPTION }).catch(() => {})
@@ -79,7 +85,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'chime' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'done-chime' }, openPane)
+  // /chime を持てた時は予備名を開かない (同じ名前の別のコマンドを横取りしない)
+  on('command.run', { command: 'done-chime' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   on('turn.complete', async ($, e, next) => {
     const s = await read($, SETTINGS)

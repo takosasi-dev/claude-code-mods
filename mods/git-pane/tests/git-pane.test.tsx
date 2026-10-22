@@ -305,6 +305,8 @@ test('index を書き直さない: 任意のロックを止め、未ステージ
   expect(world.calls).toHaveLength(5)
   expect(world.envs?.every(env => env?.GIT_OPTIONAL_LOCKS === '0')).toBe(true)
   expect(world.calls.every(a => a.includes('core.fsmonitor=false'))).toBe(true)
+  // 署名の欄を持つコミットを log が読んでも gpg.program を走らせない
+  expect(world.calls.every(a => a.includes('log.showSignature=false'))).toBe(true)
   // 作業ツリーと index の比べは diff-files (git diff は GIT_OPTIONAL_LOCKS を見ずに index を書く)
   const diffs = world.calls.map(a => sub(a)).filter(a => a[0]?.startsWith('diff'))
   expect(diffs.map(a => a.slice(0, 2).join(' ')).sort()).toEqual(['diff --cached', 'diff-files --numstat'])
@@ -365,6 +367,20 @@ test('/git が拒まれて /gitpane にした時は、/git を横取りしない
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
   expect(await $.command.run({ command: 'git', ...run })).toMatchObject({ text: '組み込みの git' })
   expect(await $.command.run({ command: 'gitpane', ...run })).toMatchObject({ text: 'git のペインを開きました。' })
+})
+
+test('/git を持てた時は /gitpane を横取りしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockGit(on, { repo: 'clean', calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', { command: 'gitpane' }, () => ({ text: '他の gitpane' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'gitpane', ...run })).toMatchObject({ text: '他の gitpane' })
+  expect(await $.command.run({ command: 'git', ...run })).toMatchObject({ text: 'git のペインを開きました。' })
 })
 
 test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {

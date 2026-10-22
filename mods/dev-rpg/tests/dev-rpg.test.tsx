@@ -353,9 +353,13 @@ test('/rpg が取れればそれで開く', async ($, on) => {
     opened.push(e.id)
     return { value: { isPlaced: true as const } }
   })
+  // 予備名の /dev-rpg は登録していないので、同じ名前の別のコマンドを横取りしない
+  on('command.run', { command: 'dev-rpg' }, () => ({ text: '別の dev-rpg' }))
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   const r = await $.command.run({ command: 'rpg', args: '', origin: { kind: 'composer' }, presentation })
   expect(r).toMatchObject({ text: '冒険の書を開きました。' })
+  const other = await $.command.run({ command: 'dev-rpg', args: '', origin: { kind: 'composer' }, presentation })
+  expect(other).toMatchObject({ text: '別の dev-rpg' })
   expect(opened).toEqual(['dev-rpg'])
 })
 

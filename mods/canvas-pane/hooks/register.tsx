@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CanvasBoard } from '../types'
-import { DESCRIPTION as TOOL_DESCRIPTION, INPUT_SCHEMA, KEEP, KIND_NAME, TOOL_NAME, drawChart, parseShow } from './canvas'
+import { DESCRIPTION as TOOL_DESCRIPTION, INPUT_SCHEMA, KEEP, KIND_NAME, TOOL_NAME, drawChart, hhmm, parseShow } from './canvas'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'canvas-pane'
@@ -21,11 +21,6 @@ let ownsMain = false
 const openPane = async ($: $) => {
   await $.ui.open({ id: PANE, title: TITLE })
   return { text: 'キャンバスのペインを開きました。' }
-}
-
-const hhmm = (ms: number) => {
-  const d = new Date(ms)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 /** 前へ・次へ。端では動かない */
@@ -58,7 +53,8 @@ export const register: Register = on => {
 
   // /canvas を持てなかった時は、元の /canvas に回す
   on('command.run', { command: 'canvas' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'canvas-pane' }, openPane)
+  // /canvas を持てた時は予備名を開かない (同じ名前の別のコマンドを横取りしない)
+  on('command.run', { command: 'canvas-pane' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   // Claude が呼ぶツール。入力はモデルから来る外の値なので、全部確かめてから描く
   on('tool.call', { tool: TOOL }, async ($, e) => {

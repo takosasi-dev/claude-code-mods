@@ -166,7 +166,8 @@ export const register: Register = (on, options) => {
 
   // /quest を持てなかった時は、その名前の持ち主に回す
   on('command.run', { command: 'quest' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'daily-quest' }, openPane)
+  // /quest を持てた時は /daily-quest を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'daily-quest' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
     await flush($)

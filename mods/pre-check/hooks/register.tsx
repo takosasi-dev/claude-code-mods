@@ -44,8 +44,10 @@ let loadSeq = 0
 // git を読むだけ。書き込む操作は呼ばない。
 // GIT_OPTIONAL_LOCKS=0 と diff-index / diff-files で index を書き直さない。core.fsmonitor=false と --no-textconv で
 // リポジトリの設定が指すコマンドを走らせない。--literal-pathspecs でパスをワイルドカードとして読まない
+// log.showSignature=false で gpg.program も走らせない。
+// ponytail: filter.<name>.clean は止める -c が無い (diff-files が作業ツリーを読む時に走りうる)。mod-guide の限界に書く
 const git = ($: $, cwd: string, args: string[], stdin?: string) =>
-  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '--literal-pathspecs', ...args], {
+  $.process.run(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '--literal-pathspecs', ...args], {
     cwd,
     env: { GIT_OPTIONAL_LOCKS: '0' },
     timeoutMs: 20_000,
@@ -188,7 +190,8 @@ export const register: Register = (on, options) => {
 
   // /precheck を持てなかった時は、その名前の持ち主に回す
   on('command.run', { command: 'precheck' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'pre-check' }, openPane)
+  // /precheck を持てた時は /pre-check を登録していないので、同じ名前の別のコマンドに回す
+  on('command.run', { command: 'pre-check' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

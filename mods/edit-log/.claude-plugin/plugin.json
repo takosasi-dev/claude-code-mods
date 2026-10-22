@@ -1,6 +1,6 @@
 {
   "name": "edit-log",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "/edits で、このセッションで Claude が変えたファイルを時系列のペインで見る(回数・失敗・git の差分)",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

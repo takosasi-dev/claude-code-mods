@@ -5,7 +5,7 @@ import type { CcDashCall, CcDashLayout, CcDashPanel, CcDashTab, CcDashUsage } fr
 import { knownOrder, layoutOf, move, objOf, PANEL_LABEL, reset, setShown, shownOf } from './layout'
 import { clean, clock, dur, gaugesSvg, left, overviewSvg, shortTool, TOOL_COLORS, timelineSvg, toolBarsSvg, turnsSvg } from './svg'
 import type { Gauge } from './svg'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'cc-dash'
 const TITLE = '計器盤'
@@ -84,7 +84,8 @@ const serial = (f: () => Promise<void>) => {
 
 /**
  * 並びを変える。書く直前に store を読み直し、その値に変更を当てて、知らない欄と知らない枠は残して書く。
- * 読めなければ書かずに画面だけ変える (別のセッションの並びを消さない)
+ * 読めない時 (例外・形が違う) と、新しい版が入ったのに古い版のまま動いている時は、書かずに画面だけ変える
+ * (別のセッションや新しい版の並びを消さない)
  */
 const changeLayout = ($: $, f: (l: CcDashLayout) => CcDashLayout) =>
   serial(async () => {
@@ -95,10 +96,21 @@ const changeLayout = ($: $, f: (l: CcDashLayout) => CcDashLayout) =>
       await update($, layoutA, f)
       return
     }
+    if (!isLayoutShape(raw) || !(await mayWrite($, await $.clock.now()))) {
+      await update($, layoutA, f)
+      return
+    }
     const next = f(layoutOf(raw))
     await update($, layoutA, () => next)
     await $.store.set(LAYOUT_KEY, { ...objOf(raw), ...next }).catch(() => {})
   })
+
+/** store の並びとして読める形か (まだ無い・物で、order と hidden は無いか配列) */
+const isLayoutShape = (raw: unknown) => {
+  if (raw === undefined) return true
+  const o = objOf(raw)
+  return o === raw && (o.order === undefined || Array.isArray(o.order)) && (o.hidden === undefined || Array.isArray(o.hidden))
+}
 
 const gaugesOf = (u: CcDashUsage, now: number): Gauge[] => [
   { label: '5時間枠', pct: u.sessionPct, left: left(u.sessionResetAt, now) },
@@ -119,6 +131,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await readTheme($)
+    await rememberVersion($).catch(() => {})
     await $.command.register({ name: 'dash', description: 'セッションの計器盤をペインに表示' }).catch(() => {})
     // リロードでも session.start は来る。最初の 1 回だけ時刻を入れる
     const now = await $.clock.now()

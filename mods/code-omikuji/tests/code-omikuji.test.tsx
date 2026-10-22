@@ -413,3 +413,72 @@ test('store の今日・この 7 日に知らない欄があっても消さず�
   expect((store.today() as { futureField?: number }).futureField).toBe(1)
   expect(store.writes()).toBe(writes + 1) // history だけ
 })
+
+// ---- 0.3.2 で直した物 ----
+
+const RUN = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+
+test('今日の分が既に 7 日の記録にあれば、その知らない欄も残す', async ($, on) => {
+  const today = fortune(TODAY)
+  const { store, open } = await boot($, on, { today, history: [{ date: TODAY, rank: today.rank, futureField: 3 }] })
+  await open()
+  expect(store.history()).toEqual([{ date: TODAY, rank: today.rank, futureField: 3 } as OmikujiDay])
+  expect(addDay([{ date: TODAY, rank: '吉', futureField: 1 } as OmikujiDay], { date: TODAY, rank: '凶' })).toEqual([{ date: TODAY, rank: '凶', futureField: 1 } as OmikujiDay])
+})
+
+test('store を読めない・形が違う時は、引いて見せるだけで書かない', async ($, on) => {
+  const { store, open } = await boot($, on, { history: { broken: true } })
+  await open()
+  expect(store.history()).toEqual({ broken: true } as never)
+  expect(store.today()).toBeUndefined()
+  expect(store.writes()).toBe(0)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /第/ })).toBeDefined()
+})
+
+test('store.get が断られても、開けて書かない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  let writes = 0
+  on('store.get', () => ({ deny: '読めない' }))
+  on('store.set', () => {
+    writes++
+    return { value: undefined }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  expect(await $.command.run({ command: 'omikuji', ...RUN })).toMatchObject({ text: 'おみくじを開きました。' })
+  expect(writes).toBe(0)
+})
+
+test('/omikuji を持てた時は、/code-omikuji をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  on('command.run', (_$, e) => ({ text: `other ${e.command}` }))
+  const { open } = await boot($, on)
+  expect(await open()).toMatchObject({ text: 'おみくじを開きました。' })
+  expect(await $.command.run({ command: 'code-omikuji', ...RUN })).toMatchObject({ text: 'other code-omikuji' })
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.3.2'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'code-omikuji', version }) }
+    throw new Error('ENOENT')
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const { store, open, clock } = await boot($, on)
+  await open()
+  expect(store.today()?.date).toBe(TODAY)
+  version = '0.4.0'
+  await clock.advance(DAY)
+  await open()
+  await open()
+  expect(store.today()?.date).toBe(TODAY)
+  expect(store.history()?.map(d => d.date)).toEqual([TODAY])
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
+})

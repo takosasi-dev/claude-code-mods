@@ -54,6 +54,8 @@ const PLUGINS = {
     { name: 'demo-status', register: status },
   ],
 }
+/** ステータス行も残す設定 (keepStatus) をオンにした時 */
+const WITH_STATUS = { ...PLUGINS, options: { keepStatus: true } }
 
 type Cmd = { name: string; description: string; source: 'builtin' | 'plugin' | 'user' | 'mcp'; plugin?: string }
 /** commands: $.command.list() の答え。ran: 押して走ったコマンドを積む */
@@ -160,7 +162,7 @@ test('1 ターンで同じ文が 500 件来ても、書き込みは 1 回で最�
   expect(s.items().every(i => i.text === '同じ文')).toBe(true)
 })
 
-test('ステータス行は同じ文の連続を 1 件にし、消した時は記録しない', PLUGINS, async ($, on) => {
+test('ステータス行も残す設定の時: 同じ文の連続を 1 件にし、消した時は記録しない', WITH_STATUS, async ($, on) => {
   const s = await boot($, on)
   for (const [id, answer] of [
     ['s1', '読んでいます'],
@@ -279,7 +281,7 @@ test('mod ごとに開くコマンドを決める (純関数)', () => {
 })
 
 for (const surface of SURFACES) {
-  test(`${surface}: 通知の行を押すと出した mod のコマンドを開き、コマンドの分からない mod の行は押せない`, PLUGINS, async ($, on) => {
+  test(`${surface}: 通知の行を押すと出した mod のコマンドを開き、コマンドの分からない mod の行は押せない`, WITH_STATUS, async ($, on) => {
     const ran: string[] = []
     let list = [cmd('after-main', 'demo-after@example-market'), cmd('demo-after', 'demo-after@example-market'), cmd('before', 'demo-before')]
     const s = await boot($, on, { commands: () => list, ran, store: { items: [item('engine', '本体の通知', NOW - 60_000)] } })
@@ -318,3 +320,74 @@ for (const surface of SURFACES) {
     await again.unmount()
   })
 }
+
+// ---- 0.3.0 で直した物 ----
+
+test('既定ではステータス行を残さず、トーストだけを残す (実況のステータス行で埋まらない)', PLUGINS, async ($, on) => {
+  const s = await boot($, on)
+  for (let k = 0; k < 150; k++) await turn($, `s${k}`, `実況 ${k}`)
+  await turn($, 't1', 'F')
+  await s.clock.advance(1000)
+  expect(s.items().map(i => i.kind)).toEqual(['toast', 'toast'])
+})
+
+test('/inbox を持てた時は、/toast-inbox をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  on('command.run', { command: 'toast-inbox' }, () => ({ text: '別の /toast-inbox' }))
+  await boot($, on)
+  expect((await $.command.run({ command: 'inbox', ...RUN })).text).toBe('通知の受け箱を開きました。')
+  expect((await $.command.run({ command: 'toast-inbox', ...RUN })).text).toBe('別の /toast-inbox')
+})
+
+test('store の通知が読めない形なら書かずに知らせ、溜めた分は直った後に書く', PLUGINS, async ($, on) => {
+  const s = await boot($, on, { store: { items: { broken: true }, readAt: 'x' } })
+  await turn($, 't1', 'G')
+  await s.clock.advance(1000)
+  expect(s.raw.get('items')).toEqual({ broken: true })
+  expect(s.writes()).toBe(0)
+  await $.command.run({ command: 'inbox', ...RUN })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^通知の記録を読めなかったので/ })).toBeDefined()
+  // 既読も、readAt が読めない形なら書かない
+  s.raw.set('items', [])
+  await turn($, 't2', 'H')
+  await s.clock.advance(1000)
+  // 直ったら、前に書けなかった分も一緒に書く
+  expect(s.items().map(i => i.text).sort()).toEqual(['前の mod G', '前の mod H', '後ろの mod G', '後ろの mod H'])
+  expect(await ui.find({ type: 'Text', text: /^通知の記録を読めなかったので/ })).toBeUndefined()
+  await ui.press({ key: 'mark-read' })
+  expect(s.raw.get('readAt')).toBe('x')
+})
+
+test('通知の知らない欄 (新しい版が足した欄) は、足した後も store に残る', PLUGINS, async ($, on) => {
+  const s = await boot($, on, { store: { items: [{ ...item('old', '前の通知', NOW - 1000), futureField: 1 }] } })
+  await turn($, 't1', 'I')
+  await s.clock.advance(1000)
+  const raw = s.raw.get('items') as (InboxItem & { futureField?: number })[]
+  expect(raw).toHaveLength(3)
+  expect(raw[0]).toEqual({ ...item('old', '前の通知', NOW - 1000), futureField: 1 } as InboxItem)
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、開き直しを頼む', PLUGINS, async ($, on) => {
+  let version = '0.3.0'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'toast-inbox', version }) }
+    throw new Error('ENOENT')
+  })
+  const s = await boot($, on)
+  await turn($, 't1', 'J')
+  await s.clock.advance(1000)
+  expect(s.items()).toHaveLength(2)
+  version = '0.4.0'
+  await s.clock.advance(61_000)
+  await turn($, 't2', 'K')
+  await s.clock.advance(1000)
+  await $.command.run({ command: 'inbox', ...RUN })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'mark-read' })
+  await ui.press({ key: 'clear' })
+  await ui.press({ key: 'clear' })
+  expect(s.items()).toHaveLength(2)
+  expect(s.raw.get('readAt')).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /開き直して/ })).toBeDefined()
+})

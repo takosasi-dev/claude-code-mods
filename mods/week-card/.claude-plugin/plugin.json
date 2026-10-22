@@ -1,6 +1,6 @@
 {
   "name": "week-card",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "/week で 1 週間の使い方 (usage-history) と、お題・ガチャの図鑑・冒険の書のレベルとダンジョン・水槽の魚がこの 1 週間でいくつ増えたかを 1 枚のカードにまとめ、週報に貼る文 (Markdown) を入力欄に入れる",
   "author": {
     "name": "takosasi-dev"

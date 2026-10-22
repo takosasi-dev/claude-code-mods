@@ -1,6 +1,6 @@
 {
   "name": "mod-check",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/mod-check でこの mod 集の mod がちゃんと動いているかを 1 回で確かめ、貼れる文にする。隣に並ぶ mod の版がセッション中に変わったら、入力欄の上の帯とトーストで開き直しを頼む。「点検表」タブで実画面の見え方に よい・だめ・まだ を付け、結果を貼る文にする",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

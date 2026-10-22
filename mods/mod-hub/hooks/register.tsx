@@ -5,7 +5,7 @@ import type { ModHubCommand, ModHubRecent, ModHubSort } from '../types'
 import { applyFilter, asPins, asRecent, byCategory, clean, headerSvg, launchers, noteMod, pushRecent, sortRecent, splitPins } from './hub'
 import type { Launcher } from './hub'
 import { bandSvg, categoryColor, modIcon } from './icons'
-import { C, followTheme, readTheme, season } from './style'
+import { C, followTheme, mayWrite, readTheme, rememberVersion, season } from './style'
 
 const PANE = 'mod-hub'
 const TITLE = 'mod'
@@ -21,28 +21,55 @@ const RECENT = atom({ plugin: 'mod-hub', key: 'recent' } as const, [] as ModHubR
 const SORTS: ModHubSort[] = ['category', 'name', 'recent']
 const SORT_LABEL: Record<ModHubSort, string> = { category: '並び: カテゴリー別', name: '並び: 名前順', recent: '並び: 最近開いた順' }
 
+const BROKEN = '保存した記録を読めなかったので、保存していません(上書きしないよう止めています)'
+const STALE = '新しい版が入ったので保存していません。VS Code を開き直してください'
+
+/** store のキーを読む。キーが無ければ empty、読めない時 (例外・形が違う) は undefined */
+async function readKey<T>($: EngineInterface, key: string, as: (v: unknown) => T | undefined, empty: T): Promise<T | undefined> {
+  try {
+    const raw = await $.store.get(key)
+    return raw === undefined ? empty : as(raw)
+  } catch {
+    return undefined
+  }
+}
+
+/** 書いてよいか。古い版のまま動いている時は書かずに知らせる (このセッションの中では効かせる) */
+async function canWrite($: EngineInterface) {
+  if (await mayWrite($, await $.clock.now())) return true
+  await update($, NOTICE, () => STALE)
+  return false
+}
+
 // 並べ方を順に回し、次のセッションにも残す(残せなくてもこのセッションでは効く)
 async function toggleSort($: EngineInterface) {
   let next: ModHubSort = 'category'
   await update($, SORT, s => (next = SORTS[(SORTS.indexOf(s) + 1) % SORTS.length] ?? 'category'))
-  await $.store.set('sort', next).catch(() => {})
+  if (await canWrite($)) await $.store.set('sort', next).catch(() => {})
 }
 
-// 固定する・外す。$.store は他のセッションと共有なので、書く直前に読み直して 1 本だけ足す・抜く
+// 固定する・外す。$.store は他のセッションと共有なので、書く直前に読み直して 1 本だけ足す・抜く。
+// 読めない時は、このセッションの中だけで固定する (store は上書きしない)
 async function setPin($: EngineInterface, name: string, on: boolean) {
-  const saved = asPins(await $.store.get('pins').catch(() => undefined)) ?? (await read($, PINS))
-  const next = on ? [...saved.filter(n => n !== name), name] : saved.filter(n => n !== name)
+  const pin = (list: readonly string[]) => (on ? [...list.filter(n => n !== name), name] : list.filter(n => n !== name))
+  const saved = await readKey($, 'pins', asPins, [])
+  if (!saved) {
+    await update($, PINS, pin)
+    return void (await update($, NOTICE, () => BROKEN))
+  }
+  const next = pin(saved)
   await update($, PINS, () => next)
-  await $.store.set('pins', next).catch(() => {})
+  if (await canWrite($)) await $.store.set('pins', next).catch(() => {})
 }
 
 // 開いた記録を残す(同じく書く直前に読み直す)
 async function noteRecent($: EngineInterface, name: string) {
   const at = await $.clock.now()
-  const saved = asRecent(await $.store.get('recent').catch(() => undefined)) ?? (await read($, RECENT))
+  const saved = await readKey($, 'recent', asRecent, [])
+  if (!saved) return void (await update($, RECENT, list => pushRecent(list, name, at)))
   const next = pushRecent(saved, name, at)
   await update($, RECENT, () => next)
-  await $.store.set('recent', next).catch(() => {})
+  if (await canWrite($)) await $.store.set('recent', next).catch(() => {})
 }
 
 async function loadCommands($: EngineInterface) {
@@ -88,6 +115,7 @@ export const register: Register = on => {
   })
 
   on('session.start', async ($, e, next) => {
+    await rememberVersion($).catch(() => {})
     // /mod が拒まれたら (組み込みと被ったら) /mod-hub にする
     const description = '画面のある mod を開くボタンを並べる'
     const got = await $.command.register({ name: 'mod', description }).catch(() => undefined)
@@ -106,7 +134,8 @@ export const register: Register = on => {
 
   // /mod を持てなかった時は元の /mod を横取りしない
   on('command.run', { command: 'mod' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'mod-hub' }, openPane)
+  // /mod を持てた時は /mod-hub を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'mod-hub' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

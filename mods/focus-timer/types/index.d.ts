@@ -11,7 +11,7 @@ declare module 'claude-code' {
     'focus-timer': {
       /** null は待機 */
       run: FocusTimerRun | null
-      /** ローカル日付 (YYYY-MM-DD) ごとの完了本数。$.store の 'done' にも写す */
+      /** 日本時間の日付 (YYYY-MM-DD) ごとの完了本数。$.store の 'done' にも写す */
       done: Record<string, number>
     }
   }

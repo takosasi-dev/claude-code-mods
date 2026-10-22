@@ -435,7 +435,7 @@ export function sceneOf(tool: string): Scene {
 }
 
 /** 制御文字を落とす (Text の子や SVG に入るとペインが閉じる)。タブと改行は空白に */
-export const clean = (s: string) => s.replace(/[\t\n\r]/g, ' ').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+export const clean = (s: string) => s.replace(/[\t\n\r]/g, ' ').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '')
 
 /** ツールの入力から、触っているファイルの名前 (フォルダは落とす)。無ければ「ファイル」 */
 export function fileOf(input: Record<string, unknown>): string {

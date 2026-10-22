@@ -200,9 +200,7 @@ test('長さは userConfig の focusMinutes / breakMinutes', { options: { focusM
 
 test('前のセッションの今日の本数を store から読み戻す', async ($, on) => {
   mock.clock(on, { now: NOW })
-  const d = new Date(NOW)
-  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  mock.store(on, { done: { [today]: 3, '2000-01-01': 9 } })
+  mock.store(on, { done: { [todayKey()]: 3, '2000-01-01': 9 } })
   bottom(on)
   await start($)
   const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
@@ -256,9 +254,9 @@ test('/focus が組み込みで拒まれたら /focus-timer で開き、/focus �
 
 // ---- 0.1.1 で直した物 ----
 
-const todayKey = () => {
-  const d = new Date(NOW)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+/** 日本時間の YYYY-MM-DD */
+function todayKey(ms = NOW) {
+  return new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10)
 }
 
 test('別のセッションが増やした今日の本数を、古い写しで減らさない (書く直前に読み直して +1)', async ($, on) => {
@@ -351,4 +349,69 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(String((await svgOf(ui, /残り/))?.source)).toMatch(/fill="#0d1117"/)
   expect(String((await svgOf(ui, /^今日の完了/))?.source)).toMatch(/fill="#0d1117"/)
+})
+
+// ---- 0.2.3 で直した物 ----
+
+const presentation = { isFullscreen: false, columns: 80 }
+
+test('日付は日本時間で切り替わる (UTC 15:00 で翌日の分に数える)', async ($, on) => {
+  // 2026-10-20 23:50 JST に始めると、25 分後は 10/21
+  const start0 = Date.parse('2026-10-20T14:50:00Z')
+  const clock = mock.clock(on, { now: start0 })
+  const saved = storeSpy(on)
+  bottom(on)
+  await start($)
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  expect(saved.done).toEqual({ '2026-10-21': 1 })
+})
+
+test('/focus を持てた時は、/focus-timer をその名前の持ち主に回す。別の名前で返されたら持てていない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on)
+  bottom(on)
+  let renamed = false
+  on('command.register', ($, e) => ({ value: { command: renamed && e.name === 'focus' ? 'focus-2' : e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', ($, e) => ({ text: `other ${e.command}` }))
+  await start($)
+  const run = (command: string) => $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation })
+  expect(await run('focus')).toMatchObject({ text: '集中タイマーを開きました。' })
+  expect(await run('focus-timer')).toMatchObject({ text: 'other focus-timer' })
+  // /focus を別の名前にされた時は、/focus は持ち主に回し、/focus-timer で開く
+  renamed = true
+  await start($)
+  expect(await run('focus')).toMatchObject({ text: 'other focus' })
+  expect(await run('focus-timer')).toMatchObject({ text: '集中タイマーを開きました。' })
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.2.3'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'focus-timer', version }) }
+    throw new Error('ENOENT')
+  })
+  const clock = mock.clock(on, { now: NOW })
+  const saved = storeSpy(on)
+  saved.done = { [todayKey()]: 1, futureField: 1 }
+  const toasts = bottom(on)
+  await start($)
+  const vs = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  expect(saved.done).toEqual({ [todayKey()]: 2, futureField: 1 })
+  version = '0.3.0'
+  await clock.advance(5 * MIN)
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  await vs.press({ key: 'skip' })
+  await vs.press({ key: 'start' })
+  await clock.advance(25 * MIN)
+  expect(saved.done).toEqual({ [todayKey()]: 2, futureField: 1 })
+  // 画面の本数は増やす
+  expect(await todayAlt(vs)).toBe('今日の完了 4 本')
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
 })

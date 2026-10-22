@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { addDraw, BOOK_GOALS, bookLines, bookSvg, CARDS, cardOf, cardSvg, claimedFrom, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, questRewards, rates, statsSvg, wrap } from '../hooks/gacha'
+import { addDraw, BOOK_GOALS, bookLines, bookSvg, CARDS, cardOf, cardSvg, claimedFrom, dayKey, EMPTY, fromSaved, goalsMet, manualLeft, PUBLIC_CARDS, pull, questRewards, rates, statsSvg, withUnknown, wrap } from '../hooks/gacha'
 import { setTheme } from '../hooks/style'
 import type { GachaCard, GachaSave } from '../types'
 
@@ -24,7 +24,7 @@ const PANE = {
 } as const
 
 /** エンジンの代わりに一番下で答える。store は手元の Map、トーストは集める */
-const boot = async ($: Engine, on: On, init?: unknown, opts: { quest?: () => unknown; claimed?: string[] } = {}) => {
+const boot = async ($: Engine, on: On, init?: unknown, opts: { quest?: () => unknown; claimed?: string[]; failSave?: () => boolean } = {}) => {
   const clock = mock.clock(on, { now: NOW })
   // daily-quest の state の代わり (無ければ daily-quest が入っていない)
   const quest = opts.quest
@@ -33,6 +33,7 @@ const boot = async ($: Engine, on: On, init?: unknown, opts: { quest?: () => unk
   if (opts.claimed) m.set('questClaimed', opts.claimed)
   on('store.get', (_$, e) => ({ value: m.get(e.key) }))
   on('store.set', (_$, e) => {
+    if (e.key === 'save' && opts.failSave?.()) throw new Error('書けません')
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
   })
@@ -444,6 +445,63 @@ test('知らない欄 (新しい版が書いた物) は、1 ターン後も stor
   expect(raw() as object).toMatchObject({ futureField: 1, book: { x01: { firstAt: NOW, futureGlow: 1 }, zz99: { count: 3, firstAt: NOW } } })
 })
 
+test('履歴の知らない要素 (知らないカード) と知らない欄は、引いた後も store に残る。新しい版の長い履歴も切らない', async ($, on) => {
+  const known = { cardId: 'x01', at: NOW - 1, isNew: true, isClean: false, isManual: false, futureGlow: 1 }
+  const odd = { cardId: 'zz99', at: NOW - 2, isNew: true, isClean: false, isManual: false, futureKind: 'x' }
+  const { raw, saved } = await boot($, on, { ...EMPTY, total: 2, book: { x01: { count: 1, firstAt: NOW - 1 } }, history: [known, odd] })
+  await turn($)
+  const h = (raw() as { history: unknown[] }).history
+  expect(h).toHaveLength(3)
+  expect(h.slice(1)).toEqual([known, odd])
+  // 画面は知っているカードだけ
+  expect(saved().history).toHaveLength(2)
+  // 新しい版が 10 より多く残していれば、その長さのまま (1 枚足して一番古い物を落とす)
+  const long = Array.from({ length: 15 }, (_, i) => ({ cardId: 'n01', at: i, isNew: false, isClean: false, isManual: false }))
+  const draw = { cardId: 'x02', at: NOW, isNew: true, isClean: false, isManual: false }
+  const w = withUnknown({ ...EMPTY, history: long }, fromSaved({ history: long }), [draw]) as { history: unknown[] }
+  expect(w.history).toEqual([draw, ...long.slice(0, 14)])
+})
+
+test('日付は JST で決める (手動の回数は JST の 0 時に戻る)', () => {
+  expect(dayKey(Date.parse('2026-10-21T14:59:59Z'))).toBe('2026-10-21')
+  expect(dayKey(Date.parse('2026-10-21T15:00:00Z'))).toBe('2026-10-22')
+  const used = { ...EMPTY, manualDay: '2026-10-21', manualUsed: 3 }
+  expect(manualLeft(used, Date.parse('2026-10-21T14:59:59Z'))).toBe(0)
+  expect(manualLeft(used, Date.parse('2026-10-21T15:00:00Z'))).toBe(3)
+})
+
+test('ごほうびを引いて残せなかった時は受け取った印を付けず、次のターンに引く', async ($, on) => {
+  let isBroken = true
+  const today = { date: '2026-10-20', quests: [quest('turns-5', true, 2)] }
+  const { saved, claimed } = await boot($, on, undefined, { quest: () => today, failSave: () => isBroken })
+  // セッションの始まりに受け取ろうとしたが、引いた分を書けなかった
+  expect(saved().total).toBe(0)
+  expect(claimed()).toBeUndefined()
+  isBroken = false
+  await turn($)
+  // ターンの 1 枚と、ごほうびの 2 回
+  expect(saved().total).toBe(3)
+  expect(claimed()).toEqual(['2026-10-20:turns-5'])
+  await turn($)
+  expect(saved().total).toBe(4)
+})
+
+test('/gacha を持てた時は、/turn-gacha を横取りしない', async ($, on) => {
+  mock.store(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  const opened: string[] = []
+  on('ui.open', (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true as const } }
+  })
+  on('command.run', { command: 'turn-gacha' }, () => ({ text: '別の turn-gacha' }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'turn-gacha', ...run })).toMatchObject({ text: '別の turn-gacha' })
+  expect(opened).toEqual([])
+})
+
 // ---- 0.4.0 記録の控え・古い版では書かない ----
 
 const BACKUP = { options: { backupDir: 'C:/work/backup' } }
@@ -545,6 +603,37 @@ for (const surface of SURFACES) {
     expect((await ui.find({ key: 'restore' }))?.props.label).toBe('控えから戻す')
   })
 }
+
+test('控えの枠が壊れていたり日付の形が違ったりしても、その枠だけ飛ばして残りの日を並べる', BACKUP, async ($, on) => {
+  fakeFs(on, {
+    [`${DIR}/save-1.json`]: { day: '2026-10-19', value: { ...EMPTY, total: 50 } },
+    [`${DIR}/save-4.json`]: { day: `2026-10-1${String.fromCharCode(7)}`, value: { ...EMPTY } },
+    [`${DIR}/save-5.json`]: { day: '<b>x</b>', value: { ...EMPTY } },
+    [`${DIR}/save-6.json`]: '{"day":"2026-10-1',
+  })
+  await boot($, on, { ...EMPTY, total: 3 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'restore' })
+  const days = (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('day-'))
+  expect(days).toEqual(['day-2026-10-20', 'day-2026-10-19'])
+})
+
+test('控えから戻す: 図鑑は戻せて受け取り済みのお題を合わせられない時は、そう知らせる (今の受け取り済みは消さない)', BACKUP, async ($, on) => {
+  const old = { ...EMPTY, total: 50 }
+  fakeFs(on, {
+    [`${DIR}/save-1.json`]: { day: '2026-10-19', value: old },
+    [`${DIR}/questClaimed-1.json`]: { day: '2026-10-19', value: ['2026-10-19:turns-5'] },
+  })
+  const { raw, claimed, toasts } = await boot($, on, { ...EMPTY, total: 3 }, { claimed: 'broken' as never })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'restore' })
+  await ui.press({ key: 'day-2026-10-19' })
+  await ui.press({ key: 'restore-ok' })
+  expect(raw()).toEqual(old)
+  expect(claimed()).toBe('broken')
+  expect(toasts).toContain('2026-10-19 の記録に戻しました (受け取り済みのお題は合わせられませんでした)')
+  expect(toasts).not.toContain('控えの記録を書けませんでした')
+})
 
 // isStale は style.ts のモジュールの値を持つので、この試験はファイルの一番下に置く
 test('新しい版が入ったら、古い版のこのセッションは store に書かず、控えからも戻さない', BACKUP, async ($, on) => {

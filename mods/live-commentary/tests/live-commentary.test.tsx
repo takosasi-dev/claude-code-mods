@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { CLEAR_MS, LONG_MS } from '../hooks/register'
-import { PHRASES, SCENES, STYLES, duration, fileOf, fill, pickIndex, sceneOf, toStyle } from '../hooks/phrases'
+import { PHRASES, SCENES, STYLES, clean, duration, fileOf, fill, pickIndex, sceneOf, toStyle } from '../hooks/phrases'
 import { boardSvg, stadiumSvg, tickerSvg } from '../hooks/svg'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
@@ -28,7 +28,7 @@ const matcher = (template: string) =>
 const isFrom = (style: (typeof STYLES)[number], scene: (typeof SCENES)[number], text: string | undefined) =>
   text !== undefined && PHRASES[style][scene].some(p => matcher(p).test(text))
 
-type World = { fail: boolean; isPaneUp: boolean }
+type World = { fail: boolean; isPaneUp: boolean; failSet?: boolean }
 
 /** 下の hook は全部ここで足す (test が $ を呼んだ後は足せない) */
 const boot = async ($: Engine, on: On, init: Record<string, unknown> = {}) => {
@@ -36,6 +36,7 @@ const boot = async ($: Engine, on: On, init: Record<string, unknown> = {}) => {
   const store = new Map<string, unknown>(Object.entries(init))
   on('store.get', (_$, e) => ({ value: store.get(e.key) }))
   on('store.set', (_$, e) => {
+    if (world.failSet) return { deny: '書けない' }
     store.set(e.key, e.value)
     return { value: undefined }
   })
@@ -417,4 +418,54 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
     origin: { kind: 'composer' },
   })
   expect((await svgs(ui))[1]).toMatch(/fill="#0d1117"/)
+})
+
+// ---- 0.2.2 で直した物 ----
+
+test('/jikkyo を持てた時は、/live-commentary をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  on('command.run', { command: 'live-commentary' }, () => ({ text: '別の live-commentary' }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await boot($, on)
+  const run = (command: string) => $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  expect(await run('jikkyo')).toMatchObject({ text: '実況席を開きました。' })
+  expect(await run('live-commentary')).toMatchObject({ text: '別の live-commentary' })
+})
+
+test('オフにする時に store へ書けなくても、ステータス行は消え、落ちずに知らせる', async ($, on) => {
+  const { store, status, toasts, world } = await boot($, on)
+  await start($)
+  expect(status.at(-1)).toBeDefined()
+  world.failSet = true
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle' })
+  expect(status.at(-1)).toBeUndefined()
+  expect(store.get('isOn')).toBeUndefined()
+  expect(toasts.some(t => t.includes('残せませんでした'))).toBe(true)
+  // このセッションではオフが効いている
+  await bash($)
+  expect(status.at(-1)).toBeUndefined()
+})
+
+test('制御文字は C1 も落とす', () => {
+  expect(clean('a\u0007b\u0085c\u009bd')).toBe('abcd')
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.2.2'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'live-commentary', version }) }
+    throw new Error('ENOENT')
+  })
+  const { store, toasts, clock } = await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle' })
+  expect(store.get('isOn')).toBe(false)
+  version = '0.3.0'
+  await clock.advance(61_000)
+  await ui.press({ key: 'toggle' })
+  await ui.press({ key: 'toggle' })
+  await ui.press({ key: 'toggle' })
+  expect(store.get('isOn')).toBe(false)
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
 })

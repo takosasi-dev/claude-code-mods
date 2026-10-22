@@ -30,6 +30,11 @@ type Saved = Record<string, unknown>
 /** エンジンの代わりに一番下で答える。コマンドに fail が入るか、ファイルが bad.ts なら失敗。deny.ts は断る */
 const bottom = (on: On, saved: Saved = {}) => {
   const clock = mock.clock(on, { now: NOW })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
@@ -49,7 +54,7 @@ const bottom = (on: On, saved: Saved = {}) => {
       return { isError: true as const, result: undefined, text: '<tool_use_error>File has not been read yet. Read it first.</tool_use_error>' }
     return { result: 'ok' }
   })
-  return clock
+  return { advance: (ms: number) => clock.advance(ms), toasts }
 }
 
 const call = ($: Engine, tool: string, input: Record<string, unknown>, agentId?: string) =>
@@ -236,4 +241,104 @@ test('JST の日付で今日を数え、多くても SVG は上限に収まる',
   expect(svg.length).toBeLessThan(131_072)
   expect(svg).not.toMatch(CTRL)
   expect(svg).toContain('&lt;&amp;&gt;')
+})
+
+// ---- 0.1.2 で直した物 ----
+
+test('秘密らしい文字列は、切る前に伏せ字にする (トークンの形・Bearer・KEY=・URL の userinfo)', () => {
+  const secrets = [
+    'sk-ant-api03-EXAMPLE123456',
+    'sk-proj-AbCdEf123456',
+    'ghp_AbCdEf1234567890',
+    'github_pat_11ABCDEFG0123456789',
+    'AKIAIOSFODNN7EXAMPLE',
+    'xoxb-1234-5678-EXAMPLE',
+    'xoxp-1234-5678-EXAMPLE',
+    'hunter2pass',
+  ]
+  const cmd = [
+    'curl -H "Authorization: Bearer hunter2pass" https://alice:s3cr3tpw@example.com/x',
+    'GITHUB_TOKEN=ghp_AbCdEf1234567890 MY_API_KEY=k1 api_key=k2 PASSWORD=p3 DB_SECRET=s4 KEY=k5',
+    'node a.mjs sk-ant-api03-EXAMPLE123456 sk-proj-AbCdEf123456 github_pat_11ABCDEFG0123456789 AKIAIOSFODNN7EXAMPLE xoxb-1234-5678-EXAMPLE xoxp-1234-5678-EXAMPLE',
+  ]
+  for (const c of cmd) {
+    const { input, group } = summarize('Bash', { command: c })
+    const err = firstLine(`Exit code 1\n${c}`)
+    for (const s of [...secrets, 's3cr3tpw', 'k1', 'k2', 'p3', 's4', 'k5'])
+      for (const t of [input, group, err]) expect(t.split(/[\s"=:@/]+/)).not.toContain(s)
+  }
+  // 60 字で切られる所にあっても頭だけ残らない
+  const long = `${'x'.repeat(50)} Bearer abcdefghijklmnop`
+  expect(summarize('Bash', { command: long }).input).not.toMatch(/abcdef/)
+  // 形は残るので、何が落ちたかは分かる
+  expect(firstLine('auth failed: Bearer hunter2pass')).toBe('auth failed: Bearer ***')
+  expect(firstLine('push to https://bob:pw@github.com/a/b failed')).toBe('push to https://***@github.com/a/b failed')
+  expect(summarize('WebFetch', { url: 'https://bob:pw@example.com/a' })).toEqual({ input: 'example.com', group: 'WebFetch example.com' })
+  // 秘密でない物はそのまま
+  expect(firstLine('npm ERR! missing script: test')).toBe('npm ERR! missing script: test')
+})
+
+test('失敗したコマンドの秘密は store に平文で残さない。前の版が残した平文も、次に書く時に伏せる', async ($, on) => {
+  const old = { at: NOW - 1000, tool: 'Bash', input: 'curl -u bob:pw https://x', error: 'Bearer oldsecret123', group: 'Bash curl', isSub: false, futureField: 1 }
+  const saved: Saved = { entries: [old], total: 1 }
+  bottom(on, saved)
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  await call($, 'Bash', { command: 'GITHUB_TOKEN=ghp_AbCdEf1234567890 gh release create fail' })
+  const json = JSON.stringify(saved.entries)
+  expect(json).not.toContain('ghp_AbCdEf1234567890')
+  expect(json).not.toContain('oldsecret123')
+  expect(json).toContain('GITHUB_TOKEN=***')
+  // 知らない欄 (新しい版が足した欄) は残す
+  expect((saved.entries as Record<string, unknown>[])[0]?.futureField).toBe(1)
+  expect(saved.total).toBe(2)
+})
+
+test('store の記録が読めない形なら、書かずに 1 回だけ知らせ、画面には出す', async ($, on) => {
+  const saved: Saved = { entries: { broken: true }, total: 3 }
+  const { toasts } = bottom(on, saved)
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  await call($, 'Bash', { command: 'make fail' })
+  await call($, 'Bash', { command: 'make fail2' })
+  expect(saved.entries).toEqual({ broken: true })
+  expect(saved.total).toBe(3)
+  expect(toasts.filter(t => t.includes('読めなかった'))).toHaveLength(1)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await texts(ui))[0]).toBe('今日 2 件 通算 5 件 種類 2')
+  // total だけ壊れていても書かない
+  saved.entries = []
+  saved.total = 'x'
+  await call($, 'Bash', { command: 'make fail3' })
+  expect(saved.entries).toEqual([])
+})
+
+test('/errors を持てた時は、/fail-log をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  bottom(on)
+  on('command.run', { command: 'fail-log' }, () => ({ text: 'ほかの fail-log' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  expect(await $.command.run({ command: 'errors', ...RUN })).toMatchObject({ text: '失敗の記録を開きました。' })
+  expect(await $.command.run({ command: 'fail-log', ...RUN })).toMatchObject({ text: 'ほかの fail-log' })
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.1.2'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'fail-log', version }) }
+    throw new Error('ENOENT')
+  })
+  const saved: Saved = {}
+  const clock = bottom(on, saved)
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  await call($, 'Bash', { command: 'make fail' })
+  expect((saved.entries as FailEntry[]).length).toBe(1)
+  version = '0.2.0'
+  await clock.advance(61_000)
+  await call($, 'Bash', { command: 'make fail2' })
+  await call($, 'Bash', { command: 'make fail3' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'clear' })
+  await ui.press({ key: 'clear' })
+  expect((saved.entries as FailEntry[]).length).toBe(1)
+  expect(saved.total).toBe(1)
+  expect(clock.toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
 })

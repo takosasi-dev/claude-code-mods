@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { FocusTimerRun } from '../types'
-import { followTheme, readTheme } from './style'
+import { followTheme, jstDay, mayWrite, readTheme, rememberVersion } from './style'
 import { mmss, ringSvg, todaySvg } from './svg'
 import type { Status } from './svg'
 
@@ -15,11 +15,8 @@ const doneA = atom({ plugin: 'focus-timer', key: 'done' } as const, {} as Record
 
 type $ = EngineInterface
 
-/** ローカル日付 YYYY-MM-DD */
-const dayKey = (ms: number) => {
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+/** 日本時間の日付 YYYY-MM-DD (動いている環境のタイムゾーンに頼らない) */
+const dayKey = jstDay
 
 const minutes = (v: unknown, fallback: number) => {
   const n = Number(v)
@@ -116,6 +113,9 @@ const finish = async ($: $, endsAt: number): Promise<void> => {
     if (stored === undefined) {
       await update($, doneA, d => ({ ...d, [key]: (d[key] ?? 0) + 1 }))
       $.ui.toast('集中の本数を保存できませんでした(記録を読めませんでした)', { timeoutMs: 8000 })
+    } else if (!(await mayWrite($, now))) {
+      // 新しい版が入ったのに古い版のまま動いている時は書かない (開き直しのお願いは mayWrite がトーストで出す)
+      await update($, doneA, d => ({ ...d, [key]: (d[key] ?? 0) + 1 }))
     } else {
       // ponytail: 日付ごとの記録は消さずに溜める。1 日 1 キーなので年単位でも小さい
       const all = { ...stored, [key]: (stored[key] ?? 0) + 1 }
@@ -141,11 +141,10 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await readTheme($)
+    await rememberVersion($).catch(() => {})
     // /focus は組み込みにあると拒まれる。その時は /focus-timer にし、/focus は組み込みに任せる
-    ownsFocus = await $.command
-      .register({ name: 'focus', description: 'ポモドーロの集中タイマーをペインに表示' })
-      .then(() => true)
-      .catch(() => false)
+    const got = await $.command.register({ name: 'focus', description: 'ポモドーロの集中タイマーをペインに表示' }).catch(() => undefined)
+    ownsFocus = got?.command === 'focus'
     if (!ownsFocus) {
       await $.command.register({ name: 'focus-timer', description: 'ポモドーロの集中タイマーをペインに表示' }).catch(() => {})
     }
@@ -177,7 +176,8 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'focus' }, ($, e, next) => (ownsFocus ? open($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'focus-timer' }, open)
+  // /focus を持てた時は /focus-timer を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'focus-timer' }, ($, e, next) => (ownsFocus ? next(e) : open($))).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

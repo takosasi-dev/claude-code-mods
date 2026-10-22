@@ -88,65 +88,83 @@ const restoreDay = ($: $, day: string) =>
       $.ui.toast('控えを読めなかったので、戻していません', { timeoutMs: 8000 })
       return
     }
-    try {
-      await $.store.set(STORE_KEY, value)
-      const old = claimedFrom(await backupOf($, CLAIM_KEY, day))
-      if (old.length > 0) {
-        const now = claimedFrom(await $.store.get(CLAIM_KEY))
-        await $.store.set(CLAIM_KEY, [...new Set([...now, ...old])].slice(-KEEP_CLAIMED))
-      }
-    } catch {
-      $.ui.toast('控えの記録を書けませんでした', { timeoutMs: 8000 })
-      return
-    }
-    await load($)
-    await update($, NOTE, () => '')
-    closeRestore($)
-    $.ui.toast(`${day} の記録に戻しました`)
-  })
-
-/**
- * 1 枚引いて store と state に書く。SR 以上だけトースト。
- * 書く直前に store を読み直し、1 枚分だけ足す (別のセッションの分を消さない)
- */
-const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
-  serial(async () => {
-    const now = await $.clock.now()
-    const got = await readStore($)
-    if (!got) {
-      await update($, NOTE, () => BROKEN)
-      return
-    }
-    const saved = got.saved
-    if (flags.isManual && manualLeft(saved, now) <= 0) {
-      await update($, SAVE, () => saved)
-      await update($, NOTE, () => '今日の手動はおしまいです(また明日。ターンが終わるたびには引けます)')
-      return
-    }
-    // 日をまたいで動き続けるセッションも、その日はじめて書く前に控える
-    await backupAll($, got.raw)
-    // 新しい版が入ったのに古い版のまま動いている時は、引かない (書くと新しい版の欄を消す。トーストで開き直しを頼む)
-    if (!(await mayWrite($, now))) return
-    const card = pull(Math.random(), Math.random(), flags.isClean)
-    const next = addDraw(saved, card, now, flags)
-    // この版の知らない欄 (新しい版が足した物) は読んだまま残す
-    const isSaved = await $.store.set(STORE_KEY, withUnknown(got.raw, next)).then(
+    const isSaved = await $.store.set(STORE_KEY, value).then(
       () => true,
       () => false,
     )
-    await update($, SAVE, () => next)
-    await update($, VIEW, () => 'card')
-    // 図鑑の実績はその場で数える (保存はしない)
-    const before = new Set(goalsMet(saved).map(g => g.id))
-    const gained = goalsMet(next).filter(g => !before.has(g.id))
-    const note = gained.length > 0 ? `図鑑の実績「${gained.map(g => g.name).join('」「')}」を達成` : ''
-    await update($, NOTE, () => (isSaved ? note : '引いたカードを保存できませんでした'))
-    if (card.rarity === 'SR' || card.rarity === 'SSR') $.ui.toast(`${card.rarity}!${card.name}`)
+    if (!isSaved) {
+      $.ui.toast('控えの記録を書けませんでした', { timeoutMs: 8000 })
+      return
+    }
+    // 図鑑は戻した。受け取り済みのお題は今の物に足す (今の物が読めない形なら書かない)
+    const old = claimedFrom(await backupOf($, CLAIM_KEY, day))
+    const isMerged =
+      old.length === 0 ||
+      (await $.store.get(CLAIM_KEY).then(
+        async now => {
+          if (now !== undefined && !Array.isArray(now)) return false
+          await $.store.set(CLAIM_KEY, [...new Set([...claimedFrom(now), ...old])].slice(-KEEP_CLAIMED))
+          return true
+        },
+        () => false,
+      ).catch(() => false))
+    await load($)
+    await update($, NOTE, () => '')
+    closeRestore($)
+    $.ui.toast(isMerged ? `${day} の記録に戻しました` : `${day} の記録に戻しました (受け取り済みのお題は合わせられませんでした)`)
   })
 
 /**
+ * count 枚引いて store と state に書く。SR 以上だけトースト。store に残せたら true。
+ * 書く直前に store を読み直し、引いた分だけ足す (別のセッションの分を消さない)。serial の中で呼ぶ
+ */
+async function drawNow($: $, flags: { isClean: boolean; isManual: boolean }, count = 1): Promise<boolean> {
+  const now = await $.clock.now()
+  const got = await readStore($)
+  if (!got) {
+    await update($, NOTE, () => BROKEN)
+    return false
+  }
+  const saved = got.saved
+  if (flags.isManual && manualLeft(saved, now) <= 0) {
+    await update($, SAVE, () => saved)
+    await update($, NOTE, () => '今日の手動はおしまいです(また明日。ターンが終わるたびには引けます)')
+    return false
+  }
+  // 日をまたいで動き続けるセッションも、その日はじめて書く前に控える
+  await backupAll($, got.raw)
+  // 新しい版が入ったのに古い版のまま動いている時は、引かない (書くと新しい版の欄を消す。トーストで開き直しを頼む)
+  if (!(await mayWrite($, now))) return false
+  const cards = Array.from({ length: count }, () => pull(Math.random(), Math.random(), flags.isClean))
+  const next = cards.reduce((s, card) => addDraw(s, card, now, flags), saved)
+  // この版の知らない欄 (新しい版が足した物・履歴の知らない要素) は読んだまま残す
+  const isSaved = await $.store.set(STORE_KEY, withUnknown(got.raw, next, next.history.slice(0, count))).then(
+    () => true,
+    () => false,
+  )
+  if (!isSaved) {
+    // 残せなかったカードは見せない (画面は store の値のまま)
+    await update($, SAVE, () => saved)
+    await update($, NOTE, () => '引いたカードを保存できませんでした')
+    return false
+  }
+  await update($, SAVE, () => next)
+  await update($, VIEW, () => 'card')
+  // 図鑑の実績はその場で数える (保存はしない)
+  const before = new Set(goalsMet(saved).map(g => g.id))
+  const gained = goalsMet(next).filter(g => !before.has(g.id))
+  await update($, NOTE, () => (gained.length > 0 ? `図鑑の実績「${gained.map(g => g.name).join('」「')}」を達成` : ''))
+  for (const card of cards) if (card.rarity === 'SR' || card.rarity === 'SSR') $.ui.toast(`${card.rarity}!${card.name}`)
+  return true
+}
+
+const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) => serial(() => drawNow($, flags))
+
+/**
  * daily-quest でこなしたお題のごほうびを 1 回だけ受け取り、その回数だけその場で引く。
- * 受け取った印は store の questClaimed (書く直前に読み直す)。daily-quest が無ければ何もしない
+ * 先に引いて図鑑に残し、残せた時だけ受け取った印 (store の questClaimed、書く直前に読み直す) を書く。
+ * 引けなかった (読めない・古い版・書けない) 時は印を付けないので、次のターンにもう一度引く。
+ * daily-quest が無ければ何もしない
  */
 async function claim($: $) {
   let today: unknown
@@ -162,7 +180,9 @@ async function claim($: $) {
     if (!claimed) return
     const fresh = questRewards(today, claimed)
     if (fresh.length === 0 || !(await mayWrite($, await $.clock.now()))) return
-    // ponytail: 読んでから書くまでの間に別のセッションが受け取ると 2 度引ける。間は数ミリ秒なので見送り
+    const n = fresh.reduce((k, g) => k + g.pulls, 0)
+    if (n > 0 && !(await drawNow($, { isClean: false, isManual: false }, n))) return
+    // ponytail: 読んでから書くまでの間に別のセッションが受け取ると 2 度引ける。印を書けなかった時も次のターンにもう一度引く (多めに引けるが、ごほうびは消えない)
     const isSaved = await $.store.set(CLAIM_KEY, [...claimed, ...fresh.map(g => g.key)].slice(-KEEP_CLAIMED)).then(
       () => true,
       () => false,
@@ -170,7 +190,6 @@ async function claim($: $) {
     if (isSaved) got = fresh
   })
   const pulls = got.reduce((n, g) => n + g.pulls, 0)
-  for (let i = 0; i < pulls; i++) await draw($, { isClean: false, isManual: false })
   if (got.length > 0) {
     const msg = `お題「${got.map(g => g.title).join('」「')}」のごほうびで ${pulls} 回引いた`
     await update($, NOTE, n => (n === '' ? msg : `${msg} / ${n}`))
@@ -205,7 +224,8 @@ export const register: Register = (on, options) => {
 
   // /gacha を持てなかった時は、元の /gacha に回す
   on('command.run', { command: 'gacha' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'turn-gacha' }, openPane)
+  // /gacha を持てた時は /turn-gacha を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'turn-gacha' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // メインのターンだけ数える (サブエージェントの分は agentId 付き)
   on('turn.start', async ($, e, next) => {

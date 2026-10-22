@@ -1,7 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { UsagePaneData } from '../types/index'
-import { followTheme, readTheme } from './style'
+import { clean, followTheme, readTheme } from './style'
 
 const PANE = 'usage-pane'
 const usageKey = { plugin: 'usage-pane', key: 'usage' } as const
@@ -22,8 +22,8 @@ const left = (iso: unknown, now: number) => {
 // 絶対パス(/x、\x、C:\x、C:/x)だけを受け付ける。相対パスは今のフォルダから読まれてしまう
 const isAbsolute = (path: string) => /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path)
 
-// Text に入れる前に制御文字を落とす(エンジンは制御文字を含む Text を拒む)
-const clean = (s: string) => s.replace(/[\x00-\x1f\x7f]/g, '')
+// ペインが開いているか。閉じている間はファイルを読まない
+const isOpen = async ($: EngineInterface) => (await $.ui.panes().catch(() => [])).some(p => p.id === PANE)
 
 // ファイルを読んで $.state に置く(描画フックの外で呼ぶ)
 async function refresh($: EngineInterface, file: string) {
@@ -48,9 +48,11 @@ export const register: Register = (on, options) => {
     await readTheme($)
     // 組み込みの /usage とぶつけないよう別名にする
     await $.command.register({ name: 'usage-pane', description: '使用量をペインに表示' }).catch(() => {})
-    await refresh($, file)
-    // 読むのはここ(30 秒ごと)とコマンドだけ。残り時間の表示も進めるため描き直しも頼む
+    // リロードでペインが開いたままなら読む
+    if (await isOpen($)) await refresh($, file)
+    // 読むのはここ(ペインが開いている間だけ 30 秒ごと)とコマンドだけ。残り時間の表示も進めるため描き直しも頼む
     $.clock.every(30_000, async () => {
+      if (!(await isOpen($))) return
       await refresh($, file)
       $.ui.invalidate('ui.render')
     })

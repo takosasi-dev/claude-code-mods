@@ -51,6 +51,10 @@ const serial = <T,>(f: () => Promise<T>) => {
   return p
 }
 
+const BROKEN = 'week-card: 記録を読めなかったので、今日の写しは書いていません。次のターンの終わりにもう一度読みます'
+/** 読めない時のトーストを出したか。読めたら戻す (続けて読めない間は 1 回だけ出す) */
+let toldBroken = false
+
 /** 今日の写しを取る。store の今日の分と違う時だけ、書く直前に読み直して今日の分だけ置き換える */
 const record = ($: $) =>
   serial(async () => {
@@ -58,8 +62,19 @@ const record = ($: $) =>
     const day = dayKey(now)
     const snap = snapOf(await readRaw($))
     if (Object.keys(snap).length === 0) return
-    const raw = await $.store.get('snaps').catch(() => undefined)
-    const saved = asSnaps(raw) ?? (await read($, SNAPS))
+    // 読めない時 (reject・形が違う) は書かない。今の state の写しで書くと、ほかの日が丸ごと消える
+    const got = await $.store.get('snaps').then(
+      v => ({ v }),
+      () => undefined,
+    )
+    const saved = got === undefined ? undefined : got.v === undefined ? {} : asSnaps(got.v)
+    if (got === undefined || saved === undefined) {
+      if (!toldBroken) $.ui.toast(BROKEN)
+      toldBroken = true
+      return
+    }
+    toldBroken = false
+    const raw = got.v
     if (isSameSnap(saved[day], { ...saved[day], ...snap })) {
       await update($, SNAPS, () => saved)
       return

@@ -40,8 +40,14 @@ const pieColor = (i: number) =>
 
 // ---- 文字 ----
 
-/** 制御文字を落とす (タブと改行は残す)。エンジンは制御文字を含む Text の子や alt の木を拒む */
-export const clean = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+/** 制御文字 (C0・DEL・C1) を落とす (タブと改行は残す)。エンジンは制御文字を含む Text の子や alt の木を拒む */
+export const clean = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '')
+/** 日本時間 (JST) の時:分 */
+export const hhmm = (ms: number) => {
+  const d = new Date(ms + 9 * 3_600_000)
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+}
+
 /** 1 行にする: タブ・改行も空白に */
 export const oneLine = (s: string) => clean(s.replace(/[\t\r\n]+/g, ' ')).trim()
 /** Markdown は tab と改行のほかの制御文字を拒むので、\r も改行に直す */
@@ -154,14 +160,30 @@ function readLabels(input: Record<string, unknown>, max: number): string[] | { e
   return out
 }
 
-/** Claude が渡した SVG で断る物。img として描かれるので本来は動かないが、念のため */
+/**
+ * 検査のための写し。文字参照 (&#104; &#x68;) と CSS のエスケープ (\68 \i) をほどく
+ * (h&#116;tps: や @\69mport のように、ほどくと外を指す書き方をすり抜けさせない)。描くのは元の物
+ */
+export function unescapeForCheck(s: string) {
+  const ch = (code: number) => (Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '')
+  return s
+    .replace(/&#x([0-9a-f]+);?/gi, (_, h: string) => ch(parseInt(h, 16)))
+    .replace(/&#(\d+);?/g, (_, d: string) => ch(Number(d)))
+    .replace(/\\([0-9a-f]{1,6})\s?/gi, (_, h: string) => ch(parseInt(h, 16)))
+    .replace(/\\([^0-9a-f\r\n])/gi, '$1')
+}
+
+/** Claude が渡した SVG で断る物。img として描かれるので本来は動かないが、念のため。制御文字を落とし、エスケープをほどいてから見る */
 export function svgProblem(raw: string): string | undefined {
   if (raw.length > LIMIT.svg) return `svg は ${LIMIT.svg} 字までです(今は ${raw.length} 字)`
-  if (!/^\s*<svg[\s>]/i.test(raw)) return 'svg は <svg で始めてください(<?xml や前置きの文は付けない)'
-  if (/<script/i.test(raw)) return 'svg に <script> は入れられません'
-  if (/[\s"'/]on[a-z]+\s*=/i.test(raw)) return 'svg に on で始まる属性 (onload= など) は入れられません'
-  if (/(?:href|src)\s*=\s*["']?\s*(?:https?:|\/\/|javascript:)/i.test(raw)) return 'svg から外の物 (href="http..." など) は参照できません。画像は data: で埋め込んでください'
-  if (/url\(\s*["']?\s*(?:https?:|\/\/)|@import/i.test(raw)) return 'svg の CSS から外の物 (url(http...)・@import) は参照できません'
+  const s = unescapeForCheck(clean(raw))
+  // URL の途中のタブ・改行は読み飛ばされるので、外を指すかは詰めた物でも見る
+  const flat = s.replace(/[\t\r\n]/g, '')
+  if (!/^\s*<svg[\s>]/i.test(s)) return 'svg は <svg で始めてください(<?xml や前置きの文は付けない)'
+  if (/<(?:[\w-]+:)?script/i.test(s)) return 'svg に <script> は入れられません'
+  if (/[\s"'/]on[a-z]+\s*=/i.test(s)) return 'svg に on で始まる属性 (onload= など) は入れられません'
+  if (/(?:href|src)\s*=\s*["']?\s*(?:https?:|\/\/|javascript:|file:)/i.test(flat)) return 'svg から外の物 (href="http..."・file: など) は参照できません。画像は data: で埋め込んでください'
+  if (/url\(\s*["']?\s*(?:https?:|\/\/|file:)|image-set\(|@import/i.test(flat)) return 'svg の CSS から外の物 (url(http...)・file:・image-set・@import) は参照できません'
   return undefined
 }
 

@@ -19,8 +19,10 @@ import {
   fromSaved,
   fullnessAt,
   gachaCounts,
+  nameOf,
   placeDeco,
   sameView,
+  shownFish,
   stepFish,
   toSaved,
   toStore,
@@ -220,7 +222,7 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const v = t.view
-    const fish = fishOf(t)
+    const fish = shownFish(t)
     const n = fish.length
     // 0.4.x の state が残ったまま描かれた時 (リロード直後) も描けるように
     const deco = t.deco ?? INITIAL.deco
@@ -333,7 +335,7 @@ export const register: Register = (on, options) => {
           placeholder="一番大きい魚の名前"
           value={t.name}
           submitLabel="決める"
-          onSubmit={value => void change($, x => ({ ...x, name: value.trim().slice(0, 12), isNaming: false }))}
+          onSubmit={value => void change($, x => ({ ...x, name: nameOf(value), isNaming: false }))}
         />
       ) : null
     const info = (

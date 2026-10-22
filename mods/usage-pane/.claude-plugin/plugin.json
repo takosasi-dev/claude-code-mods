@@ -1,6 +1,6 @@
 {
   "name": "usage-pane",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "/usage-pane で Claude の使用量(5時間枠・週・モデル別週枠)をペインに表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

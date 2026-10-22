@@ -2,7 +2,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { DEFAULTS, isWindowsPath, powershellArgv, samples, shouldChime, wavBase64, wavBytes, waveSvg } from '../hooks/wav'
+import { DEFAULTS, isWindowsPath, powershellArgv, powershellExe, samples, shouldChime, wavBase64, wavBytes, waveSvg } from '../hooks/wav'
+
+const PS_DEFAULT = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
 
 // 本物の音は鳴らさない: process.run と audio.play は下で差し替えて、呼ばれた物を記録するだけ
 const NOW = Date.parse('2026-10-20T03:00:00Z')
@@ -30,12 +32,15 @@ type Opts = {
   denyChime?: boolean
   stored?: Record<string, unknown>
   run?: 'ok' | 'fail' | 'missing'
+  /** 環境変数 SystemRoot (無ければ読めない) */
+  systemRoot?: string
 }
 
 const setup = (on: On, opts: Opts = {}) => {
-  mock.clock(on, { now: NOW })
+  const clock = mock.clock(on, { now: NOW })
   const saved: Record<string, unknown> = { ...opts.stored }
   const runs: string[][] = []
+  const cwds: (string | undefined)[] = []
   const plays: { base64?: string; mime?: string }[] = []
   const registered: string[] = []
   on('store.get', (_$, e) => ({ value: saved[e.key] }))
@@ -52,8 +57,10 @@ const setup = (on: On, opts: Opts = {}) => {
     return { value: { command: e.name } }
   })
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  mock.env(on, opts.systemRoot === undefined ? {} : { SystemRoot: opts.systemRoot })
   on('process.run', (_$, e) => {
     runs.push([...e.argv])
+    cwds.push(e.init?.cwd)
     if (opts.run === 'missing') return { deny: 'spawn powershell ENOENT\u0007' }
     const exitCode = opts.run === 'fail' ? 1 : 0
     const stderr = opts.run === 'fail' ? 'Exception\u001b[31m: no audio device' : ''
@@ -63,7 +70,7 @@ const setup = (on: On, opts: Opts = {}) => {
     plays.push({ base64: e.clip.base64, mime: e.clip.mime })
     return { value: undefined }
   })
-  return { saved, runs, plays, registered }
+  return { saved, runs, cwds, plays, registered, clock }
 }
 
 const begin = ($: Engine) => $.session.start({ cwd: UNIX_CWD, surface: 'vscode', isInteractive: true })
@@ -135,7 +142,7 @@ test('Windows の作業フォルダの形', () => {
 test('Windows で呼ぶ argv: シェルを通さず、base64 を SoundPlayer に MemoryStream で渡す。長さも収まる', () => {
   const b64 = wavBase64('bell', 'high') // いちばん長い音
   const argv = powershellArgv(b64)
-  expect(argv.slice(0, 4)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-Command'])
+  expect(argv.slice(0, 4)).toEqual([PS_DEFAULT, '-NoProfile', '-NonInteractive', '-Command'])
   const script = argv[4] ?? ''
   expect(script).toContain(`FromBase64String('${b64}')`)
   expect(script).toContain('System.IO.MemoryStream')
@@ -145,14 +152,40 @@ test('Windows で呼ぶ argv: シェルを通さず、base64 を SoundPlayer に
   expect(() => powershellArgv("x');Remove-Item ~ #")).toThrow()
 })
 
-test('長いターンの終わり: Windows は powershell、音は audio.play で鳴らさない', async ($, on) => {
-  const { runs, plays } = setup(on, { cwd: WIN_CWD })
+test('powershell は名前でなく絶対パスで起こす。SystemRoot が読めない・形が違えば C:\\Windows', () => {
+  expect(powershellExe('D:\\Win')).toBe('D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  expect(powershellExe('D:\\Win\\')).toBe('D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  for (const bad of [undefined, '', 'Win', '.\\x', '\\\\server\\share', 'D:\\a"b']) expect([bad, powershellExe(bad)]).toEqual([bad, PS_DEFAULT])
+})
+
+test('長いターンの終わり: Windows は絶対パスの powershell を mod のフォルダで起こし、音は audio.play で鳴らさない', async ($, on) => {
+  const { runs, cwds, plays } = setup(on, { cwd: WIN_CWD, systemRoot: 'D:\\Win' })
   await begin($)
   await complete($, 45_000)
   await settle()
   expect(runs.length).toBe(1)
-  expect(runs[0]?.[0]).toBe('powershell')
+  expect(runs[0]?.[0]).toBe('D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  // 作業フォルダ (に置かれた powershell.exe) からは起こさない
+  expect(typeof cwds[0]).toBe('string')
+  expect(cwds[0]).not.toBe(WIN_CWD)
+  expect(cwds[0]).not.toBe('')
   expect(plays.length).toBe(0)
+})
+
+test('SystemRoot が読めない時は C:\\Windows の powershell', async ($, on) => {
+  const { runs } = setup(on, { cwd: WIN_CWD })
+  await begin($)
+  await complete($, 45_000)
+  await settle()
+  expect(runs[0]?.[0]).toBe(PS_DEFAULT)
+})
+
+test('/chime を持てた時は、予備名の /done-chime を横取りしない', async ($, on) => {
+  setup(on)
+  on('command.run', { command: 'done-chime' }, () => ({ text: '別の done-chime' }))
+  await begin($)
+  const other = await $.command.run({ command: 'done-chime', args: '', origin: { kind: 'composer' }, presentation })
+  expect(other).toMatchObject({ text: '別の done-chime' })
 })
 
 test('長いターンの終わり: Windows 以外は audio.play に WAV を渡し、powershell は呼ばない', async ($, on) => {
@@ -295,4 +328,27 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   expect(await source()).toMatch(/fill="#0d1117"/)
   expect(await source()).toContain('stroke="#58a6ff"')
   expect([plays, runs]).toEqual([[], []]) // 色を替えても鳴らさない
+})
+
+// 版の覚えはモジュールに残るので、この試験は最後に置く
+test('新しい版が入ったら設定を store に書かない (このセッションの間は効く)', async ($, on) => {
+  let version = '0.2.2'
+  on('fs.read', (_$, e) => (e.path.replace(/\\/g, '/').endsWith('/plugin.json') ? { value: JSON.stringify({ name: 'done-chime', version }) } : { deny: 'ENOENT' }))
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const { saved, clock } = setup(on)
+  await begin($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await clock.advance(61_000)
+  await ui.press({ key: 'toggle' })
+  expect(saved.isOn).toBe(false)
+  version = '0.3.0'
+  await clock.advance(61_000)
+  await ui.press({ key: 'toggle' })
+  expect(saved.isOn).toBe(false)
+  expect(toasts.some(t => t.includes('新しい版が入りました'))).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /設定を残せませんでした/ })).toBeDefined()
 })

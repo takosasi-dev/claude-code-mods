@@ -40,13 +40,11 @@ const folderOption = (value: unknown) => {
   return trimmed === '' || /^[A-Za-z]:$/.test(trimmed) ? raw.slice(0, trimmed.length + 1) : trimmed
 }
 
-// 本文の file: リンク。Markdown は file: も押せるリンクにするので、押しても何もしないようにする
-const fileLinks = (text: string) => {
-  const found = new Set<string>()
-  for (const m of text.matchAll(/\]\(\s*<?(file:[^)\s>]+)>?/gi)) if (m[1]) found.add(m[1])
-  for (const m of text.matchAll(/<(file:[^>\s]+)>/gi)) if (m[1]) found.add(m[1])
-  return [...found]
-}
+// 本文に file: リンクがありうるか。Markdown は file: も押せるリンクにするので、ありうる時は全部のリンクを押しても何もしない側にする。
+// リンクの形 (参照・山かっこ・かっこ入りのパス) を拾い切るのは難しいので、本文に file: があるかで決める。
+// Markdown はリンク先の \: と文字参照 (&#58; &colon; など) をほどくので、それらも file: とみなす
+const mayHaveFileLink = (text: string) =>
+  /\bfile:|&(?:#x?[0-9a-f]+|[a-z][a-z0-9]*);/i.test(text.replace(/\\([!-/:-@[-`{-~])/g, '$1'))
 
 const SORTS: { value: ProjectBoardSort; label: string }[] = [
   { value: 'new', label: '更新が新しい順' },
@@ -161,16 +159,7 @@ export const register: Register = (on, options) => {
           ) : (
             p.path !== '' && <Code source={url ? `${p.path}\n${url}` : p.path} />
           )}
-          {(() => {
-            const links = fileLinks(detail.body)
-            if (links.length === 0) return <Markdown key="body" text={detail.body} />
-            // 256 本を超える時は全部のリンクを押しても何もしない側にする
-            return links.length <= 256 ? (
-              <Markdown key="body" text={detail.body} pressableLinks={links} onLinkPress={() => {}} />
-            ) : (
-              <Markdown key="body" text={detail.body} onLinkPress={() => {}} />
-            )
-          })()}
+          {mayHaveFileLink(detail.body) ? <Markdown key="body" text={detail.body} onLinkPress={() => {}} /> : <Markdown key="body" text={detail.body} />}
           {detail.more && <Button key="more" label="続きを読む" onPress={() => void openDetail($, p, true)} />}
         </Box>
       )

@@ -23,7 +23,7 @@ export const EMPTY: RuleSwitchSave = { on: {}, custom: [] }
 
 export type Rule = { id: string; text: string; isOn: boolean; isCustom: boolean }
 
-const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g
 
 /** 外から来た文字列を 1 行にする: 制御文字を落とし、改行とタブは空白、前後の空白を取り、上限で切る */
 export const clean = (s: string) =>
@@ -51,24 +51,27 @@ export function fromSaved(raw: unknown): RuleSwitchSave | undefined {
     const text = clean(c.text)
     if (c.id === '' || text === '' || seen.has(c.id)) continue
     seen.add(c.id)
-    custom.push({ id: c.id, text })
+    // 知らない欄 (新しい版が足した欄) は残す。数の上限は足す時と、画面・プロンプトに出す時 (rulesOf) だけ
+    custom.push({ ...c, id: c.id, text })
   }
-  return { on, custom: custom.slice(0, MAX_CUSTOM) }
+  return { on, custom }
 }
 
 /**
  * store に書く形。書く直前に読んだ raw のうち、この版の知らない欄 (新しい版が足した物) を残して mine を重ねる。
- * 古い版のまま動いているセッションが、新しい版の記録を消さないように
+ * on の中の true でない値 (この版が知らない値) も残す。古い版のまま動いているセッションが、新しい版の記録を消さないように
  */
 export function withUnknown(raw: unknown, mine: RuleSwitchSave): Record<string, unknown> {
   const known = Object.keys(EMPTY)
-  return { ...(isPlain(raw) ? Object.fromEntries(Object.entries(raw).filter(([k]) => !known.includes(k))) : {}), ...mine }
+  const o = isPlain(raw) ? raw : {}
+  const on = { ...(isPlain(o.on) ? Object.fromEntries(Object.entries(o.on).filter(([, v]) => v !== true)) : {}), ...mine.on }
+  return { ...Object.fromEntries(Object.entries(o).filter(([k]) => !known.includes(k))), ...mine, on }
 }
 
-/** 画面に並べる順: 決まったルール、自分のルール */
+/** 画面に並べる順: 決まったルール、自分のルール (MAX_CUSTOM 個まで。システムプロンプトにもこの分だけ入る) */
 export const rulesOf = (save: RuleSwitchSave): Rule[] => [
   ...BUILTIN.map(b => ({ ...b, isOn: save.on[b.id] === true, isCustom: false })),
-  ...save.custom.map(c => ({ ...c, isOn: save.on[c.id] === true, isCustom: true })),
+  ...save.custom.slice(0, MAX_CUSTOM).map(c => ({ id: c.id, text: c.text, isOn: save.on[c.id] === true, isCustom: true })),
 ]
 
 export const isKnown = (save: RuleSwitchSave, id: string) => BUILTIN.some(b => b.id === id) || save.custom.some(c => c.id === id)

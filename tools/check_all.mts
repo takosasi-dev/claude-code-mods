@@ -64,7 +64,10 @@ function run(cmd: string, argv: string[], env: NodeJS.ProcessEnv, shell = false)
     let out = ''
     p.stdout.on('data', d => (out += d))
     p.stderr.on('data', d => (out += d))
-    const timer = setTimeout(() => p.kill(), 300_000)
+    // shell 越しの npx は p.kill() だと cmd.exe だけが止まり tsc が残るので、Windows では子ごと止める
+    const stop = () =>
+      process.platform === 'win32' && p.pid ? spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) : p.kill()
+    const timer = setTimeout(stop, 300_000)
     p.on('error', e => (out += String(e)))
     p.on('close', code => {
       clearTimeout(timer)
@@ -81,8 +84,17 @@ if (unknown.length) throw new Error(`知らない mod: ${unknown.join(', ')}`)
 const targets = only.length ? only : mods
 
 const tmp = mkdtempSync(join(tmpdir(), 'check-all-'))
-const baseEnv: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' }
+// 試験の中からモデルや外へ届かないように、閉じた口へ向ける(perf.mts と同じ隔離)
+const baseEnv: NodeJS.ProcessEnv = {
+  ...process.env,
+  NO_COLOR: '1',
+  FORCE_COLOR: '0',
+  ANTHROPIC_BASE_URL: 'http://127.0.0.1:9',
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+}
 delete baseEnv.CLAUDE_CODE_PLUGIN_DIRS
+delete baseEnv.ANTHROPIC_API_KEY
+delete baseEnv.ANTHROPIC_AUTH_TOKEN
 const npx = (rest: string[]) => run('npx', ['-y', '-p', 'typescript@5', 'tsc', ...rest], baseEnv, true)
 
 type Result = { mod: string; validate: Run; test: Run; tsc: Run | undefined; pass: number; fail: number }

@@ -2,8 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { GuardEntry, GuardOutcome } from '../types'
-import { LOG_FORMAT, LOG_MAX, NO, YES, approvedIn, askText, denyText, isValid, listOf, outwardOf, paneLines, paneSvg, rangeOf, repoDirOf, resolveDir, scanPush } from './guard'
+import { LOG_FORMAT, LOG_MAX, NO, YES, approvedIn, askText, denyText, hasPush, isValid, listOf, outwardOf, paneLines, paneSvg, rangeOf, repoDirOf, resolveDir, scanPush } from './guard'
 import { followTheme, readTheme } from './style'
+import type { Shell } from './words'
 
 const PANE = 'ship-guard'
 const TITLE = '外に出す操作の見張り'
@@ -30,10 +31,10 @@ async function record($: $, label: string, command: string, outcome: GuardOutcom
  * git push の前に、送るコミット (どのリモートにもまだ無い物、最大 200) の作者と足した行を読む。
  * git は読むだけ。リポジトリの設定が指すコマンド (fsmonitor・textconv・外部 diff) は走らせない
  */
-async function preflight($: $, command: string): Promise<string[]> {
+async function preflight($: $, command: string, shell: Shell): Promise<string[]> {
   if (!cfg.isChecking) return []
-  const dir = resolveDir(repoDirOf(command), await $.session.cwd())
-  const argv = ['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', 'log', '-p', '-U0', '--no-color', '--no-renames', '--no-textconv', '--no-ext-diff', LOG_FORMAT, '-n', '200', ...rangeOf(command)]
+  const dir = resolveDir(repoDirOf(command, shell), await $.session.cwd())
+  const argv = ['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', 'log', '-p', '-U0', '--no-color', '--no-renames', '--no-textconv', '--no-ext-diff', LOG_FORMAT, '-n', '200', ...rangeOf(command, shell)]
   try {
     const r = await $.process.run(argv, { cwd: dir, env: { GIT_OPTIONAL_LOCKS: '0' }, timeoutMs: 20_000 })
     if (r.exitCode !== 0) return [`送るコミットを読めませんでした (${dir}: ${(r.stderr.trim().split('\n')[0] ?? '').slice(0, 80) || `終了コード ${r.exitCode}`})`]
@@ -55,10 +56,10 @@ async function grant($: $, about: string) {
  * git push は先に公開前のチェックをして、気になる所があれば確認済みでも聞き直す (公開の許可は、漏れの許可ではない)。
  * 聞けない・断られた時は止める。見張りなので .catch は付けない (失敗したら通さない)
  */
-async function guard<R>($: $, command: string, next: () => Promise<R>): Promise<R | { deny: string }> {
-  const label = outwardOf(command)
+async function guard<R>($: $, command: string, shell: Shell, next: () => Promise<R>): Promise<R | { deny: string }> {
+  const label = outwardOf(command, shell)
   if (label === undefined || (await read($, OFF))) return next()
-  const findings = label === 'git push' ? await preflight($, command) : []
+  const findings = hasPush(command, shell) ? await preflight($, command, shell) : []
   if (findings.length === 0 && isValid(await read($, PERMIT), await read($, TURN))) {
     await record($, label, command, 'confirmed')
     return next()
@@ -100,7 +101,7 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'guard' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'ship-guard' }, openPane)
+  on('command.run', { command: 'ship-guard' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // 確認の効き目はターンで数える (メインのターンだけ)
   on('turn.start', async ($, e, next) => {
@@ -108,18 +109,19 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // AskUserQuestion で公開してよいと答えたら、このターンと次のターンは聞き直さない
+  // AskUserQuestion で公開してよいと答えたら、このターンと次のターンは聞き直さない。
+  // 数えるのは Claude が聞いた物だけ (ほかの mod の $.ui.ask の「はい」は公開の許可ではない。自分の「実行する」は guard で許す)
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const r = await next(e)
-    if (r.deny === undefined && r.isError !== true && typeof r.text === 'string') {
+    if (next.origin.plugin === 'engine' && r.deny === undefined && r.isError !== true && typeof r.text === 'string') {
       const about = approvedIn(r.text)
       if (about !== undefined) await grant($, about)
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  on('tool.call', { tool: 'Bash' }, ($, e, next) => guard($, e.command, () => next(e)))
-  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => guard($, e.command, () => next(e)))
+  on('tool.call', { tool: 'Bash' }, ($, e, next) => guard($, e.command, 'bash', () => next(e)))
+  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => guard($, e.command, 'powershell', () => next(e)))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

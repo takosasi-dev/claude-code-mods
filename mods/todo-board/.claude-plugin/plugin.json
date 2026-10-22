@@ -1,6 +1,6 @@
 {
   "name": "todo-board",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "/todos で今の作業フォルダの TODO・FIXME・HACK・XXX を拾い(git の中は git grep、外はフォルダを歩く)、種類ごとの件数・推移・多いファイルと、種類で絞れる一覧をペインに出す",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

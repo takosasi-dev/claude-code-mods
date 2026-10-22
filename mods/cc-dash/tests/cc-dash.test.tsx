@@ -505,3 +505,52 @@ test('自分の並び: 全部隠すと案内を出し、store が無くても画
     await ui.unmount()
   }
 })
+
+// ---- 0.3.2 で直した物 ----
+
+test('自分の並び: store の並びが読めない形なら、画面だけ変えて書かない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const store = fakeStore(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  for (const broken of ['壊れた', ['overview'], { order: 'x' }, { hidden: 3 }]) {
+    store.set('layout', broken)
+    await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'tab-mine' })
+    await ui.press({ key: 'arrange' })
+    await ui.press({ key: 'hide-usage' })
+    expect(await ui.find({ key: 'show-usage' })).toBeDefined()
+    expect(store.get('layout')).toEqual(broken)
+    await ui.press({ key: 'arrange-done' })
+    await ui.unmount()
+  }
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは並びを store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.3.2'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'cc-dash', version }) }
+    throw new Error('ENOENT')
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const clock = mock.clock(on, { now: NOW })
+  const store = fakeStore(on, { layout: { order: [...PANELS], hidden: [], futureField: 1 } })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-mine' })
+  await ui.press({ key: 'arrange' })
+  await ui.press({ key: 'hide-usage' })
+  expect(store.get('layout')).toEqual({ order: [...PANELS], hidden: ['usage'], futureField: 1 })
+  version = '0.4.0'
+  await clock.advance(61_000)
+  await ui.press({ key: 'hide-turns' })
+  await ui.press({ key: 'arrange-reset' })
+  expect(store.get('layout')).toEqual({ order: [...PANELS], hidden: ['usage'], futureField: 1 })
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
+})

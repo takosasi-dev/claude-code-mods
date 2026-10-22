@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { EMPTY, LOG_MAX, classify, fromRaw, parse, withUnknown } from '../hooks/guard'
+import { EMPTY, LOG_MAX, classify, clock, fromRaw, isWritable, parse, shownLog, withUnknown } from '../hooks/guard'
 
 // 試験はコマンドを文字列として調べるだけ。tool.call は一番下の偽物が受けるので、窓も音も出ず、モデルも呼ばない
 const NOW = Date.parse('2026-10-22T05:00:00Z')
@@ -72,13 +72,110 @@ test('純関数: 隔離なしの claude -p', () => {
   expect(ps('$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:9"; claude -p hi')).toEqual(['headless'])
   // 両方を決めていれば見ない (X=... と $env:X の両方の書き方)
   expect(sh('env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=$(mktemp -d) ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi')).toEqual([])
-  expect(sh('export CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9\nclaude -p hi')).toEqual([])
+  expect(sh('export CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 CLAUDE_CODE_PLUGIN_DIRS=\nclaude -p hi')).toEqual([])
+  expect(sh('export CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9; unset CLAUDE_CODE_PLUGIN_DIRS; claude -p hi')).toEqual([])
   expect(ps('$env:CLAUDE_CONFIG_DIR = (New-Item -ItemType Directory D:/tmp/cc).FullName; $env:ANTHROPIC_BASE_URL="http://127.0.0.1:9"; Remove-Item Env:CLAUDE_CODE_PLUGIN_DIRS; claude -p hi')).toEqual([])
   // -p の無い claude・plugin validate / test・--version は見ない
   for (const c of ['claude plugin validate mods/x', 'claude plugin test mods/x -p', 'claude --version', 'claude mcp list', 'claude'])
     expect(sh(c)).toEqual([])
   // 止めた時の直し方に PLUGIN_DIRS を消すことを書く
   expect(classify('claude -p hi', 'bash')[0]?.fix).toContain('CLAUDE_CODE_PLUGIN_DIRS')
+})
+
+// 監査 (2026-10-22) の再現の入力。隔離は 3 つ (一時の CLAUDE_CONFIG_DIR・127.0.0.1 の BASE_URL・PLUGIN_DIRS を消す) がそろった時だけ
+const ISO = 'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=$(mktemp -d) ANTHROPIC_BASE_URL=http://127.0.0.1:9'
+test('純関数: 隔離の見逃し (値を見る・echo の中は数えない・PLUGIN_DIRS・書き方)', () => {
+  const hits = [
+    'claude -p"hi"',
+    'claude -pv hi',
+    'claude -p=hi',
+    "claude --model x -p 'hi'",
+    '"claude" -p hi',
+    'claude.exe -p hi',
+    'echo hi | claude -p',
+    // 値を見る: 本物の URL・本物の ~/.claude・空は隔離にならない
+    'CLAUDE_CONFIG_DIR=$(mktemp -d) ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi',
+    'export CLAUDE_CONFIG_DIR=/tmp/x; export ANTHROPIC_BASE_URL=http://x; claude -p hi',
+    'ANTHROPIC_BASE_URL=https://api.anthropic.com CLAUDE_CONFIG_DIR=$HOME/.claude claude -p hi',
+    'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=$HOME/.claude ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi',
+    'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=~/.claude/ ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi',
+    'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR= ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi',
+    'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1.evil.example claude -p hi',
+    // echo の中・前の区切りの VAR= (export でない) は数えない
+    'echo CLAUDE_CONFIG_DIR= ANTHROPIC_BASE_URL= ; claude -p hi',
+    'CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 CLAUDE_CODE_PLUGIN_DIRS=; claude -p hi',
+    // then / do / ! / xargs / if の後ろ・npx
+    'if true; then claude -p hi; fi',
+    'for f in a; do claude -p hi; done',
+    '! claude -p hi',
+    'xargs claude -p < f',
+    'xargs -n 1 claude -p < f',
+    'npx @anthropic-ai/claude-code -p hi',
+    'npx -y @anthropic-ai/claude-code@latest --print hi',
+    "bash -lc 'claude -p hi'",
+    'sh -c "x"; claude -p hi',
+  ]
+  for (const c of hits) expect([c, sh(c)]).toEqual([c, ['headless']])
+  expect(ps('$env:X=1; claude -p hi')).toEqual(['headless'])
+  expect(ps('$env:CLAUDE_CONFIG_DIR="x"; $env:ANTHROPIC_BASE_URL="http://127.0.0.1:9"; claude -p hi')).toEqual(['headless'])
+  expect(ps('$env:CLAUDE_CONFIG_DIR="$env:USERPROFILE\\.claude"; $env:ANTHROPIC_BASE_URL="http://127.0.0.1:9"; $env:CLAUDE_CODE_PLUGIN_DIRS=$null; claude -p hi')).toEqual(['headless'])
+
+  const misses = [
+    `${ISO} claude -p hi`,
+    `${ISO} claude -p"hi"`,
+    'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://localhost:9/ claude -p hi',
+    'env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://[::1]:9 claude -p hi',
+    'CLAUDE_CODE_PLUGIN_DIRS= CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi',
+    'env --unset=CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 claude -p hi',
+    `if true; then ${ISO} claude -p hi; fi`,
+    `xargs ${ISO} claude -p < f`,
+    `${ISO} npx @anthropic-ai/claude-code -p hi`,
+    // -p の無い claude・plugin / mcp の下のコマンド
+    'claude plugin validate -p',
+    'claude mcp list -p',
+    'git commit -m "use claude -p"',
+    'cat <<EOF\nclaude -p\nEOF',
+    'node -e "x" # claude -p',
+  ]
+  for (const c of misses) expect([c, sh(c)]).toEqual([c, []])
+  expect(ps('$env:CLAUDE_CONFIG_DIR="D:/tmp/cc"; $env:ANTHROPIC_BASE_URL="http://127.0.0.1:9"; $env:CLAUDE_CODE_PLUGIN_DIRS=""; claude -p hi')).toEqual([])
+  expect(ps('$env:CLAUDE_CONFIG_DIR = "D:/tmp/cc"; $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:9"; Remove-Item -Path Env:\\CLAUDE_CODE_PLUGIN_DIRS; claude -p hi')).toEqual([])
+})
+
+test('純関数: 窓と音の見逃し (iex・-EncodedCommand・Process::Start・winsound・playwright・MessageBeep・timeout)', () => {
+  const START_NOTEPAD = 'UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgAG4AbwB0AGUAcABhAGQA' // UTF-16LE の Start-Process notepad
+  expect(ps('Invoke-Expression "Start-Process notepad"')).toEqual(['window'])
+  expect(ps('iex "Start-Process notepad"')).toEqual(['window'])
+  expect(ps(`powershell -NoProfile -EncodedCommand ${START_NOTEPAD}`)).toEqual(['window'])
+  expect(sh(`powershell -enc ${START_NOTEPAD}`)).toEqual(['window'])
+  expect(sh(`pwsh -e ${START_NOTEPAD}`)).toEqual(['window'])
+  expect(ps('[System.Diagnostics.Process]::Start("notepad")')).toEqual(['window'])
+  expect(sh('python -c "import winsound; winsound.Beep(440,100)"')).toEqual(['sound'])
+  expect(sh("python3 - <<'EOF'\nimport winsound\nwinsound.Beep(440, 100)\nEOF")).toEqual(['sound'])
+  expect(ps('$p = New-Object -TypeName "System.Media.SoundPlayer"; $p.Play()')).toEqual(['sound'])
+  expect(ps('New-Object -TypeName "System.Media.SoundPlayer"')).toEqual(['sound'])
+  expect(sh('npx playwright test --ui')).toEqual(['window'])
+  expect(sh('npx playwright codegen')).toEqual(['window'])
+  expect(sh('python -m playwright open http://localhost')).toEqual(['window'])
+  expect(ps('rundll32.exe user32.dll,MessageBeep')).toEqual(['sound'])
+  expect(sh('timeout 5 godot --path .')).toEqual(['window', 'sound'])
+  expect(sh('timeout -s KILL 5 godot --path .')).toEqual(['window', 'sound'])
+  expect(sh('timeout --kill-after=2 --preserve-status 5 ffplay a.wav')).toEqual(['sound'])
+  // 外れる側: 窓も音も出ない書き方
+  const misses: [string, 'bash' | 'powershell'][] = [
+    [`powershell -NoProfile -EncodedCommand VwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIABoAGkA`, 'bash'], // Write-Output hi
+    ['powershell -NoProfile -EncodedCommand ABC', 'powershell'],
+    ['powershell -ExecutionPolicy Bypass -File x.ps1', 'bash'],
+    ['iex "Get-ChildItem"', 'powershell'],
+    ['python -c "print(1)"', 'bash'],
+    ['grep -rn winsound src', 'bash'],
+    ['npx playwright test', 'bash'],
+    ['npx playwright install', 'bash'],
+    ['timeout 5 godot --headless --path .', 'bash'],
+    ['$p = Get-Process', 'powershell'],
+    ['Write-Host "[System.Diagnostics.Process]::Start"', 'powershell'],
+  ]
+  for (const [c, shell] of misses) expect([c, classify(c, shell)]).toEqual([c, []])
 })
 
 test('純関数: 外れる物 (文字列・コメント・窓や音の出ない書き方)', () => {
@@ -133,7 +230,8 @@ test('純関数: 入れ子のシェルと windowApps', () => {
   expect(sh(`bash -c 'echo "Start-Process"'`)).toEqual([])
   expect(ps(`bash -lc "godot --path ."`)).toEqual(['window', 'sound'])
   // 外で決めた環境は中の claude にも効く
-  expect(sh(`CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 bash -c "claude -p hi"`)).toEqual([])
+  expect(sh(`env -u CLAUDE_CODE_PLUGIN_DIRS CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 bash -c "claude -p hi"`)).toEqual([])
+  expect(sh(`CLAUDE_CONFIG_DIR=/tmp/cc ANTHROPIC_BASE_URL=http://127.0.0.1:9 bash -c "claude -p hi"`)).toEqual(['headless'])
   expect(classify('D:/repo/dist/MyGame.exe --dev', 'bash', ['mygame']).map(f => f.group)).toEqual(['window'])
   expect(classify('MyGame --dev', 'powershell', ['tool', 'mygame']).map(f => f.what)).toEqual(['mygame は窓のアプリ (設定 windowApps)'])
   expect(classify('D:/repo/dist/MyGame.exe --dev', 'bash')).toEqual([])
@@ -146,16 +244,24 @@ test('純関数: 入れ子のシェルと windowApps', () => {
 test('純関数: 知らない欄を残す・読めない値は既定', () => {
   expect(fromRaw(undefined)).toEqual(EMPTY)
   expect(fromRaw('broken')).toEqual(EMPTY)
-  const raw = { futureField: 1, off: { sound: true, later: true }, counts: { window: 2, later: 5 }, log: [{ at: 1, groups: ['window'], command: 'x', action: 'blocked', note: 'n' }, { at: 'x' }] }
+  const later = { at: 2, groups: ['later'], command: 'y', action: 'later' }
+  const raw = { futureField: 1, off: { sound: true, later: true }, counts: { window: 2, later: 5 }, log: [{ at: 1, groups: ['window'], command: 'x', action: 'blocked', note: 'n' }, later, 3] }
   const s = fromRaw(raw)
   expect(s.off).toEqual({ window: false, sound: true, headless: false })
-  expect(s.log).toHaveLength(1)
+  // 知らない action・group の行も持つ (描く時だけ除く)。物でない要素は落とす
+  expect(s.log).toHaveLength(2)
+  expect(shownLog(s)).toHaveLength(1)
   expect(withUnknown(raw, { ...s, counts: { ...s.counts, window: 3 } })).toEqual({
     futureField: 1,
     off: { later: true, window: false, sound: true, headless: false },
     counts: { later: 5, window: 3, sound: 0, headless: 0 },
-    log: [{ at: 1, groups: ['window'], command: 'x', action: 'blocked', note: 'n' }],
+    log: [{ at: 1, groups: ['window'], command: 'x', action: 'blocked', note: 'n' }, later],
   })
+  // 書き戻してよい形か
+  expect([undefined, {}, raw].map(isWritable)).toEqual([true, true, true])
+  expect(['broken', null, [], { log: 'x' }, { off: 1 }, { counts: [] }].map(isWritable)).toEqual([false, false, false, false, false, false])
+  // 時刻は日本時間
+  expect(clock(Date.parse('2026-10-22T15:30:00Z'))).toBe('00:30')
 })
 
 // ── フックの試験
@@ -335,6 +441,46 @@ test('知らない欄 (新しい版が書いた物) は、記録と切り替え�
   expect(raw.futureField).toBe(1)
   expect(raw.off).toEqual({ later: true, window: true, sound: false, headless: false })
   expect(fromRaw(raw).counts.sound).toBe(1)
+})
+
+test('知らない action の記録の行は、書き戻しても消えず、ペインには出ない', async ($, on) => {
+  const later = { at: NOW - 1000, groups: ['later'], command: 'future-cmd', action: 'later', extra: 1 }
+  const { w } = setup(on, { ...EMPTY, log: [later], futureField: 1 })
+  await begin($)
+  await bash($, 'say hi')
+  const raw = w.raw() as { log: unknown[]; futureField: unknown }
+  expect(raw.futureField).toBe(1)
+  expect(raw.log[0]).toEqual(later)
+  expect(raw.log).toHaveLength(2)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const text = await shown(ui)
+  expect(text).toContain('say hi')
+  expect(text).not.toContain('future-cmd')
+})
+
+test('読めない記録 (形が違う) には書かず、書けなかった分は次に書ける時に足す', async ($, on) => {
+  const { w } = setup(on, 'broken')
+  await begin($)
+  const r = await bash($, 'say a')
+  expect(denyOf(r)).not.toBe('')
+  expect(w.raw()).toBe('broken')
+  expect(w.toasts.some(t => t.includes('記録を読めなかった'))).toBe(true)
+  // 読める形に戻ったら、前の分も一緒に書く
+  w.poke({ ...EMPTY, futureField: 1 })
+  await bash($, 'say b')
+  const s = fromRaw(w.raw())
+  expect(s.log.map(e => e.command)).toEqual(['say a', 'say b'])
+  expect(s.counts.sound).toBe(2)
+  expect((w.raw() as { futureField?: unknown }).futureField).toBe(1)
+})
+
+test('/runguard を持てた時は、予備名の /run-guard を横取りしない', async ($, on) => {
+  setup(on)
+  on('command.run', { command: 'run-guard' }, () => ({ text: '別の run-guard' }))
+  await begin($)
+  const presentation = { isFullscreen: false, columns: 80 }
+  const other = await $.command.run({ command: 'run-guard', args: '', origin: { kind: 'composer' }, presentation })
+  expect(other).toMatchObject({ text: '別の run-guard' })
 })
 
 test(`記録は ${LOG_MAX} 件まで、数はずっと足す`, async ($, on) => {

@@ -97,6 +97,33 @@ test('純関数: 外に出す操作の見分け', () => {
     expect(outwardOf(c)).toBeUndefined()
 })
 
+test('純関数: 外に出す操作の見分け (語に分けて読む。前置き・入れ子のシェル・オプション・別名)', () => {
+  const pushes = [
+    '"git" push', "'git' push", "& 'C:\\Program Files\\Git\\bin\\git.exe' push", '& git push',
+    'env git push', 'env -u X git push', 'command git push', 'sudo git push', 'sudo -u bot git push', 'time git push', 'nohup git push origin main &', 'GIT_TRACE=1 git push',
+    'if true; then git push; fi', 'for i in 1; do git push; done', '! git push', 'xargs -n1 git push < remotes', 'xargs -I {} git push {} main', 'timeout 60 git push',
+    'bash -c "git push"', "sh -c 'git push origin main'", 'eval "git push"', 'powershell -Command "git push"', 'pwsh -NoProfile -c "cd x; git push"', 'cmd /c git push',
+    'iex "git push"', "Invoke-Expression 'git push'",
+    'git --git-dir .git push', 'git --work-tree . push', 'git -C "my dir" push', 'git -c "user.name=a b" push', 'git -c core.sshCommand="ssh -i k" push', 'git --no-pager push',
+    'git -c alias.x=push x', "git -c alias.p='!git push origin' p", 'git\tpush', '(git push)', 'git push 2>&1 | tee log',
+    'git commit -m "it\'s" && git push', "git commit -m 'it'\\''s' && git push", 'echo "a\\"b" ; git push', 'echo $(git push)',
+    'Start-Process git -ArgumentList push', "Start-Process -FilePath git -ArgumentList @('push','origin') -Wait",
+    // --dry-run も今までどおり聞く
+    'git push --dry-run',
+  ]
+  for (const c of pushes) expect([c, outwardOf(c)]).toEqual([c, 'git push'])
+  expect(outwardOf('yarn npm publish')).toBe('npm publish')
+  expect(outwardOf('npm --prefix pkg publish')).toBe('npm publish')
+  expect(outwardOf('npx gh release create v1')).toBe('gh release')
+  expect(outwardOf('gh -R o/r release delete v1 -y')).toBe('gh release')
+  // PowerShell の書き方
+  expect(outwardOf("git commit -m 'it''s'; if ($?) { git push }", 'powershell')).toBe('git push')
+  expect(outwardOf('& "C:\\Program Files\\Git\\cmd\\git.exe" push', 'powershell')).toBe('git push')
+  // 外れる側: 文字や検索の中、コミットの文、別のサブコマンド
+  for (const c of ['echo "git push"', 'echo git push', 'printf "%s" "npm publish"', 'git commit -m "push to origin"', 'git log --grep push', 'npm run publish', 'git stash push', 'bash -c "echo git push"', 'gh pr create', 'yarn publish-docs', 'Start-Process notepad', '# git push'])
+    expect([c, outwardOf(c)]).toEqual([c, undefined])
+})
+
 test('純関数: AskUserQuestion の答えの読み取り', () => {
   const said = (q: string, a: string) => `User has answered your questions: "${q}"="${a}". You can now continue.`
   expect(approvedIn(said('どこまでやりますか？', '公開+リリース v0.1.0'))).toBe('どこまでやりますか？')
@@ -106,6 +133,19 @@ test('純関数: AskUserQuestion の答えの読み取り', () => {
   expect(approvedIn(said('色はどれにしますか？', '青'))).toBeUndefined()
   expect(approvedIn('読めない文')).toBeUndefined()
   expect(approvedIn(`${said('色は？', '青').slice(0, -14)}, "リリースしますか？"="する". You can now continue.`)).toBe('リリースしますか？')
+  // 断り
+  for (const no of ['いいえ', 'ダメ', 'だめです', '不要', 'Nope', 'No', '今はしないでおく', 'はい、でも後で']) expect([no, approvedIn(said('push しますか？', no))]).toEqual([no, undefined])
+  // 公開を聞いていない問いの「はい」
+  expect(approvedIn(said('公開前に README を直しますか？', 'はい'))).toBeUndefined()
+  expect(approvedIn(said('公開前に README を直しますか？', '直して'))).toBeUndefined()
+  expect(approvedIn(said('テストを走らせる？ push は後で', 'はい'))).toBeUndefined()
+  expect(approvedIn(said('次は何をしますか？', 'リリースノートを書く'))).toBeUndefined()
+  expect(approvedIn(said('push しないでおきますか？', 'はい'))).toBeUndefined()
+  expect(approvedIn(said('リリース 2 件を見直しますか？', 'はい'))).toBeUndefined()
+  expect(approvedIn(said('push/pull の設定を直しますか？', 'はい'))).toBeUndefined()
+  // 公開を聞いている問いの肯定
+  for (const yes of ['はい', '実行する', 'OK', 'yes', 'push する', '公開する']) expect([yes, approvedIn(said('GitHub に公開しますか？', yes))]).toEqual([yes, 'GitHub に公開しますか？'])
+  expect(approvedIn(said('Push to GitHub?', 'Yes'))).toBe('Push to GitHub?')
 })
 
 test('外に出す操作でなければ聞かずに通す', async ($, on) => {
@@ -187,6 +227,16 @@ test('断った AskUserQuestion では許可にしない', async ($, on) => {
   expect(w.asked.length).toBe(1)
 })
 
+test('/guard を持てた時は、予備名の /ship-guard を横取りしない', async ($, on) => {
+  setup(on)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', { command: 'ship-guard' }, () => ({ text: '別の ship-guard' }))
+  await begin($)
+  const run = (command: string) => $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as never)
+  expect(await run('guard')).toMatchObject({ text: '外に出す操作の見張りのペインを開きました。' })
+  expect(await run('ship-guard')).toMatchObject({ text: '別の ship-guard' })
+})
+
 test('ペイン: 記録と状態。「このセッションは見張らない」で聞かずに通す', async ($, on) => {
   const w = setup(on)
   await begin($)
@@ -218,7 +268,12 @@ test('ペイン: 記録と状態。「このセッションは見張らない」
 
 test('純関数: push を読む場所・送る範囲', () => {
   expect(repoDirOf(`cd "D:/public-copy/claude-code-mods" && ${PUSH} origin main --tags`)).toBe('D:/public-copy/claude-code-mods')
-  expect(repoDirOf('cd /d/repo && git status && cd sub; git push')).toBe('sub')
+  expect(repoDirOf('cd /d/repo && git status && cd sub; git push')).toBe('/d/repo/sub')
+  // 引用符の中の push には当たらない
+  expect(repoDirOf('git commit -m "fix git push" && cd other && git push')).toBe('other')
+  expect(repoDirOf('cd a; git -C "b c" push')).toBe('a/b c')
+  expect(repoDirOf('Push-Location x; git push', 'powershell')).toBe('x')
+  expect(repoDirOf('bash -c "cd x && git push"')).toBe('x')
   expect(repoDirOf("git -C 'C:/a b/repo' push")).toBe('C:/a b/repo')
   expect(repoDirOf('Set-Location -LiteralPath "D:\\x"; if ($?) { git push }')).toBe('D:\\x')
   expect(repoDirOf('git push')).toBeUndefined()
@@ -228,8 +283,17 @@ test('純関数: push を読む場所・送る範囲', () => {
   expect(resolveDir('sub', 'C:/w/')).toBe('C:/w/sub')
   expect(resolveDir('/home/x/r', '/tmp')).toBe('/home/x/r')
   expect(rangeOf('git push')).toEqual(['HEAD', '--not', '--remotes'])
-  expect(rangeOf('git push origin main --tags')).toEqual(['--branches', '--tags', '--not', '--remotes'])
+  expect(rangeOf('git push origin main --tags')).toEqual(['--branches', '--tags', '--not', '--remotes=origin'])
   expect(rangeOf('git commit -m " --tags" && git push')).toEqual(['HEAD', '--not', '--remotes'])
+  // リモートと refspec を読み、そのリモートに既にある物を除く
+  expect(rangeOf('git push origin feature')).toEqual(['feature', '--not', '--remotes=origin'])
+  expect(rangeOf('git push public main')).toEqual(['main', '--not', '--remotes=public'])
+  expect(rangeOf('git push -u origin HEAD:refs/heads/x +dev')).toEqual(['HEAD', 'dev', '--not', '--remotes=origin'])
+  expect(rangeOf('git push origin')).toEqual(['HEAD', '--not', '--remotes=origin'])
+  expect(rangeOf('git push origin tag v1')).toEqual(['v1', '--not', '--remotes=origin'])
+  // 読めない物 (URL のリモート・- で始まる ref) は今までの範囲
+  expect(rangeOf('git push https://example.com/r.git main')).toEqual(['main', '--not', '--remotes'])
+  expect(rangeOf('git push origin +--output=x')).toEqual(['HEAD', '--not', '--remotes=origin'])
 })
 
 test('純関数: 公開前のチェック', () => {
@@ -238,7 +302,9 @@ test('純関数: 公開前のチェック', () => {
   const found = scanPush(commit('a1', PERSONAL, [`mail: ${PERSONAL}`, `path ${HOME_WIN}`]) + commit('b2', PERSONAL, [`also ${HOME_MSYS}`], 'docs/b.md'), cfg)
   expect(found).toEqual(['作者のメールが noreply ではない: ta***@gmail.com (2 コミット)', '個人のメールらしい文字列: ta***@gmail.com (README.md)', `ユーザー名入りのパス: ${HOME_SHOWN} (README.md ほか 1 件)`])
   // 許したメールと、気にする言葉 (大文字小文字は見ない)
-  expect(scanPush(commit('a1', PERSONAL, ['by Nakano']), { allowed: ['@gmail.com'], words: ['nakano'] })).toEqual(['気にする言葉「nakano」 (README.md)'])
+  expect(scanPush(commit('a1', PERSONAL, ['by Yamada']), { allowed: ['@gmail.com'], words: ['yamada'] })).toEqual(['気にする言葉「yamada」 (README.md)'])
+  // 足した行の制御文字は落とす
+  expect(scanPush(commit('a1', NOREPLY, ['/home/ke\x1b[31mnta/x']), cfg)).toEqual(['ユーザー名入りのパス: /home/ke*** (README.md)'])
   // 消した行 (-) と、ファイル名の行 (+++) は見ない
   expect(scanPush(`\x01c3\x00a\x00${NOREPLY}\x00a\x00${NOREPLY}\n--- a/${PERSONAL}\n+++ b/x.md\n-${PERSONAL}\n`, cfg)).toEqual([])
 })
@@ -255,7 +321,7 @@ test('git push: 確認済みで中身もきれいなら聞かずに通す。読�
   expect(w.git.length).toBe(1)
   expect(w.git[0]?.cwd).toBe('D:/public-copy/claude-code-mods')
   expect(w.git[0]?.argv).toContain('log')
-  expect(w.git[0]?.argv.slice(-3)).toEqual(['HEAD', '--not', '--remotes'])
+  expect(w.git[0]?.argv.slice(-3)).toEqual(['main', '--not', '--remotes=origin'])
   // gh release は読まない
   await bash($, 'gh release create v1')
   expect(w.git.length).toBe(1)

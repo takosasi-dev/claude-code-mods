@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { HaikuPoem, HaikuTurn } from '../types'
-import { askFor, clean, cleanAnswer, digestOf, failText, fileOf, jstMonth, mergePoems, poemsOf, shouldCompose, stamp, tanzakuSvg } from './haiku'
-import { followTheme, readTheme } from './style'
+import { askFor, clean, cleanAnswer, digestOf, failText, fileOf, jstMonth, mergePoems, poemsOf, shouldCompose, shownText, stamp, tanzakuSvg } from './haiku'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'turn-haiku'
 const TITLE = 'ターンの俳句'
@@ -33,6 +33,7 @@ const serial = <T,>(f: () => Promise<T>): Promise<T> => {
 }
 
 const note = ($: $, text: string) => update($, NOTE, () => text)
+const STALE = '新しい版が入ったので保存していません。VS Code を開き直してください'
 const message = (err: unknown) => clean(err instanceof Error ? err.message : String(err)).slice(0, 200)
 
 /** 句を store に足す (C1: 書く直前に読み直し、id で合成)。読めなければ書かずに画面だけ */
@@ -47,6 +48,12 @@ async function save($: $, poem: HaikuPoem) {
   if (!merged) {
     await update($, POEMS, list => mergePoems(list, [poem]) ?? list)
     await note($, '句の記録を読めなかったので保存していません')
+    return
+  }
+  // 新しい版が入ったのに古い版のまま動いている時は書かない (画面には出す)
+  if (!(await mayWrite($, await $.clock.now()))) {
+    await update($, POEMS, list => mergePoems(list, [poem]) ?? list)
+    await note($, STALE)
     return
   }
   await update($, POEMS, () => merged)
@@ -76,6 +83,7 @@ const compose = ($: $, turn: HaikuTurn) =>
 const toggleAuto = ($: $) =>
   serial(async () => {
     const next = await update($, AUTO, v => !v)
+    if (!(await mayWrite($, await $.clock.now()))) return void (await note($, STALE))
     await $.store.set(AUTO_KEY, next).catch(() => note($, '設定を保存できませんでした'))
   })
 
@@ -96,6 +104,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    await rememberVersion($).catch(() => {})
     // /haiku が拒まれたら (組み込みや別の mod と被ったら) /turn-haiku にする
     const got = await $.command.register({ name: 'haiku', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'haiku'
@@ -113,7 +122,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'haiku' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'turn-haiku' }, openPane)
+  // /haiku を持てた時は /turn-haiku を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'turn-haiku' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // メインのターンだけ数える (サブエージェントの分は agentId 付き)
   on('turn.start', async ($, e, next) => {
@@ -162,9 +172,9 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1}>
         {Svg ? (
-          <Svg source={tanzakuSvg(latest)} alt={latest ? `短冊: ${clean(latest.text)}` : 'まだ一句も詠んでいません'} />
+          <Svg source={tanzakuSvg(latest)} alt={latest ? `短冊: ${shownText(latest.text)}` : 'まだ一句も詠んでいません'} />
         ) : (
-          <Text bold>{latest ? clean(latest.text) : 'まだ一句も詠んでいません'}</Text>
+          <Text bold>{latest ? shownText(latest.text) : 'まだ一句も詠んでいません'}</Text>
         )}
         {latest && <Text dimColor>{`${stamp(latest.at)} に詠みました`}</Text>}
         <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -179,7 +189,7 @@ export const register: Register = on => {
           <Box key="past" flexDirection="column">
             <Text bold>過去の句</Text>
             {past.map(p => (
-              <Text>{`${stamp(p.at)}  ${clean(p.text)}`}</Text>
+              <Text>{`${stamp(p.at)}  ${shownText(p.text)}`}</Text>
             ))}
           </Box>
         )}

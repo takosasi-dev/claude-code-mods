@@ -31,7 +31,7 @@ const FACTS = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['vs
 
 /** エンジンの代わりに一番下で答える。store は手元の Map */
 const boot = async ($: Engine, on: On, init?: unknown, opts: { start?: boolean } = {}) => {
-  mock.clock(on, { now: NOW })
+  const clock = mock.clock(on, { now: NOW })
   const m = new Map<string, unknown>(init === undefined ? [] : [['save', init]])
   let sets = 0
   on('store.get', (_$, e) => ({ value: m.get(e.key) }))
@@ -50,6 +50,7 @@ const boot = async ($: Engine, on: On, init?: unknown, opts: { start?: boolean }
     /** 別のセッションが書いたことにする */
     poke: (v: unknown) => m.set('save', v),
     sets: () => sets,
+    clock,
   }
 }
 
@@ -74,6 +75,7 @@ test('純関数: 形の確かめ・制御文字・節の文・1 件だけ変え�
   ).toEqual({ on: { ja: true }, custom: [{ id: 'c1', text: 'a b' }] })
 
   expect(clean('a\u0000b\u0007c\u007f\td\r\ne')).toBe('abc d e')
+  expect(clean('a\u0085b\u009bc')).toBe('abc') // C1 も落とす
   expect(clean('x'.repeat(500))).toHaveLength(MAX_TEXT)
   expect(BUILTIN.length).toBe(8)
   expect(new Set(BUILTIN.map(b => b.id)).size).toBe(8)
@@ -97,7 +99,10 @@ test('SVG: viewBox だけ、上限内、灯ったランプは脈打つ、制御�
   const many = { on: { ja: true as const }, custom: Array.from({ length: 40 }, (_, i) => ({ id: `c${i}`, text: `<長い>${'約'.repeat(MAX_TEXT)}` })) }
   const svg = boardSvg(many)
   expect(svg).toContain('オン 1 個')
-  expect(svg).toContain('ほか 20 個')
+  // 自分のルールは 20 個まで出す (store に残っている残りは描かない)
+  expect(svg).toContain('約約')
+  expect(svg).not.toContain('ほか')
+  expect((svg.match(/>自作</g) ?? []).length).toBe(MAX_CUSTOM)
   expect(svg).toContain('&lt;長い&gt;')
   expect(svg).toContain('repeatCount="indefinite"')
   expect(svg.length).toBeLessThan(131_072)
@@ -341,4 +346,62 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   await $.config.set({ key: 'theme', value: 'dark', previous: 'light', provider: { plugin: 'core', tier: 'core' } as never, origin: { kind: 'composer' } })
   expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
   expect(await svgOf(ui)).toContain('fill="#3fb950"/>')
+})
+
+// ---- 0.2.3 で直した物 ----
+
+test('/rules を持てた時は、/rule-switch をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  mock.store(on)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', (_$, e) => ({ text: `other ${e.command}` }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  expect(await $.command.run({ command: 'rules', ...run })).toMatchObject({ text: 'ルールスイッチを開きました。' })
+  expect(await $.command.run({ command: 'rule-switch', ...run })).toMatchObject({ text: 'other rule-switch' })
+})
+
+test('自分のルールの知らない欄・上限より多いルール・on の知らない値は、切り替えの後も store に残る (出すのは 20 個まで)', async ($, on) => {
+  const many = Array.from({ length: MAX_CUSTOM + 2 }, (_, i) => ({ id: `c${i}`, text: `rule ${i}`, futureField: i }))
+  const { raw } = await boot($, on, { on: { c0: true, ja: 'later' }, custom: many, futureField: 1 })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // 画面とプロンプトに出すのは 20 個まで
+  expect(await ui.find({ type: 'Button', key: `rule-c${MAX_CUSTOM - 1}` })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: `rule-c${MAX_CUSTOM}` })).toBeUndefined()
+  await ui.press({ key: 'rule-plan' })
+  await ui.press({ key: 'rule-c0' })
+  const r = raw() as { on: Record<string, unknown>; custom: { id: string; futureField: number }[]; futureField: number }
+  expect(r.futureField).toBe(1)
+  expect(r.on).toEqual({ ja: 'later', plan: true })
+  expect(r.custom).toHaveLength(MAX_CUSTOM + 2)
+  expect(r.custom.map(c => c.futureField)).toEqual(many.map(c => c.futureField))
+  // 消すとその 1 件だけ抜ける
+  await ui.press({ key: 'del-c1' })
+  await ui.press({ key: 'del-c1' })
+  expect((raw() as typeof r).custom.map(c => c.id)).toEqual(many.filter(c => c.id !== 'c1').map(c => c.id))
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.1.0'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'rule-switch', version }) }
+    throw new Error('ENOENT')
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const { saved, clock } = await boot($, on, undefined)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'rule-ja' })
+  expect(saved().on).toEqual({ ja: true })
+  version = '0.2.0'
+  await clock.advance(61_000)
+  await ui.press({ key: 'rule-plan' })
+  await ui.input({ key: 'new', text: 'x' })
+  expect(saved()).toEqual({ on: { ja: true }, custom: [] })
+  expect(await ui.find({ type: 'Text', text: /開き直して/ })).toBeDefined()
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
 })

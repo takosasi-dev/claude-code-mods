@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { RuleSwitchSave } from '../types'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 import { boardLines, boardSvg, clean, fromSaved, isKnown, MAX_CUSTOM, rulesOf, SECTION_ID, sectionText, summary, withAdded, withRemoved, withToggle, withUnknown } from './rules'
 
 const PANE = 'rule-switch'
@@ -17,7 +17,8 @@ const NOTE = atom({ plugin: 'rule-switch', key: 'note' } as const, '')
 type $ = EngineInterface
 
 const BROKEN = '記録を読めなかったので、切り替えを残せません(上書きしないよう止めています)'
-const HINT = '切り替えは次の依頼から効きます。切り替えるとプロンプトのキャッシュが作り直されます'
+const STALE = '新しい版が入ったので切り替えを残していません。VS Code を開き直してください'
+const HINT ='切り替えは次の依頼から効きます。切り替えるとプロンプトのキャッシュが作り直されます'
 
 let ownsMain = false
 
@@ -65,6 +66,12 @@ const write = ($: $, change: (fresh: RuleSwitchSave) => RuleSwitchSave | string)
     if (typeof next === 'string') {
       await update($, SAVE, () => fresh)
       await update($, NOTE, () => next)
+      return
+    }
+    // 新しい版が入ったのに古い版のまま動いている時は書かない (新しい版の欄を消さないように)
+    if (!(await mayWrite($, await $.clock.now()))) {
+      await update($, SAVE, () => fresh)
+      await update($, NOTE, () => STALE)
       return
     }
     // この版の知らない欄 (新しい版が足した物) は読んだまま残す
@@ -116,6 +123,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    await rememberVersion($).catch(() => {})
     // /rules が拒まれたら (組み込みと被ったら) /rule-switch にする
     const got = await $.command.register({ name: 'rules', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'rules'
@@ -126,7 +134,8 @@ export const register: Register = on => {
 
   // /rules を持てなかった時は、元の /rules に回す
   on('command.run', { command: 'rules' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'rule-switch' }, openPane)
+  // /rules を持てた時は /rule-switch を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'rule-switch' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // 別のセッションで切り替えた物も、次のターンから同じにする (メインのターンだけ)
   on('turn.start', async ($, e, next) => {

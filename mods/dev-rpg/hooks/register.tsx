@@ -332,6 +332,12 @@ async function unspend($: $) {
   await save($)
 }
 
+/** 次の世代の番号。store と、このセッションが知っている世代の大きい方の 1 つ上 (store が読めなくても上がる) */
+async function nextEpoch($: $) {
+  const stored = (await readStore($))?.saved.epoch ?? 0
+  return Math.max(stored, (await readHero($)).synced.epoch) + 1
+}
+
 /** やり直しは消す操作なので、store を丸ごと書き替える (知らない欄も「すべて消えます」のうち) */
 const reset = ($: $) =>
   serial(async () => {
@@ -341,9 +347,18 @@ const reset = ($: $) =>
       await update($, NEWS, () => OLD_VERSION)
       return
     }
-    const fresh = startSession(INITIAL_SAVED, now)
+    // 世代を上げる。別のセッションは次の保存で差分を足さずに、このやり直しを取る
+    const fresh = startSession({ ...INITIAL_SAVED, epoch: await nextEpoch($) }, now)
     const hero = { ...fresh, synced: toSaved(fresh) }
-    await $.store.set(STORE_KEY, hero.synced)
+    const isSaved = await $.store.set(STORE_KEY, hero.synced).then(
+      () => true,
+      () => false,
+    )
+    if (!isSaved) {
+      await update($, CONFIRM, () => false)
+      await update($, NEWS, () => '記録を書けなかったので、やり直していません')
+      return
+    }
     await update($, HERO, () => hero)
     await update($, BATTLE, () => null)
     await update($, CONFIRM, () => false)
@@ -411,7 +426,9 @@ const restore = ($: $, day: string) =>
       await update($, NEWS, () => 'この控えは読めない形でした')
       return
     }
-    const isSaved = await $.store.set(STORE_KEY, b.value).then(
+    // 控えの値は知らない欄ごと戻し、世代だけ上げる (別のセッションが戻す前の差分を足さないように)
+    const value = { ...b.value, epoch: Math.max(await nextEpoch($), fromSaved(b.value).epoch + 1) }
+    const isSaved = await $.store.set(STORE_KEY, value).then(
       () => true,
       () => false,
     )
@@ -419,7 +436,7 @@ const restore = ($: $, day: string) =>
       await update($, NEWS, () => '記録を書けませんでした')
       return
     }
-    const saved = fromSaved(b.value)
+    const saved = fromSaved(value)
     await update($, HERO, x => ({ ...(x.s.startedAt === 0 ? startSession(saved, now) : x), ...saved, synced: saved, xpFrom: levelInfo(saved.xp).frac }))
     await update($, BATTLE, () => null)
     await update($, RESTORE, () => CLOSED)
@@ -458,7 +475,8 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'rpg' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'dev-rpg' }, openPane)
+  // /rpg を持てた時は /dev-rpg を登録していないので、同じ名前の別のコマンドに回す
+  on('command.run', { command: 'dev-rpg' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // 主ループのターンだけ数える (サブエージェントの分は agentId 付き)
   on('turn.start', async ($, e, next) => {

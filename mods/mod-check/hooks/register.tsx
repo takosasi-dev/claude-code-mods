@@ -171,7 +171,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'mod-check' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'modcheck' }, openPane)
+  // 本来の名前を持てた時は予備名を登録していないので、同じ名前の別のコマンドを横取りしない
+  on('command.run', { command: 'modcheck' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)

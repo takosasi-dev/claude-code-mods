@@ -34,6 +34,8 @@ const FILE = { options: { usageFile: '/tmp/demo/usage.json' } }
 
 // ペインを開く求めに答える
 const allowOpen = (on: On) => on('ui.open', () => ({ value: { isPlaced: true } }))
+// ペインが開いている (リロードの後など)
+const shownPane = (on: On) => on('ui.panes', () => ({ value: [{ id: 'usage-pane', title: '使用量', isShown: true, isFocused: false, isPlaced: true }] }))
 
 // /usage-pane で開く(ここでファイルを読む)
 const openPane = async ($: Engine) => {
@@ -92,6 +94,7 @@ test('30 秒ごとに読み直して描き直す', FILE, async ($, on) => {
   let pct = 32
   on('fs.read', () => ({ value: usage(pct) }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  shownPane(on)
   await $.session.start({ cwd: '', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: '32%' })).toBeDefined()
@@ -108,6 +111,7 @@ test('描画ではファイルを読まない(読むのはタイマーとコマ�
     return { value: usage(32) }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  shownPane(on)
   await $.session.start({ cwd: '', surface: 'terminal', isInteractive: true })
   const afterStart = reads
   for (const surface of SURFACES) {
@@ -118,6 +122,21 @@ test('描画ではファイルを読まない(読むのはタイマーとコマ�
   expect(reads).toBe(afterStart)
   await clock.advance(30_000)
   expect(reads).toBe(afterStart + 1)
+})
+
+// 監査: 閉じていても 30 秒ごとにファイルを読んでいた
+test('ペインが閉じている間は、始まりにも 30 秒ごとにも読まない', FILE, async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  let reads = 0
+  on('fs.read', () => {
+    reads++
+    return { value: usage(32) }
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [] }))
+  await $.session.start({ cwd: '', surface: 'terminal', isInteractive: true })
+  await clock.advance(90_000)
+  expect(reads).toBe(0)
 })
 
 test('ファイルが未設定なら読まずに設定のしかたを出す', async ($, on) => {

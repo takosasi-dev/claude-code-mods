@@ -301,9 +301,12 @@ test('/quest を登録して開く。取れなければ /daily-quest にして�
     return e.name === 'quest' && isTaken ? { deny: '組み込みと被っています' } : { value: { command: e.name } }
   })
   on('command.run', { command: 'quest' }, () => ({ text: 'ほかの quest' }))
+  on('command.run', { command: 'daily-quest' }, () => ({ text: 'ほかの daily-quest' }))
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['quest'])
   expect(await $.command.run({ command: 'quest', ...RUN })).toMatchObject({ text: 'きょうのお題を開きました。' })
+  // /quest を持てた時は /daily-quest を登録していないので、横取りしない
+  expect(await $.command.run({ command: 'daily-quest', ...RUN })).toMatchObject({ text: 'ほかの daily-quest' })
   isTaken = true
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['quest', 'quest', 'daily-quest'])

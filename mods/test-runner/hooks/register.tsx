@@ -84,14 +84,15 @@ async function runTests($: $) {
   }
 
   const finishedAt = await $.clock.now()
+  const counts = countResults(out)
   const result: TestRunnerResult = {
-    status: statusOf(code, stoppedBy),
+    status: statusOf(code, stoppedBy, counts.failed),
     command,
     exitCode: code,
     ms: finishedAt - startedAt,
     finishedAt,
     tail: tailOf(out),
-    ...countResults(out),
+    ...counts,
   }
   await update($, RUN, () => ({ kind: 'done' as const, result }))
   await update($, HIST, h => [...h, { status: result.status, ms: result.ms }].slice(-HISTORY))
@@ -158,7 +159,8 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'testrun' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'test-runner' }, openPane)
+  // /testrun を持てた時は予備名を開かない (同じ名前の別のコマンドを横取りしない)
+  on('command.run', { command: 'test-runner' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   // Claude が走らせたテスト (サブエージェントの分も) を履歴に入れる。見ているだけなので失敗しても止めない
   on('tool.call', ($, e, next) => {

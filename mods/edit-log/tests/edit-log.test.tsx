@@ -296,6 +296,7 @@ test('git はファイルの親フォルダで、textconv・pathspec の解釈�
   expect((diff ?? []).indexOf('--literal-pathspecs')).toBeGreaterThan(0)
   expect((diff ?? []).indexOf('--literal-pathspecs')).toBeLessThan((diff ?? []).indexOf('diff-index'))
   expect(diff).toContain('core.fsmonitor=false')
+  expect(diff).toContain('log.showSignature=false')
   expect(diff?.slice(-1)).toEqual(['/tmp/demo/src/a[1].ts'])
   expect(world.inits?.every(i => i.cwd === '/tmp/demo/src' && i.env?.GIT_OPTIONAL_LOCKS === '0')).toBe(true)
 
@@ -341,6 +342,30 @@ for (const surface of SURFACES) {
     else expect(await ui.find({ type: 'Text', text: 'ab.ts' })).toBeDefined()
   })
 }
+
+// 監査: plain は CR を残すので、CR を含むパスの label で Text が拒まれた。label は clean で作る
+for (const surface of SURFACES) {
+  test(`${surface}: ファイル名の CR・C1 も落として描く`, async ($, on) => {
+    bottom(on, { repo: 'repo', diff: DIFF, calls: [] })
+    await edit($, '/tmp/demo/a\rb\u0085.ts', 'a', 'b')
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const button = await ui.find({ key: 'file:a b.ts' })
+    expect(button).toBeDefined()
+    expect(button?.text).not.toMatch(/[\r\u0080-\u009f]/)
+    if (surface === 'vscode') expect(String((await ui.find({ type: 'Svg' }))?.props.alt)).not.toMatch(/[\r\u0080-\u009f]/)
+  })
+}
+
+test('/edits を持てた時は /edit-log を横取りしない', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', { command: 'edit-log' }, () => ({ text: '他の edit-log' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'edit-log', ...run })).toMatchObject({ text: '他の edit-log' })
+  expect(await $.command.run({ command: 'edits', ...run })).toMatchObject({ text: '変更ログを開きました。' })
+})
 
 test('/edits が拒まれて /edit-log にした時は、/edits を横取りしない', async ($, on) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))

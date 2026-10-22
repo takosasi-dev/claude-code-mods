@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { faceSvg } from '../hooks/face'
+import { clean, faceSvg } from '../hooks/face'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const CWD = '/tmp/demo'
@@ -353,4 +353,44 @@ test('季節の小物: 春は花びら、夏は昼に麦わら帽子・夜に蛍
     expect(s).toContain('viewBox="0 0 96 72"')
     expect(s).toContain('<circle cx="48" cy="40" r="28"')
   }
+})
+
+// ---- 0.4.1 で直した物 ----
+
+test('/face を持てた時は、/face-band をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  const { saved } = setup(on)
+  on('command.run', { command: 'face-band' }, () => ({ text: '別の face-band' }))
+  await begin($)
+  const other = await $.command.run({ command: 'face-band', args: '', origin: { kind: 'composer' }, presentation })
+  expect(other).toMatchObject({ text: '別の face-band' })
+  expect(saved.isHidden).toBe(false)
+})
+
+test('制御文字は C1 も落とす', () => {
+  expect(clean('a\u0007b\u0085c\u009bd')).toBe('abcd')
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let version = '0.4.1'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'face-band', version }) }
+    throw new Error('ENOENT')
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const { saved, clock } = setup(on)
+  await begin($)
+  const face = () => $.command.run({ command: 'face', args: '', origin: { kind: 'composer' }, presentation })
+  await face()
+  expect(saved.isHidden).toBe(true)
+  version = '0.5.0'
+  await clock.advance(61_000)
+  expect(await face()).toMatchObject({ text: '顔の帯を出しました。(新しい版が入ったので設定は残していません。VS Code を開き直してください)' })
+  await face()
+  expect(saved.isHidden).toBe(true)
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
 })

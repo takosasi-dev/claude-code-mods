@@ -42,7 +42,7 @@ Anthropic とは関係のない、個人が作った非公式の mod です。
 | turn-haiku | `/haiku` | ターンが終わるたびに、やった事を五七五の 1 句にして縦書きの短冊に。季節の季語の候補を添えて詠む。過去の句の一覧 |
 | session-timeline | `/timeline` | このセッションのターンとツール呼び出しを横の帯の年表で。ツールの種類で色分け、失敗は赤い印、サブエージェントは細い帯、1 分以上のターンは黄の縁 |
 | file-map | `/filemap` | このセッションで読んだ・書いたファイルを、フォルダごとの四角(ツリーマップ)で。大きいほど多く触った所、橙は書いた物、青は読んだだけ |
-| toast-inbox | `/inbox` | ほかの mod が出したトーストとステータス行を 100 件まで残す受け箱。未読の数・mod ごとの件数・mod で絞る・全部既読・空にする。通知の行を押すと、それを出した mod のペインを開く |
+| toast-inbox | `/inbox` | ほかの mod が出したトーストを 100 件まで残す受け箱(設定でステータス行も)。未読の数・mod ごとの件数・mod で絞る・全部既読・空にする。通知の行を押すと、それを出した mod のペインを開く |
 | usage-history | `/history` | 日をまたいだ使い方の記録。日ごとのターン数か出力トークンの棒(7 日 / 30 日)、合計と 1 日平均、曜日と時間帯のヒートマップ。直近 7 日の数をほかの mod(week-card)にも見せる。記録は毎日控えを取れる |
 | fail-log | `/errors` | ツールが失敗した記録を 200 件まで残す。似た失敗をまとめた「よく落ちる物」の棒、最近の一覧、今日・通算の数。サブエージェントの分は紫で分ける |
 | daily-quest | `/quest` | 日替わりのお題 3 つ(ターン・ファイルを直す・テスト・コミットなど 8 種から)。進みの棒・ごほうび・連続日数・直近 7 日。ごほうびは dev-rpg が経験値、turn-gacha がおまけの抽選で受け取る。記録は毎日控えを取り、「控えから戻す」で戻せる |
@@ -351,6 +351,10 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - rule-watch の開発ログの見張りは、Write / Edit とシェルのコマンドに入ったパスで「書いた」とみなします。MCP のツールで書いた物は数えません
 - dev-rpg のダンジョンは、潜っている間ターンの終わりに 1 歩進み、8 歩でその階の敵と自動で戦います。力尽きると袋の経験値の半分を持ち帰ります
 - week-card の「増えた数」は、week-card を入れた日から日ごとの写しを取り始めるので、次の日から出ます。dev-rpg のレベルは dev-rpg の式の写しで数えます
+- ship-guard が公開の許可として数えるのは、Claude 自身が AskUserQuestion で聞いて、問いが公開を聞いていて答えが肯定の時だけです(「いいえ」や、公開と関係の無い問いの「はい」、ほかの mod の確認は数えません)
+- 0.10.1 から、記録を書く mod は記録を読めなかった時に書きません(前は手元の写しで上書きし、記録が消えることがありました)
+- fail-log は、失敗したコマンドとエラーの文の秘密らしい所(`Bearer …`・`TOKEN=…`・URL の userinfo・`ghp_` など)を伏せてから残します。形で見分けられない物は残ることがあります
+- 他人から受け取ったリポジトリの `.git/config` は信じないでください。git を読む mod は `fsmonitor`・`textconv`・`log.showSignature` は止めていますが、`.gitattributes` の `filter` の clean は止められません
 
 ## 設定が要る mod
 
@@ -367,6 +371,7 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 | pre-check | `testCommand` / `timeoutSeconds` | test-runner と同じ。空ならテストの項目は飛ばす |
 | compact-cue | `notifyPercent` / `urgentPercent` | 合図を出し始める使用量と、急ぎにする使用量(%、既定 50 / 75) |
 | compact-cue | `memoDir` | 引き継ぎメモのフォルダ。入れると、ここへ書いた時も区切りとみなす(空でも動く) |
+| toast-inbox | `keepStatus` | ほかの mod のステータス行も残す(既定 オフ。実況のように何度も出す mod があると埋まるため) |
 | ship-guard | `checkBeforePush` | push の前に中身を確かめる(既定 オン) |
 | ship-guard | `allowedEmails` / `privateWords` | 気にしないメール(カンマ区切り、`@example.org` でドメインごと)と、足した行や作者名に入っていたら知らせる言葉 |
 | rule-watch | `checkEnglish` / `checkQuestion` | 英語の返事・文での質問を見るか(既定 オン) |

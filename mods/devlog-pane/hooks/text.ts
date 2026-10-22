@@ -7,7 +7,7 @@ export const jstDate = (ms: number) => new Date(ms + 9 * 3600_000).toISOString()
 
 // Markdown 要素に渡せる形にする: タブ・改行以外の制御文字を落とし、長ければ後ろ側を行頭から残す
 export const fit = (text: string) => {
-  const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+  const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '')
   if (clean.length <= MAX) return clean
   const from = clean.length - (MAX - HEAD.length)
   const nl = clean.indexOf('\n', from - 1)

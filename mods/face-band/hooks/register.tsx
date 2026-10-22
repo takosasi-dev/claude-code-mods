@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { FaceBandLook, FaceBandMood, FaceBandNow } from '../types'
-import { dayPart, followTheme, readTheme, season } from './style'
+import { dayPart, followTheme, mayWrite, readTheme, rememberVersion, season } from './style'
 import { IDLE, clean, endWord, faceAlt, faceSvg, faceText, subLine } from './face'
 
 const NOW = atom({ plugin: 'face-band', key: 'now' } as const, IDLE)
@@ -24,11 +24,14 @@ const moved = (n: FaceBandNow, mood: FaceBandMood, word: string, more: Partial<F
 
 const toggle = async ($: $) => {
   const hidden = await update($, HIDDEN, v => !v)
-  // 残すのは「隠したか」だけ。他のセッションの値と混ぜる物は無いので、この 1 キーを書く
-  const saved = await $.store.set(STORE_KEY, hidden).then(
-    () => '',
-    () => '(設定は残せませんでした)',
-  )
+  // 残すのは「隠したか」だけ。他のセッションの値と混ぜる物は無いので、この 1 キーを書く。
+  // 新しい版が入ったのに古い版のまま動いている時は書かない (このセッションの中では効く)
+  const saved = (await mayWrite($, await $.clock.now()))
+    ? await $.store.set(STORE_KEY, hidden).then(
+        () => '',
+        () => '(設定は残せませんでした)',
+      )
+    : '(新しい版が入ったので設定は残していません。VS Code を開き直してください)'
   $.ui.invalidate('ui.render')
   return { text: `${hidden ? '顔の帯を隠しました。' : '顔の帯を出しました。'}${saved}` }
 }
@@ -50,6 +53,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await readTheme($)
     const started = await next(e)
+    await rememberVersion($).catch(() => {})
     const got = await $.command.register({ name: 'face', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'face'
     if (!ownsMain) await $.command.register({ name: 'face-band', description: DESCRIPTION }).catch(() => {})
@@ -66,7 +70,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'face' }, ($, e, next) => (ownsMain ? toggle($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'face-band' }, toggle)
+  // /face を持てた時は /face-band を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'face-band' }, ($, e, next) => (ownsMain ? next(e) : toggle($))).catch(($, e, next) => next(e))
 
   // メインのターンだけ (サブエージェントは agentId 付き)
   on('turn.start', async ($, e, next) => {

@@ -204,7 +204,8 @@ export const register: Register = (on, options) => {
 
   // /games を持てなかった時は、元の /games に回す
   on('command.run', { command: 'games' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'wait-games' }, openPane)
+  // /games を持てた時は /wait-games を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'wait-games' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // メインのターンが始まったら、遊んでいるかを数え直す
   on('turn.start', async ($, e, next) => {

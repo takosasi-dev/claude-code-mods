@@ -3,7 +3,7 @@ import type { RpgBattle, RpgDelve, RpgDelveFight, RpgEnemy, RpgHero } from '../t
 import type { Command } from './battle'
 import { BOSSES, ENEMIES, act, canUse, enemyOf, fighterOf, monster, openBattle, rngOf } from './battle'
 import type { Line } from './rpg'
-import { K, MONO, SP_RULE, bar, gain, paint, sprite, svgDoc, win } from './rpg'
+import { K, MONO, SP_RULE, addDone, bar, gain, paint, sprite, svgDoc, win } from './rpg'
 import { esc, isLight, short } from './style'
 
 // ---------------------------------------------------------------- 釣り合いの表 (数はここだけ)
@@ -119,8 +119,11 @@ export const enterDelve = (h: RpgHero, now: number, from: number): RpgHero => ({
   },
 })
 
+/** 潜りを終える: 経験値を持ち帰り、入口に戻り、終えた印を残す (別のセッションがこの潜りを書き戻さない・もう一度持ち帰らない) */
+const finish = (h: RpgHero, d: RpgDelve, xp: number): RpgHero => ({ ...gain(h, xp), delve: null, doneDelves: addDone(h.doneDelves, { id: d.startedAt, xp }) })
+
 /** 帰る: 袋の経験値を持ち帰る */
-export const leaveDelve = (h: RpgHero): RpgHero => (h.delve ? { ...gain(h, h.delve.loot), delve: null } : h)
+export const leaveDelve = (h: RpgHero): RpgHero => (h.delve ? finish(h, h.delve, h.delve.loot) : h)
 
 /** 1 歩の出来事。won / lost は戦った時だけ */
 export type DelveEvent = { kind: 'step' } | { kind: 'won'; fight: RpgDelveFight } | { kind: 'lost'; fight: RpgDelveFight; kept: number }
@@ -157,7 +160,7 @@ export function stepDelve(h: RpgHero, worn: RpgHero): { hero: RpgHero; event?: D
   }
   if (!won) {
     const kept = Math.floor(d.loot * DELVE.lostKeep)
-    return { hero: { ...gain(h, kept), delve: null }, event: { kind: 'lost', fight, kept } }
+    return { hero: finish(h, d, kept), event: { kind: 'lost', fight, kept } }
   }
   const next: RpgDelve = {
     ...d,

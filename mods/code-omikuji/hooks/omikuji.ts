@@ -439,10 +439,11 @@ export function lastDays(date: string, n = 7) {
   return Array.from({ length: n }, (_, i) => new Date(t - (n - 1 - i) * 86_400_000).toISOString().slice(0, 10))
 }
 
-/** 今日の分を足して、直近 7 日より古い分を落とす */
+/** 今日の分を足して、直近 7 日より古い分を落とす。今日の分が既にあれば、その知らない欄 (新しい版が足した欄) は残す */
 export function addDay(history: readonly OmikujiDay[], day: OmikujiDay): OmikujiDay[] {
   const keep = new Set(lastDays(day.date))
-  return [...history.filter(d => d.date !== day.date && keep.has(d.date)), day].sort((p, q) => p.date.localeCompare(q.date))
+  const had = history.find(d => d.date === day.date)
+  return [...history.filter(d => d.date !== day.date && keep.has(d.date)), { ...had, ...day }].sort((p, q) => p.date.localeCompare(q.date))
 }
 
 const md = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`

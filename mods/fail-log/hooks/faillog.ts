@@ -49,23 +49,39 @@ export function commandHead(cmd: string): string {
   return /^[A-Za-z][\w:-]*$/.test(sub) ? `${exe} ${sub}` : exe
 }
 
+// ponytail: 形で見分けられる秘密だけを伏せる。`-p 値` のような位置で決まる物は見分けられない
+const SECRETS: [RegExp, string][] = [
+  // トークンの形 (頭は残す)
+  [/\b(sk-ant-|sk-|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|xoxb-|xoxp-)[A-Za-z0-9_-]{6,}/g, '$1***'],
+  [/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA***'],
+  // Authorization: Bearer xxx
+  [/\b(Bearer)\s+\S+/gi, '$1 ***'],
+  // GITHUB_TOKEN=xxx・api_key=xxx・--password=xxx (名前の後ろが合えば頭に何が付いていても)
+  [/(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|KEY)=\S+/gi, '$1=***'],
+  // URL の userinfo (https://user:pass@host)
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi, '$1***@'],
+]
+
+/** 秘密らしい文字列を伏せ字にする。store に残す前に、切る前の文字列に当てる (切った後だと頭だけ残って漏れる) */
+export const redact = (s: string) => SECRETS.reduce((t, [re, to]) => t.replace(re, to), s)
+
 /** ツールの入力から、一覧に出す要約とまとめる鍵 */
 export function summarize(tool: string, input: Record<string, unknown>): { input: string; group: string } {
   const name = shortTool(tool)
   if (SHELLS.has(tool)) {
-    const cmd = str(input.command)
+    const cmd = redact(str(input.command))
     const head = commandHead(cmd)
     return { input: short(clean(cmd.split(/\r?\n/)[0] ?? ''), 60), group: head ? `${name} ${head}` : name }
   }
   const key = FILE_TOOLS[tool]
   if (key) {
-    const file = clean(baseName(str(input[key])))
+    const file = clean(redact(baseName(str(input[key]))))
     return { input: file, group: file ? `${name} ${file}` : name }
   }
-  // Grep・Glob は探した形、WebFetch は宛先の名前
-  if (tool === 'Grep' || tool === 'Glob') return { input: short(clean(str(input.pattern)), 40), group: name }
+  // Grep・Glob は探した形、WebFetch は宛先の名前 (userinfo は落とす)
+  if (tool === 'Grep' || tool === 'Glob') return { input: short(clean(redact(str(input.pattern))), 40), group: name }
   if (tool === 'WebFetch') {
-    const host = /^[a-z]+:\/\/([^/?#]+)/i.exec(str(input.url))?.[1] ?? ''
+    const host = (/^[a-z]+:\/\/([^/?#]+)/i.exec(str(input.url))?.[1] ?? '').replace(/^.*@/, '')
     const h = clean(host)
     return { input: h, group: h ? `${name} ${h}` : name }
   }
@@ -73,10 +89,10 @@ export function summarize(tool: string, input: Record<string, unknown>): { input
 }
 
 /**
- * エラーの 1 行目。<tool_use_error> の札は外す。`Exit code 1` だけの行なら次の行も付ける
+ * エラーの 1 行目。<tool_use_error> の札は外す。`Exit code 1` だけの行なら次の行も付ける。秘密らしい文字列は伏せる
  */
 export function firstLine(text: string): string {
-  const lines = text
+  const lines = redact(text)
     .replace(/<\/?tool_use_error>/g, '')
     .split(/\r?\n/)
     .map(l => clean(l))
@@ -86,20 +102,23 @@ export function firstLine(text: string): string {
   return short(s, 160)
 }
 
-/** $.store の値を確かめて読む。形の違う物は捨てる */
+/**
+ * $.store の値を確かめて読む。形の違う物は捨てる。知らない欄 (新しい版が足した欄) は残す。
+ * 前の版が平文で残した秘密も、読む時に伏せる (次に書く時に store からも消える)。件数で切るのは足す時だけ
+ */
 export function asEntries(v: unknown): FailEntry[] | undefined {
   if (!Array.isArray(v)) return undefined
   return v
     .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null && typeof x.at === 'number' && typeof x.tool === 'string')
     .map(x => ({
+      ...x,
       at: x.at as number,
       tool: clean(x.tool as string),
-      input: clean(str(x.input)),
-      error: clean(str(x.error)),
-      group: clean(str(x.group)) || clean(x.tool as string),
+      input: clean(redact(str(x.input))),
+      error: clean(redact(str(x.error))),
+      group: clean(redact(str(x.group))) || clean(x.tool as string),
       isSub: x.isSub === true,
     }))
-    .slice(-KEEP)
 }
 
 export const asCount = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined)

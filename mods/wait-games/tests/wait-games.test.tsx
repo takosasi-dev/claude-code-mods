@@ -646,9 +646,13 @@ test('/games を登録して開く。取れなければ /wait-games', async ($, 
     opened = e.id
     return { value: { isPlaced: true as const } }
   })
+  on('command.run', { command: 'wait-games' }, () => ({ text: 'ほかの wait-games' }))
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
   expect(tried).toEqual(['games'])
   const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  // /games を持てた時は /wait-games を登録していないので、横取りしない
+  expect((await $.command.run({ command: 'wait-games', ...run })).text).toBe('ほかの wait-games')
+  expect(opened).toBe('')
   expect((await $.command.run({ command: 'games', ...run })).text).toBe('ミニゲームを開きました。')
   expect(opened).toBe('wait-games')
   isTaken = true

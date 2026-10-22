@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { FailEntry } from '../types'
 import { KEEP, RECENT, asCount, asEntries, failLines, failSvg, firstLine, recentHead, summarize, summaryText } from './faillog'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'fail-log'
 const TITLE = '失敗の記録'
@@ -19,7 +19,7 @@ type $ = EngineInterface
 async function load($: $) {
   const entries = asEntries(await $.store.get('entries').catch(() => undefined))
   const total = asCount(await $.store.get('total').catch(() => undefined))
-  if (entries) await update($, ENTRIES, () => entries)
+  if (entries) await update($, ENTRIES, () => entries.slice(-KEEP))
   if (total !== undefined) await update($, TOTAL, () => total)
 }
 
@@ -32,20 +32,47 @@ const serial = (fn: () => Promise<void>) => {
   return run
 }
 
-/** $.store は他のセッションと共有なので、書く直前に読み直して 1 件だけ足す */
+/** store のキーを読む。キーが無ければ empty、読めない時 (例外・形が違う) は undefined */
+async function readKey<T>($: $, key: string, as: (v: unknown) => T | undefined, empty: T): Promise<T | undefined> {
+  try {
+    const raw = await $.store.get(key)
+    return raw === undefined ? empty : as(raw)
+  } catch {
+    return undefined
+  }
+}
+
+// ponytail: 読めなかった知らせはセッションに 1 回だけ (失敗のたびに出すとうるさい)。リロードでもう 1 回出る
+let toldBroken = false
+
+/**
+ * $.store は他のセッションと共有なので、書く直前に読み直して 1 件だけ足す。
+ * 読めない時 (例外・形が違う) と、古い版のまま動いている時は書かずに、このセッションの画面にだけ足す
+ */
 const record = ($: $, entry: FailEntry) =>
   serial(async () => {
-    const saved = asEntries(await $.store.get('entries').catch(() => undefined)) ?? (await read($, ENTRIES))
-    const total = (asCount(await $.store.get('total').catch(() => undefined)) ?? (await read($, TOTAL))) + 1
+    const saved = await readKey($, 'entries', asEntries, [])
+    const total = await readKey($, 'total', asCount, 0)
+    const onlyHere = async () => {
+      await update($, ENTRIES, list => [...list, entry].slice(-KEEP))
+      await update($, TOTAL, n => n + 1)
+    }
+    if (saved === undefined || total === undefined) {
+      if (!toldBroken) $.ui.toast('失敗の記録を読めなかったので、保存していません(上書きしないよう止めています)', { timeoutMs: 8000 })
+      toldBroken = true
+      return onlyHere()
+    }
+    if (!(await mayWrite($, entry.at))) return onlyHere()
     const next = [...saved, entry].slice(-KEEP)
     await update($, ENTRIES, () => next)
-    await update($, TOTAL, () => total)
+    await update($, TOTAL, () => total + 1)
     await $.store.set('entries', next).catch(() => {})
-    await $.store.set('total', total).catch(() => {})
+    await $.store.set('total', total + 1).catch(() => {})
   })
 
 const clear = ($: $) =>
   serial(async () => {
+    if (!(await mayWrite($, await $.clock.now()))) return void (await update($, CONFIRMING, () => false))
     await update($, ENTRIES, () => [])
     await update($, TOTAL, () => 0)
     await update($, CONFIRMING, () => false)
@@ -74,13 +101,15 @@ export const register: Register = on => {
     if (!ownsMain) await $.command.register({ name: 'fail-log', description: DESCRIPTION }).catch(() => {})
     await readTheme($)
     await update($, CONFIRMING, () => false)
+    await rememberVersion($).catch(() => {})
     await load($)
     return started
   })
 
   // /errors を持てなかった時は、その名前の持ち主に回す
   on('command.run', { command: 'errors' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'fail-log' }, openPane)
+  // /errors を持てた時は /fail-log を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'fail-log' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // 見るだけ。ツールが失敗した (isError) 物だけ記録する。断られた物は数えない
   on('tool.call', async ($, e, next) => {

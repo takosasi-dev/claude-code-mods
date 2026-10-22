@@ -14,7 +14,9 @@ async function refresh($: EngineInterface, logDir: string) {
     return
   }
   const sep = logDir.includes('\\') || !logDir.includes('/') ? '\\' : '/'
-  const path = `${logDir}${sep}${jstDate(await $.clock.now())}.md`
+  // 根(C:\ や /)は区切りで終わっているので足さない
+  const base = /[\\/]$/.test(logDir) ? logDir : `${logDir}${sep}`
+  const path = `${base}${jstDate(await $.clock.now())}.md`
   const stat = await $.fs.stat(path).catch(() => undefined)
   const mtimeMs = stat?.mtimeMs ?? 0
   const { value } = await $.state.get(log)
@@ -23,8 +25,17 @@ async function refresh($: EngineInterface, logDir: string) {
   await $.state.set(log, { path, mtimeMs, text })
 }
 
+// 設定のフォルダ: 絶対パス(/x、\x、C:\x、C:/x)でなければ未設定(空)。相対パスや「C:」は今のフォルダから読まれてしまう。
+// 末尾の区切りは外すが、根(C:\ や /)は区切りを残す (project-board と同じ形)
+const folderOption = (value: unknown) => {
+  const raw = String(value ?? '').trim()
+  if (!/^(?:[\\/]|[A-Za-z]:[\\/])/.test(raw)) return ''
+  const trimmed = raw.replace(/[\\/]+$/, '')
+  return trimmed === '' || /^[A-Za-z]:$/.test(trimmed) ? raw.slice(0, trimmed.length + 1) : trimmed
+}
+
 export const register: Register = (on, options) => {
-  const logDir = String(options.logDir ?? '').trim().replace(/[\\/]+$/, '')
+  const logDir = folderOption(options.logDir)
 
   followTheme(on)
 

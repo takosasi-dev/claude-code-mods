@@ -248,20 +248,49 @@ test('ドライブの根は区切りを残す(C:\\ を C: にしない)', { opti
   expect(await rowKeys(ui)).toEqual(['open:Alpha'])
 })
 
-test('本文の file: リンクは押せない(https: はそのまま)', { options: { memoDir: '/tmp/demo/memo' } }, async ($, on) => {
+// 監査: 参照の形・山かっこの空白・かっこ入りのパスの file: リンクを拾い漏らして、押すと開けた
+const FILE_BODIES = [
+  '[手元のメモ](file:///C:/x/a.md) と [サイト](https://example.com) と <file:///C:/y.md>',
+  '[x][r]\n\n[r]: file:///C:/Windows/System32/calc.exe',
+  '[x](<file:///C:/a b.exe>)',
+  '[x](file:///C:/a(1).exe)',
+  '[x](FILE:///C:/a.exe)',
+  '[x](file&#58;///C:/a.exe)',
+  '[x](fil&#x65;:///C:/a.exe)',
+  '[x](file&colon;///C:/a.exe)',
+  '[x](file\\:///C:/a.exe)',
+]
+for (const [n, text] of FILE_BODIES.entries()) {
+  test(`本文に file: がありうる時は、どのリンクも押しても何もしない (${n})`, { options: { memoDir: '/tmp/demo/memo' } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    anyFs(on, `# Alpha\n\n${text}\n`)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...PANE, surface })
+      await ui.press({ key: 'reload' })
+      await ui.press({ key: 'open:Alpha' })
+      const body = await ui.find({ key: 'body' })
+      // pressableLinks を渡さないので、全部のリンクが onLinkPress (何もしない) に来る
+      expect(body?.props.pressableLinks).toBeUndefined()
+      // 押しても何も起きない(落ちない)。https: のリンクも mod が受ける (面が開かない)
+      await ui.press({ key: 'body', link: { href: 'file:///C:/x/a.md' } })
+      await ui.press({ key: 'body', link: { href: 'https://example.com' } })
+      await ui.press({ key: 'back' })
+      await ui.unmount()
+    }
+  })
+}
+
+test('本文に file: が無ければリンクはそのまま', { options: { memoDir: '/tmp/demo/memo' } }, async ($, on) => {
   mock.clock(on, { now: NOW })
-  anyFs(on, '# Alpha\n\n[手元のメモ](file:///C:/x/a.md) と [サイト](https://example.com) と <file:///C:/y.md>\n')
-  for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...PANE, surface })
-    await ui.press({ key: 'reload' })
-    await ui.press({ key: 'open:Alpha' })
-    const body = await ui.find({ key: 'body' })
-    expect(body?.props.pressableLinks).toEqual(['file:///C:/x/a.md', 'file:///C:/y.md'])
-    // 押しても何も起きない(落ちない)
-    await ui.press({ key: 'body', link: { href: 'file:///C:/x/a.md' } })
-    await ui.press({ key: 'back' })
-    await ui.unmount()
-  }
+  anyFs(on, '# Alpha\n\n[サイト](https://example.com) と profile: の話\n')
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'reload' })
+  await ui.press({ key: 'open:Alpha' })
+  const body = await ui.find({ key: 'body' })
+  expect(body).toBeDefined()
+  // mod はリンクを受けない (面がいつもどおり開く)
+  const r = await ui.press({ key: 'body', link: { href: 'https://example.com' } }).then(() => 'pressed', () => 'not ours')
+  expect(r).toBe('not ours')
 })
 
 test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', OPTIONS, async ($, on) => {

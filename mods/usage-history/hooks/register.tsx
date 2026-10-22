@@ -71,6 +71,22 @@ const serial = <T,>(f: () => Promise<T>) => {
   return p
 }
 
+/** 書けなかった差分を、溜めている差分に戻す (次のターンの終わりにもう一度書く) */
+function putBack(days: Days, heat: number[]) {
+  for (const [k, d] of Object.entries(days)) bump(k, d)
+  if (heat.length > 0) pendingHeat = mergeHeat(pendingHeat, heat)
+}
+
+const BROKEN = '記録を読めなかったので、まだ書いていません。次のターンの終わりにもう一度読みます'
+const UNSAVED = '記録を書けませんでした。次のターンの終わりにもう一度書きます'
+
+/** store の key を読む。無ければ { v: undefined }、読めなければ (reject) undefined */
+const readKey = ($: $, key: 'days' | 'heat') =>
+  $.store.get(key).then(
+    v => ({ v }),
+    () => undefined,
+  )
+
 // 書く直前に読み直し、差分だけを足す (他のセッションが足した分を消さない)
 const flush = ($: $) =>
   serial(async () => {
@@ -78,22 +94,42 @@ const flush = ($: $) =>
     const now = await $.clock.now()
     // 古い版のまま動いている時は書かない (新しい版の欄を消さないように。差分は溜めたまま)
     if (!(await mayWrite($, now))) return
+    const gotDays = await readKey($, 'days')
+    const gotHeat = await readKey($, 'heat')
+    // 読めない時 (reject・形が違う) は書かない。差分は溜めたまま次に回す
+    const savedDays = gotDays === undefined ? undefined : gotDays.v === undefined ? {} : asDays(gotDays.v)
+    if (gotDays === undefined || savedDays === undefined) {
+      await update($, NOTE, () => BROKEN)
+      return
+    }
+    // heat は 168 枠でなければ上書きしない (heat の差分だけ溜めたまま)
+    const savedHeat = gotHeat === undefined ? undefined : gotHeat.v === undefined ? [] : asHeat(gotHeat.v)
     const days = pendingDays
-    const heat = pendingHeat
+    const heat = savedHeat === undefined ? [] : pendingHeat
     pendingDays = {}
-    pendingHeat = []
-    const rawDays = await $.store.get('days').catch(() => undefined)
-    const rawHeat = await $.store.get('heat').catch(() => undefined)
-    await backup($, rawDays, rawHeat, now)
-    const savedDays = asDays(rawDays) ?? (await read($, DAYS))
-    const savedHeat = asHeat(rawHeat) ?? (await read($, HEAT))
+    if (savedHeat !== undefined) pendingHeat = []
+    await backup($, gotDays.v, gotHeat?.v, now)
     const nextDays = mergeDays(savedDays, days)
-    const nextHeat = mergeHeat(savedHeat, heat)
     await putDays($, nextDays, now)
-    await update($, HEAT, () => nextHeat)
     // この版の知らない欄 (新しい版が足した物) は読んだまま残す
-    await $.store.set('days', withUnknown(rawDays, nextDays)).catch(() => {})
-    if (heat.length > 0) await $.store.set('heat', nextHeat).catch(() => {})
+    const isDays = await $.store.set('days', withUnknown(gotDays.v, nextDays)).then(
+      () => true,
+      () => false,
+    )
+    let isHeat = true
+    if (savedHeat !== undefined && heat.length > 0) {
+      const nextHeat = mergeHeat(savedHeat, heat)
+      await update($, HEAT, () => nextHeat)
+      isHeat = await $.store.set('heat', nextHeat).then(
+        () => true,
+        () => false,
+      )
+    }
+    putBack(isDays ? {} : days, isHeat ? [] : heat)
+    const note = await read($, NOTE)
+    if (!isDays || !isHeat) await update($, NOTE, () => UNSAVED)
+    else if (savedHeat === undefined) await update($, NOTE, () => BROKEN)
+    else if (note === BROKEN || note === UNSAVED) await update($, NOTE, () => '')
   })
 
 // ---------------------------------------------------------------- 控えから戻す
@@ -134,7 +170,8 @@ const restore = ($: $, day: string) =>
     await putDays($, days, now)
     if (heat) await update($, HEAT, () => heat)
     await update($, RESTORE, () => CLOSED)
-    await update($, NOTE, () => `${day} の記録に戻しました`)
+    // heat の控えが無い (読めない) 日は、曜日と時間帯の記録を今のまま残す。混ざったことを言っておく
+    await update($, NOTE, () => (heat ? `${day} の記録に戻しました` : `${day} の日ごとの記録に戻しました (曜日と時間帯の記録は控えが無いので今のまま)`))
   })
 
 const openPane = async ($: $) => {

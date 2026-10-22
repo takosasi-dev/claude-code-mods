@@ -36,14 +36,14 @@ const RICH = {
 const BASE_SNAP = { level: 10, deepest: 22, cards: 1, fish: 3, quests: 9, streak: 1 }
 type Others = Partial<Record<keyof typeof RICH, unknown>>
 
-type Boot = { others?: () => Others; store?: Record<string, unknown>; taken?: boolean }
+type Boot = { others?: () => Others; store?: Record<string, unknown>; taken?: boolean; getFails?: () => boolean }
 
 /** others に無い mod は「入っていない」(state.get に答えない) */
 const boot = async ($: Engine, on: On, opts: Boot = {}) => {
   const clock = mock.clock(on, { now: NOW })
   const m = new Map<string, unknown>(Object.entries(opts.store ?? {}))
   let writes = 0
-  on('store.get', (_$, e) => ({ value: m.get(e.key) }))
+  on('store.get', (_$, e) => (opts.getFails?.() ? { deny: '読めません' } : { value: m.get(e.key) }))
   on('store.set', (_$, e) => {
     writes++
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
@@ -236,6 +236,38 @@ test('/week を持てなかった時は /week-card にして、/week を横取�
   await boot($, on, { taken: true })
   expect((await $.command.run({ command: 'week', ...RUN })).text).toBe('別の /week')
   expect((await $.command.run({ command: 'week-card', ...RUN })).text).toBe('今週のカードを開きました。')
+})
+
+test('store を読めない時 (reject・形が違う) は書かず、トーストで知らせる。読めたらまた書く', async ($, on) => {
+  // 読めない時に state の写しで書くと、ほかの日が丸ごと消える (withSnap は raw が無ければ今日だけになる)
+  expect(Object.keys(withSnap(undefined, '2026-10-22', { level: 5 }))).toEqual(['2026-10-22'])
+  let fails = false
+  let rich = RICH
+  const old = { futureField: 1, '2026-10-15': BASE_SNAP }
+  const s = await boot($, on, { others: () => rich, store: { snaps: old }, getFails: () => fails })
+  const before = s.writes()
+  fails = true
+  rich = { ...RICH, totalDone: 30 }
+  await turn($)
+  await s.clock.settle()
+  await turn($)
+  await s.clock.settle()
+  expect(s.writes()).toBe(before)
+  expect(s.toasts.filter(t => t.includes('記録を読めなかった'))).toHaveLength(1)
+  // 形が違う (配列) 時も書かない
+  fails = false
+  s.raw.set('snaps', ['壊れた'])
+  rich = { ...RICH, totalDone: 31 }
+  await turn($)
+  await s.clock.settle()
+  expect(s.writes()).toBe(before)
+  expect(s.raw.get('snaps')).toEqual(['壊れた'])
+  // 読めるようになれば、ほかの日を残して今日の分を書く
+  s.raw.set('snaps', old)
+  await turn($)
+  await s.clock.settle()
+  expect(s.writes()).toBe(before + 1)
+  expect(s.raw.get('snaps')).toMatchObject({ futureField: 1, '2026-10-15': BASE_SNAP, '2026-10-22': { quests: 31 } })
 })
 
 // ここから下は「古い版」の印が残る。新しい試験はこの上に足す

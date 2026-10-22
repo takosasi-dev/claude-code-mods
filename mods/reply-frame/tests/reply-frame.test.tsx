@@ -33,6 +33,21 @@ test('長すぎる返答は標準の描画に任せる', async ($, on) => {
   await ui.unmount()
 })
 
+// 監査: 制御文字を含む返答を枠の Markdown に入れると、エンジンが木ごと拒んで返答が消えた
+test('タブ・改行以外の制御文字を含む返答は標準の描画に任せる。タブ・改行だけなら枠で描く', async ($, on) => {
+  on('ui.render', { component: 'AssistantMessage' }, () => ({ type: 'engine', ref: 0 }))
+  for (const text of ['色 \x1b[31m赤', 'ベル\x07', '改ページ\x0c', 'NEL\u0085', 'DEL\x7f', 'CRLF\r\nの行']) {
+    const ui = await $.ui.mount({ plugin: 'reply-frame', surface: 'vscode', component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+    expect(await ui.drawn()).toEqual({ type: 'engine', ref: 0 })
+    await ui.unmount()
+  }
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'reply-frame', surface, component: 'AssistantMessage', props: { text: 'a\tb\nc\nd', isFirstOfReply: true } })
+    expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { borderStyle: 'round' } })
+    await ui.unmount()
+  }
+})
+
 test('1 万字を超えても 10 万字までは枠で描く', async $ => {
   const ui = await $.ui.mount({
     plugin: 'reply-frame',

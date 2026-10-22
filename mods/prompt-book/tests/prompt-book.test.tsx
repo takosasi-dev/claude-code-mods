@@ -403,3 +403,63 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   expect(await svgOf(ui)).toMatch(/fill="#0d1117"/)
   expect(await svgOf(ui)).toContain('fill="#58a6ff" stroke="#58a6ff"')
 })
+
+// ---- 0.2.2 で直した物 ----
+
+const RUN = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+
+test('/prompts を持てた時は、/prompt-book をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', (_$, e) => ({ text: `other ${e.command}` }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  expect(await $.command.run({ command: 'prompts', ...RUN })).toMatchObject({ text: 'プロンプト帳を開きました。' })
+  expect(await $.command.run({ command: 'prompt-book', ...RUN })).toMatchObject({ text: 'other prompt-book' })
+})
+
+test('依頼文の知らない欄 (新しい版が足した欄) は、使う・保存・消すの後も store に残る', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { m } = sharedStore(on, { items: [{ ...item('m0', 't0', 0, 0), futureField: 1 }, { ...item('m1', 't1', 0, 1), futureField: 2 }] })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'use:m0' })
+  const saved = () => m.get('items') as (PromptBookItem & { futureField?: number })[]
+  expect(saved()[0]).toMatchObject({ id: 'm0', uses: 1, futureField: 1 })
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  await ui.press({ key: 'del:m0' })
+  await ui.press({ key: 'del:m0' })
+  expect(saved()[0]).toMatchObject({ id: 'm1', futureField: 2 })
+  expect(saved()).toHaveLength(2)
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { m } = sharedStore(on, { items: mine(1) })
+  let version = '0.2.2'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'prompt-book', version }) }
+    throw new Error('ENOENT')
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'use:m0' })
+  expect((m.get('items') as PromptBookItem[])[0]?.uses).toBe(1)
+  version = '0.3.0'
+  await clock.advance(61_000)
+  await ui.press({ key: 'use:m0' })
+  await ui.input({ key: 'body', text: '新しい依頼' })
+  await ui.press({ key: 'save' })
+  expect(m.get('items') as PromptBookItem[]).toEqual([{ ...item('m0', 't0', 1, 0), lastUsedAt: NOW }])
+  expect(await noticeOf(ui)).toMatch(/開き直して/)
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
+})

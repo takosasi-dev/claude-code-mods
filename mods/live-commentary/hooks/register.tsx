@@ -5,7 +5,7 @@ import type { LiveCommentaryClock, LiveCommentaryLine, LiveCommentaryScore } fro
 import type { Scene, Style } from './phrases'
 import { KIND, PHRASES, duration, fileOf, fill, pickIndex, sceneOf, toStyle } from './phrases'
 import { KIND_THEME, boardSvg, clockLabel, stadiumSvg, tickerSvg } from './svg'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'live-commentary'
 const TITLE = '実況席'
@@ -50,13 +50,16 @@ async function say($: $, scene: Scene, vars: Readonly<Record<string, string | nu
   if (isToast) $.ui.toast(line.text, { timeoutMs: 6000 })
 }
 
+/** オン/オフを切り替える。ステータス行は store より先に消す (書けなくても、オフにしたら消える) */
 const setOn = async ($: $, isOn: boolean) => {
   await update($, ON, () => isOn)
-  await $.store.set(STORE_KEY, isOn)
   if (!isOn) {
     clearTimer?.cancel()
     $.ui.status(undefined)
   }
+  // 新しい版が入ったのに古い版のまま動いている時は書かない (開き直しのお願いは mayWrite がトーストで出す)
+  if (!(await mayWrite($, await $.clock.now()))) return
+  await $.store.set(STORE_KEY, isOn).catch(() => $.ui.toast('実況のオン/オフを残せませんでした(このセッションでは効いています)', { timeoutMs: 6000 }))
 }
 
 const clearLog = ($: $) => update($, LOG, () => [])
@@ -81,6 +84,7 @@ export const register: Register = (on, options) => {
   followTheme(on)
 
   on('session.start', async ($, e, next) => {
+    await rememberVersion($).catch(() => {})
     // /jikkyo が拒まれたら (組み込みと被ったら) /live-commentary にする
     const got = await $.command.register({ name: 'jikkyo', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'jikkyo'
@@ -94,7 +98,8 @@ export const register: Register = (on, options) => {
 
   // /jikkyo を持てなかった時は、元の /jikkyo に回す
   on('command.run', { command: 'jikkyo' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'live-commentary' }, openPane)
+  // /jikkyo を持てた時は /live-commentary を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'live-commentary' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // 主ループのターンだけ実況する (サブエージェントの分は agentId 付き)
   on('turn.start', async ($, e, next) => {

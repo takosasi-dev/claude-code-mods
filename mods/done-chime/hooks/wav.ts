@@ -81,11 +81,20 @@ export const wavBase64 = (sound: DoneChimeSound, volume: DoneChimeVolume) => toB
 /** Windows か (作業フォルダが X:\ や \\server の形) */
 export const isWindowsPath = (cwd: string) => /^[A-Za-z]:[\\/]/.test(cwd) || cwd.startsWith('\\\\')
 
+/**
+ * Windows に付いてくる powershell.exe の絶対パス。名前だけで起こすと、作業フォルダや PATH の先にある
+ * 同じ名前の物を起こしてしまう。SystemRoot が読めない・X:\ の形でなければ C:\Windows
+ */
+export const powershellExe = (systemRoot: string | undefined) => {
+  const root = (systemRoot ?? '').trim().replace(/[\\/]+$/, '')
+  return `${/^[A-Za-z]:\\[^"*?<>|]*$/.test(root) ? root : 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+}
+
 /** Windows で鳴らす argv。base64 は英数字と + / = だけなので '' の中にそのまま入れられる */
-export const powershellArgv = (base64: string) => {
+export const powershellArgv = (base64: string, exe = powershellExe(undefined)) => {
   if (!/^[A-Za-z0-9+/=]*$/.test(base64)) throw new Error('base64 ではありません')
   const script = `$b=[Convert]::FromBase64String('${base64}');$m=New-Object System.IO.MemoryStream(,$b);$p=New-Object System.Media.SoundPlayer($m);$p.PlaySync()`
-  return ['powershell', '-NoProfile', '-NonInteractive', '-Command', script]
+  return [exe, '-NoProfile', '-NonInteractive', '-Command', script]
 }
 
 /** ターンの終わりに鳴らすか */

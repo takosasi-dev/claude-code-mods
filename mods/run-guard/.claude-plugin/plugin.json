@@ -1,6 +1,6 @@
 {
   "name": "run-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude が確かめのために窓のあるアプリを起動する・音を鳴らす・claude -p を隔離なしで走らせるのを、実行の前に止める (設定で聞く・伝えるだけにもできる)。/runguard で数と記録と、組ごとのオン/オフ",
   "author": {
     "name": "takosasi-dev"

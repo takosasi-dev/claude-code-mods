@@ -35,8 +35,8 @@ export function asItems(v: unknown): InboxItem[] | undefined {
         typeof i.at === 'number' &&
         (i.kind === 'toast' || i.kind === 'status'),
     )
-    .map(i => ({ plugin: modName(i.plugin), text: clean(i.text), at: i.at, kind: i.kind }))
-    .slice(-KEEP)
+    // 知らない欄 (新しい版が足した欄) は残す。件数で切るのは足す時 (merge) と画面に出す時だけ
+    .map(i => ({ ...i, plugin: modName(i.plugin), text: clean(i.text), at: i.at, kind: i.kind }))
 }
 
 export const asReadAt = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)

@@ -318,7 +318,7 @@ test('git は読むだけ: 読みの全体オプション・env・--no-textconv�
   const READS = new Set(['rev-parse', 'hash-object', 'diff-index', 'diff-files', 'ls-files'])
   expect(world.calls.length).toBeGreaterThan(5)
   for (const c of world.calls) {
-    expect(c.argv.slice(0, 6)).toEqual(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '--literal-pathspecs'])
+    expect(c.argv.slice(0, 8)).toEqual(['git', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '--literal-pathspecs'])
     expect(c.env).toEqual({ GIT_OPTIONAL_LOCKS: '0' })
     expect(READS.has(sub(c.argv)[0] ?? '')).toBe(true)
     if (c.argv.includes('-p')) expect(c.argv).toContain('--no-textconv')
@@ -363,6 +363,18 @@ test('/precheck が拒まれたら /pre-check で開き、/precheck は横取り
   expect(await $.command.run({ command: 'pre-check', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: 'コミット前のペインを開きました。' })
   expect(await $.command.run({ command: 'precheck', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: '別の precheck' })
   expect(opened).toEqual(['pre-check'])
+})
+
+test('/precheck を持てた時は /pre-check を横取りしない', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mockHost(on, { repo: STAGED_OK, calls: [] })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', { command: 'pre-check' }, () => ({ text: '他の pre-check' }))
+  await $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
+  expect(await $.command.run({ command: 'pre-check', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: '他の pre-check' })
+  expect(await $.command.run({ command: 'precheck', args: '', origin: { kind: 'composer' }, presentation })).toMatchObject({ text: 'コミット前のペインを開きました。' })
 })
 
 test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {

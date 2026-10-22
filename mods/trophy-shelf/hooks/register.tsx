@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { ShelfFirstAt } from '../types'
 import type { ShelfRaw } from './shelf'
 import { addFirst, asFirstAt, countText, freshIds, judge, shelfLines, shelfSvg, snapshotOf, withUnknown } from './shelf'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 type $ = EngineInterface
 
@@ -51,18 +51,40 @@ const serial = <T,>(f: () => Promise<T>) => {
   return p
 }
 
-/** 今取れているのに時刻の無いトロフィーに、今の時刻を付ける。store は書く直前に読み直して足す */
+const BROKEN = 'trophy-shelf: 記録を読めなかったので、取った時刻はまだ書いていません。次のターンの終わりにもう一度読みます'
+/** 読めない時のトーストを出したか。読めたら戻す (続けて読めない間は 1 回だけ出す) */
+let toldBroken = false
+
+/**
+ * 今取れているのに時刻の無いトロフィーに、今の時刻を付ける。store は書く直前に読み直して足す。
+ * 読めない・書けない時は state も変えない (時刻の無いまま残るので、次のターンの終わりにもう一度)
+ */
 const record = ($: $) =>
   serial(async () => {
     const fresh = freshIds(judge(snapshotOf(await readRaw($)), await read($, FIRST_AT)))
     if (fresh.length === 0) return
     const now = await $.clock.now()
-    const raw = await $.store.get('firstAt').catch(() => undefined)
-    const saved = asFirstAt(raw) ?? (await read($, FIRST_AT))
+    // 古い版のまま動いている時は書かない (新しい版のトロフィーを消さないように)
+    if (!(await mayWrite($, now))) return
+    // 読めない時 (reject・形が違う) は書かない。state の写しで書くと、新しい版が足した物が消える
+    const got = await $.store.get('firstAt').then(
+      v => ({ v }),
+      () => undefined,
+    )
+    const saved = got === undefined ? undefined : got.v === undefined ? {} : asFirstAt(got.v)
+    if (got === undefined || saved === undefined) {
+      if (!toldBroken) $.ui.toast(BROKEN)
+      toldBroken = true
+      return
+    }
+    toldBroken = false
     const next = addFirst(saved, fresh, now)
-    await update($, FIRST_AT, () => next)
     // この版の知らない欄 (新しい版が足したトロフィー) は読んだまま残す
-    await $.store.set('firstAt', withUnknown(raw, next)).catch(() => {})
+    const isSaved = await $.store.set('firstAt', withUnknown(got.v, next)).then(
+      () => true,
+      () => false,
+    )
+    if (isSaved) await update($, FIRST_AT, () => next)
   })
 
 // /trophies を自分で取れたか (取れなければ /trophy-shelf にして、/trophies は横取りしない)
@@ -79,6 +101,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await rememberVersion($)
     const got = await $.command.register({ name: 'trophies', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'trophies'
     if (!ownsMain) await $.command.register({ name: 'trophy-shelf', description: DESCRIPTION }).catch(() => {})

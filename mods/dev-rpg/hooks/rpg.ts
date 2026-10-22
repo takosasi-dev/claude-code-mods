@@ -1,6 +1,6 @@
 // 経験値・レベル・実績・成長 (SP) の計算と、ステータス窓の SVG / terminal 用の行。どれも純関数
-import type { RpgDelve, RpgDelveFight, RpgEquip, RpgGachaCard, RpgHero, RpgSaved, RpgSession, RpgSlot, RpgStat } from '../types'
-import { clean, esc, isLight, short } from './style'
+import type { RpgDelve, RpgDelveFight, RpgDoneDelve, RpgEquip, RpgGachaCard, RpgHero, RpgSaved, RpgSession, RpgSlot, RpgStat } from '../types'
+import { clean, esc, isLight, jstDay, short } from './style'
 
 // ---------------------------------------------------------------- 決まりごと
 
@@ -307,7 +307,16 @@ export const INITIAL_SAVED: RpgSaved = {
   bossSign: 0,
   deepest: 0,
   delve: null,
+  doneDelves: [],
+  epoch: 0,
 }
+
+/** 終わった潜りを覚えておく数 */
+export const KEEP_DONE = 20
+
+/** 潜りを終えた印を足す (同じ id は 1 つだけ。古い物から落とす) */
+export const addDone = (done: readonly RpgDoneDelve[], d: RpgDoneDelve): RpgDoneDelve[] =>
+  [...done.filter(x => x.id !== d.id), d].slice(-KEEP_DONE)
 
 /** 遭遇はここまでためられる */
 export const MAX_ENCOUNTERS = 5
@@ -345,9 +354,23 @@ export const toSaved = (h: RpgHero): RpgSaved => {
     defeated: { ...h.defeated },
     deepest: h.deepest,
     delve: h.delve && { ...h.delve },
+    doneDelves: h.doneDelves.map(d => ({ ...d })),
+    epoch: h.epoch,
   }
   for (const k of SAVED_KEYS) out[k] = h[k]
   return out
+}
+
+/** store の終わった潜りの印。形の違う物は捨てる */
+function doneFrom(v: unknown): RpgDoneDelve[] {
+  if (!Array.isArray(v)) return []
+  const out: RpgDoneDelve[] = []
+  for (const x of v) {
+    if (typeof x !== 'object' || x === null) continue
+    const { id, xp } = x as Record<string, unknown>
+    if (finite(id) && finite(xp)) out.push({ id: Math.max(0, Math.floor(id as number)), xp: Math.max(0, Math.floor(xp as number)) })
+  }
+  return out.slice(-KEEP_DONE)
 }
 
 const DELVE_NUMS = ['startedAt', 'floor', 'step', 'hp', 'mp', 'loot', 'cleared', 'seed'] as const
@@ -436,6 +459,9 @@ export function fromSaved(raw: unknown): RpgSaved {
   // ダンジョンは 0.6.0 から。無い (古い store) なら入口にいる
   out.deepest = finite(o.deepest) ? Math.max(0, Math.floor(o.deepest as number)) : 0
   out.delve = delveFrom(o.delve)
+  // 終わった潜りと世代は 0.6.1 から。無ければ空と 0
+  out.doneDelves = doneFrom(o.doneDelves)
+  out.epoch = finite(o.epoch) ? Math.max(0, Math.floor(o.epoch as number)) : 0
   // 装備は 0.2.0 から。無い (古い store) なら何も着けていない
   const eq = o.equip
   if (typeof eq === 'object' && eq !== null) {
@@ -450,10 +476,25 @@ export function fromSaved(raw: unknown): RpgSaved {
 /**
  * 今の store に、このセッションで増えた分 (mine − base) だけを足す。
  * 数は足し算、実績は和集合 (早い方の時刻)、日付は新しい方。同じ store を使う別のセッションの分を消さない。
- * 装備とダンジョンの潜りはこのセッションで変えた時だけ mine を書く (最後に書いた方が勝つ)。一番深い階は大きい方
+ * 装備とダンジョンの潜りはこのセッションで変えた時だけ mine を書く (最後に書いた方が勝つ)。一番深い階は大きい方。
+ * 終わった潜り (doneDelves にある物) は書き戻さず、取り込まない。別のセッションが先に終えた潜りの持ち帰りは足さない。
+ * store の世代が base と違えば (別のセッションがやり直した・控えから戻した)、差分は足さずに store を取る
  */
 export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): RpgSaved {
+  if (store.epoch !== base.epoch) return store
   // ponytail: 2 つのセッションが同じ潜りを同時に進めると、後に書いた方の歩みだけが残る。歩みを差分で足すなら潜りを id ごとに持つ
+  const storeDone = new Set(store.doneDelves.map(d => d.id))
+  const baseDone = new Set(base.doneDelves.map(d => d.id))
+  const mineNew = mine.doneDelves.filter(d => !baseDone.has(d.id))
+  // このセッションで終えた潜りを、別のセッションがもう終えていたら、その持ち帰りは 2 度目なので引く
+  const twice = mineNew.filter(d => storeDone.has(d.id)).reduce((n, d) => n + d.xp, 0)
+  let doneDelves = store.doneDelves.map(d => ({ ...d }))
+  for (const d of mineNew) if (!storeDone.has(d.id)) doneDelves = addDone(doneDelves, d)
+  const doneIds = new Set(doneDelves.map(d => d.id))
+  const isLive = (d: RpgDelve | null): d is RpgDelve => d !== null && !doneIds.has(d.startedAt)
+  // こちらが帰った時に、store に別の潜り (別のセッションが新しく入った物) があれば、それは消さない
+  const isOther = store.delve !== null && store.delve.startedAt !== base.delve?.startedAt
+  const picked = sameDelve(mine.delve, base.delve) || (mine.delve === null && isOther) ? store.delve : mine.delve
   const out = {
     ...store,
     achievements: unionStamps(store.achievements, mine.achievements),
@@ -462,13 +503,22 @@ export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): Rpg
     equip: { ...(sameEquip(mine.equip, base.equip) ? store.equip : mine.equip) },
     alloc: { ...store.alloc },
     deepest: Math.max(store.deepest, mine.deepest),
-    delve: sameDelve(mine.delve, base.delve) ? store.delve : mine.delve,
+    // 選んだ潜りが終わった物なら書き戻さず、store に生きている潜りがあればそれを取る
+    delve: picked === null || isLive(picked) ? picked : isLive(store.delve) ? store.delve : null,
+    doneDelves,
   }
   for (const k of SAVED_KEYS) out[k] = Math.max(0, store[k] + mine[k] - base[k])
+  out.xp = Math.max(0, out.xp - twice)
   out.encounters = Math.min(MAX_ENCOUNTERS, out.encounters)
   out.bossSign = Math.min(1, out.bossSign)
   // 振った数も差分で足す (振り直しは減る差分)
   for (const k of STATS) out.alloc[k] = Math.max(0, store.alloc[k] + mine.alloc[k] - base.alloc[k])
+  // 2 つのセッションが同じ SP を使って、もらった分を超えたら、このセッションで新しく使った分 (振った・覚えた) は取り消す
+  const sp = spOf(out)
+  if (sp.used > sp.earned) {
+    for (const k of STATS) out.alloc[k] = Math.max(0, store.alloc[k] + Math.min(0, mine.alloc[k] - base.alloc[k]))
+    out.learned = { ...store.learned }
+  }
   const day = mine.day > store.day ? mine.day : store.day
   const mineToday = mine.day === day ? mine.dayTurns - (base.day === day ? base.dayTurns : 0) : 0
   out.day = day
@@ -510,6 +560,11 @@ export function withUnknown(raw: unknown, mine: RpgSaved): Record<string, unknow
     equip,
     // 同じ潜り (始めた時刻が同じ) なら、その中の知らない欄も残す
     delve: mine.delve && { ...(isObj(o.delve) && o.delve.startedAt === mine.delve.startedAt ? unknownOf(o.delve, DELVE_KEYS) : {}), ...mine.delve },
+    // 終わった潜りの印も、同じ id の物の知らない欄を残す
+    doneDelves: mine.doneDelves.map(d => {
+      const was = Array.isArray(o.doneDelves) ? o.doneDelves.find(x => isObj(x) && x.id === d.id) : undefined
+      return { ...unknownOf(was, ['id', 'xp']), ...d }
+    }),
   }
 }
 
@@ -517,16 +572,15 @@ export function withUnknown(raw: unknown, mine: RpgSaved): Record<string, unknow
  * 古い版のまま state に残っている勇者 (開いたまま /reload-plugins した時) に、新しい値 (0.3.0 の戦いと成長・0.4.0 のボスの気配・0.6.0 のダンジョン) を足す。
  * 今の値 (s・HP・経験値バー) はそのまま。もう新しい形ならそのまま返す
  */
-export const upgradeHero = (h: RpgHero): RpgHero =>
-  (h as Partial<RpgHero>).alloc !== undefined && (h as Partial<RpgHero>).bossSign !== undefined && (h as Partial<RpgHero>).deepest !== undefined
+export const upgradeHero = (h: RpgHero): RpgHero => {
+  const p = h as Partial<RpgHero>
+  return p.alloc !== undefined && p.bossSign !== undefined && p.deepest !== undefined && p.doneDelves !== undefined && p.epoch !== undefined
     ? h
     : { ...h, ...fromSaved(h), synced: fromSaved(h.synced) }
-
-/** その時刻の日付 (この環境の時刻帯で YYYY-MM-DD) */
-export const dayKey = (ms: number) => {
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+/** その時刻の日付 (日本時間 JST で YYYY-MM-DD。動いている環境の時刻帯には頼らない) */
+export const dayKey = jstDay
 
 /** 休んでからの疲れ (HP の減った %、下限なし) */
 export const fatigueAt = (h: RpgHero, now: number) => Math.floor(Math.max(0, now - h.s.restedAt) / HP_STEP_MS)

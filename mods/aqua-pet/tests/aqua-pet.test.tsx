@@ -21,6 +21,7 @@ import {
   unlockedDecos,
   periodAt,
   seasonAt,
+  shownFish,
   slotAt,
   stageOf,
   stepFish,
@@ -485,7 +486,10 @@ test('古い記録 (魚の欄が無い) は今の数の魚に移し、来てか�
   ])
   expect(mixed.fish[2]?.name).toBe('ぶち丸')
   expect(fromSaved({ turns: 30, bornAt: NOW, fish: [null] }, NOW).fish).toHaveLength(fishCount(30))
-  expect(fromSaved({ turns: 30, bornAt: NOW, fish: Array.from({ length: 12 }, (_, i) => aFish(i, 'maru', 0)) }, NOW).fish).toHaveLength(8)
+  // 多すぎる魚は読む時には切らない (書き戻しで消さない)。描く時に shownFish で 8 匹まで
+  const twelve = { turns: 30, bornAt: NOW, fish: Array.from({ length: 12 }, (_, i) => aFish(i, 'maru', 0)) }
+  expect(fromSaved(twelve, NOW).fish).toHaveLength(12)
+  expect(shownFish(fromSaved(twelve, NOW))).toHaveLength(8)
 })
 
 test('1 ターンでみんな 1 つ育ち、節目で新しい魚が来る (最大 8 匹)', () => {
@@ -871,6 +875,43 @@ for (const surface of SURFACES) {
     expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
   })
 }
+
+test('水槽の名前は、読む時も決める時も制御文字を落とす (画面が出なくならない)', async ($, on) => {
+  const bad = `ab${String.fromCharCode(7)}c${String.fromCharCode(0x85)}`
+  const { store, tank } = await boot($, on, { turns: 3, bornAt: NOW, fullness: 70, fedAt: NOW, name: bad })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await infoOf(ui)).toMatch(/^abc \/ 育てた日数/)
+  expect(store.saved()?.name).toBe('abc')
+  await ui.press({ key: 'rename' })
+  await ui.input({ key: 'name', text: `x${String.fromCharCode(27)}[31my${String.fromCharCode(0x9b)}` })
+  expect((await tank()).name).toBe('x[31my')
+  expect(store.saved()?.name).toBe('x[31my')
+})
+
+test('新しい版が 8 匹より多く入れた魚は、書き戻す時に切らない (描くのは 8 匹まで)', async ($, on) => {
+  const ten = Array.from({ length: 10 }, (_, i) => aFish(i, 'maru', 100 - i))
+  const { store } = await boot($, on, { turns: 200, bornAt: NOW, fullness: 70, fedAt: NOW, fish: ten })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(store.saved()?.fish?.map(f => f.turnsSeen)).toEqual(ten.map(f => f.turnsSeen + 1))
+  expect(await summaryOf(ui)).toMatch(/^魚 8 匹/)
+  expect(fromSaved({ turns: 200, fish: ten }, NOW).fish).toHaveLength(10)
+})
+
+test('控えの枠が壊れていたり日付の形が違ったりしても、その枠だけ飛ばして残りの日を並べる', BACKUP, async ($, on) => {
+  fakeFs(on, {
+    'C:/work/backup/aqua-pet/tank-1.json': JSON.stringify({ day: '2026-10-19', value: { turns: 50 } }),
+    'C:/work/backup/aqua-pet/tank-4.json': JSON.stringify({ day: `2026-10-1${String.fromCharCode(7)}`, value: { turns: 1 } }),
+    'C:/work/backup/aqua-pet/tank-5.json': JSON.stringify({ day: '<b>x</b>', value: { turns: 1 } }),
+    'C:/work/backup/aqua-pet/tank-6.json': '{"day":"2026-10-1',
+  })
+  await boot($, on, { turns: 3, bornAt: NOW, fullness: 70, fedAt: NOW })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'restore' })
+  const days = (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('day-'))
+  expect(days).toEqual(['day-2026-10-20', 'day-2026-10-19'])
+})
 
 // isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
 test('新しい版が入ったら、古い版のこのセッションは store に書かず、控えからも戻さない', BACKUP, async ($, on) => {

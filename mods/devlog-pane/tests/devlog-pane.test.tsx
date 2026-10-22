@@ -73,6 +73,7 @@ test('長文は後ろ側を行頭から残し、前略を付ける', () => {
   const mid = 'a'.repeat(50000)
   expect(fit(mid)).toBe(mid)
   expect(fit('a\r\nb')).toBe('a\nb')
+  expect(fit('a\u0085\u009bb')).toBe('ab')
   expect(fit('短い')).toBe('短い')
 })
 
@@ -113,6 +114,41 @@ test('ログを Markdown で出し、30 秒ごとに mtime が変わったとき
   expect((await ui.find({ type: 'Markdown' }))?.text).toBe('# 2026-10-03 開発ログ\n\n- 二つ目')
   await ui.unmount()
 })
+
+// 監査: 相対の logDir を受け付けて今のフォルダから読み、「/」は末尾の区切りを外して未設定になった
+for (const logDir of ['devlog', './devlog', 'C:devlog', 'C:']) {
+  test(`絶対パスでなければ未設定と同じ扱い(${logDir})`, { options: { logDir } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const touched: string[] = []
+    on('fs.stat', (_$, e) => {
+      touched.push(e.path)
+      throw new Error('ENOENT')
+    })
+    on('fs.read', (_$, e) => {
+      touched.push(e.path)
+      throw new Error('ENOENT')
+    })
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await runDevlog($)
+    const ui = await $.ui.mount({ plugin: 'devlog-pane', surface: 'vscode', ...PANE })
+    expect((await ui.find({ type: 'Text' }))?.text).toMatch(/未設定/)
+    expect(touched).toEqual([])
+  })
+}
+
+for (const [logDir, expected] of [
+  ['/', '/2026-10-03.md'],
+  ['X:\\', 'X:\\2026-10-03.md'],
+  ['/tmp/demo/devlog//', '/tmp/demo/devlog/2026-10-03.md'],
+] as const) {
+  test(`根のフォルダは区切りを残して読む(${logDir})`, { options: { logDir } }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    world(on, new Map())
+    await runDevlog($)
+    const ui = await $.ui.mount({ plugin: 'devlog-pane', surface: 'terminal', ...PANE })
+    expect((await ui.find({ type: 'Text' }))?.text).toBe(`今日の開発ログはまだありません(${expected})`)
+  })
+}
 
 test('フォルダが未設定なら読まずに設定のしかたを出す', async ($, on) => {
   mock.clock(on, { now: NOW })

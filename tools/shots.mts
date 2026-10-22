@@ -771,7 +771,7 @@ if (import.meta.main) {
           pathToFileURL(html).href,
         ],
         // Chrome は TEMP に .tmp や scoped_dir を残すので、TEMP も消す一時フォルダに向ける
-        { stdio: 'ignore', timeout: 60_000, env: { ...process.env, TEMP: tmp, TMP: tmp } },
+        { stdio: 'ignore', timeout: 60_000, windowsHide: true, env: { ...process.env, TEMP: tmp, TMP: tmp } },
       )
       console.log(`${mod}${isLight ? '-light' : ''}.png  380x${height}  ${Math.round(statSync(png).size / 1024)}KB`)
     }

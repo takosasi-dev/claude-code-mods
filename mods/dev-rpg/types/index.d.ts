@@ -55,7 +55,20 @@ export type RpgSaved = {
   deepest: number
   /** 今潜っているダンジョン。入口にいれば null */
   delve: RpgDelve | null
+  /**
+   * ここから 0.6.1。帰った・力尽きた潜り (新しい物が後ろ、20 件まで)。
+   * 別のセッションが同じ潜りを書き戻したり、袋をもう一度持ち帰ったりしないように
+   */
+  doneDelves: RpgDoneDelve[]
+  /**
+   * 記録の世代。やり直し・控えから戻すで 1 つ上がる。
+   * 合わせた時の世代と store の世代が違えば、別のセッションは差分を足さずに store を取る
+   */
+  epoch: number
 }
+
+/** 終わった潜り 1 つ: 潜りの id (始めた時刻) と、持ち帰った経験値 */
+export type RpgDoneDelve = { id: number; xp: number }
 
 /** 最後の階の戦いの写し (絵と一言に使う) */
 export type RpgDelveFight = {

@@ -1,6 +1,6 @@
 // カードの表・抽選・保存の形・SVG と terminal 用の行。どれも純関数
 import type { GachaCard, GachaDraw, GachaRarity, GachaSave, GachaSlot } from '../types'
-import { C, clean, esc, header, HEADER_H, short } from './style'
+import { C, clean, esc, header, HEADER_H, jstDay, short } from './style'
 
 export type Card = GachaCard & { line: string }
 
@@ -101,11 +101,8 @@ export const KEEP_HISTORY = 10
 
 export const EMPTY: GachaSave = { book: {}, total: 0, manualDay: '', manualUsed: 0, history: [] }
 
-/** 手元の日付 YYYY-MM-DD */
-export const dayKey = (ms: number) => {
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+/** 日本時間 (JST) の日付 YYYY-MM-DD (動いている環境のタイムゾーンには頼らない) */
+export const dayKey = jstDay
 
 /** 今日あと何回手で引けるか */
 export const manualLeft = (s: GachaSave, now: number) => MANUAL_PER_DAY - (s.manualDay === dayKey(now) ? s.manualUsed : 0)
@@ -146,14 +143,18 @@ export function unknownOf(raw: unknown, known: Iterable<string>): Record<string,
 
 /**
  * store に書く形。書く直前に読んだ raw のうち、この版の知らない欄 (新しい版の欄・知らないカードの所持・所持の欄) を残して mine を重ねる。
- * 古い版のまま動いているセッションが、新しい版で増えたカードの記録を消さないように
+ * 古い版のまま動いているセッションが、新しい版で増えたカードの記録を消さないように。
+ * 履歴は読んだ生の要素をそのまま残し (知らないカード・知らない欄ごと)、前に added (今回引いた分) を足す。
+ * 長さは KEEP_HISTORY か、読んだ長さ (新しい版がもっと残していれば) の長い方まで
  */
-export function withUnknown(raw: unknown, mine: GachaSave): Record<string, unknown> {
+export function withUnknown(raw: unknown, mine: GachaSave, added: readonly GachaDraw[] = []): Record<string, unknown> {
   const o = isObj(raw) ? raw : {}
   const was = isObj(o.book) ? o.book : {}
   const book = unknownOf(was, BY_ID.keys())
   for (const [id, v] of Object.entries(mine.book)) book[id] = { ...unknownOf(was[id], ['count', 'firstAt']), ...v }
-  return { ...unknownOf(o, Object.keys(EMPTY)), ...mine, book }
+  const old: unknown[] = Array.isArray(o.history) ? o.history : []
+  const history = [...added, ...old].slice(0, Math.max(KEEP_HISTORY, old.length))
+  return { ...unknownOf(o, Object.keys(EMPTY)), ...mine, book, history }
 }
 
 /** 1 枚引いた後の保存の形 */

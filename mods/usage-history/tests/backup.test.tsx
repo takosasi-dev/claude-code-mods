@@ -148,6 +148,19 @@ test('backupDir が空なら控えを取らず、「控えから戻す」に設�
   expect(await ui.find({ type: 'Text', text: '設定の backupDir を入れると控えが取れます' })).toBeUndefined()
 })
 
+test('heat の控えが無い日に戻すと、heat は今のまま残し、そう表示する', OPTIONS, async ($, on) => {
+  const old = { '2026-10-18': { ...EMPTY_DAY, turns: 30 } }
+  const files = new Map([[`${DIR}/usage-history/days-0.json`, JSON.stringify({ day: '2026-10-18', value: old })]])
+  const s = await boot($, on, { days: { '2026-10-21': { ...EMPTY_DAY, turns: 2 } }, heat: heatOf(2) }, files)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'restore' })
+  await ui.press({ key: 'restore:2026-10-18' })
+  await ui.press({ key: 'restore:yes' })
+  expect(s.raw.get('days')).toEqual(old)
+  expect(s.raw.get('heat')).toEqual(heatOf(2))
+  expect(await ui.find({ type: 'Text', text: '2026-10-18 の日ごとの記録に戻しました (曜日と時間帯の記録は控えが無いので今のまま)' })).toBeDefined()
+})
+
 // ここから下は「古い版」の印が残る。新しい試験はこの上に足す
 test('新しい版が入ったら (plugin.json の版が変わったら) 記録を書かず、トーストで 1 回だけ開き直しを頼む。戻すこともしない', OPTIONS, async ($, on) => {
   const s = await boot($, on, { days: { '2026-10-21': { ...EMPTY_DAY, turns: 2 } } })

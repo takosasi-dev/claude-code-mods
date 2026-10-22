@@ -3,7 +3,7 @@ import { C } from './style'
 import type { DayPart, Season } from './style'
 
 // 制御文字を落とす(エンジンは制御文字を含む Text の子や alt を拒み、帯が描かれなくなる)
-const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g
 export const clean = (s: string) => s.replace(CONTROL, '').replace(/\s+/g, ' ').trim()
 
 /** 長い MCP 名などは頭を残して切る */

@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { addFirst, asFirstAt, freshIds, judge, levelOf, shelfLines, shelfSvg, snapshotOf, TROPHIES } from '../hooks/shelf'
+import { addFirst, asFirstAt, freshIds, judge, levelOf, shelfLines, shelfSvg, snapshotOf, TROPHIES, withUnknown } from '../hooks/shelf'
 import type { ShelfRaw } from '../hooks/shelf'
 import { setTheme } from '../hooks/style'
 
@@ -46,15 +46,23 @@ const RICH = {
 }
 type Others = Partial<Record<keyof typeof RICH, unknown>>
 
-type Boot = { others?: () => Others; store?: Record<string, unknown>; taken?: boolean; theme?: () => string }
+type Boot = {
+  others?: () => Others
+  store?: Record<string, unknown>
+  taken?: boolean
+  theme?: () => string
+  getFails?: () => boolean
+  setFails?: () => boolean
+}
 
 /** 下の hook を全部置いてセッションを始める。others に無い mod は「入っていない」(state.get に答えない) */
 const boot = async ($: Engine, on: On, opts: Boot = {}) => {
   const clock = mock.clock(on, { now: NOW })
   const m = new Map<string, unknown>(Object.entries(opts.store ?? {}))
   let writes = 0
-  on('store.get', (_$, e) => ({ value: m.get(e.key) }))
+  on('store.get', (_$, e) => (opts.getFails?.() ? { deny: '読めません' } : { value: m.get(e.key) }))
   on('store.set', (_$, e) => {
+    if (opts.setFails?.()) return { deny: '書けません' }
     writes++
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
@@ -74,6 +82,14 @@ const boot = async ($: Engine, on: On, opts: Boot = {}) => {
     on('state.get', { plugin: 'daily-quest', key: 'streak' }, answer('streak'))
     on('state.get', { plugin: 'daily-quest', key: 'totalDone' }, answer('totalDone'))
   }
+  // 偽の fs: 版を読む plugin.json だけ
+  let version = '0.1.0'
+  on('fs.read', (_$, e) => (e.path.replace(/\\/g, '/').endsWith('/.claude-plugin/plugin.json') ? { value: JSON.stringify({ name: 'trophy-shelf', version }) } : { deny: 'ENOENT' }))
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('command.register', (_$, e) => (opts.taken && e.name === 'trophies' ? { deny: '組み込みと被っています' } : { value: { command: e.name } }))
   on('command.run', { command: 'trophies' }, () => ({ text: '別の /trophies' }))
@@ -85,7 +101,7 @@ const boot = async ($: Engine, on: On, opts: Boot = {}) => {
     on('config.set', (_$, e) => ({ value: e.value }))
   }
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
-  return { clock, firstAt: () => asFirstAt(m.get('firstAt')) ?? {}, raw: m, writes: () => writes }
+  return { clock, firstAt: () => asFirstAt(m.get('firstAt')) ?? {}, raw: m, writes: () => writes, toasts, setVersion: (v: string) => (version = v) }
 }
 
 const turn = ($: Engine, turnId: string, extra: Record<string, unknown> = {}) =>
@@ -266,4 +282,54 @@ test('ダンジョンのトロフィー (dev-rpg 0.6.0 の一番深い階)。古
   const j = judge(snapshotOf(deep(12)), {}).find(x => x.trophy.id === 'rpg-deep30')
   expect(j).toMatchObject({ cur: 12, goal: 30, isKnown: true, isDone: false })
   expect(shelfLines(snapshotOf(deep(12)), {}).map(l => l.text)).toContain('未取得 地下三十階 12 / 30 (ダンジョンの 30 階を勝ち抜く)')
+})
+
+test('store を読めない時 (reject・形が違う) は書かず、トーストで知らせる。読めたら知らない欄を残して書く', async ($, on) => {
+  // 読めない時に state の写しで書くと、新しい版のトロフィーが消える (withUnknown は raw が無ければ何も残さない)
+  expect(withUnknown(undefined, {})).toEqual({})
+  let fails = false
+  let hero = { ...RICH.hero, xp: 360, defeated: {} }
+  const old = { futureField: 1, 'future-trophy': NOW - DAY, 'rpg-lv5': NOW - DAY }
+  const s = await boot($, on, { others: () => ({ hero }), store: { firstAt: old }, getFails: () => fails })
+  const before = s.writes()
+  fails = true
+  hero = { ...hero, xp: 1260 }
+  await turn($, 't1')
+  await turn($, 't2')
+  expect(s.writes()).toBe(before)
+  expect(s.toasts.filter(t => t.includes('記録を読めなかった'))).toHaveLength(1)
+  // 形が違う (配列) 時も書かない
+  fails = false
+  s.raw.set('firstAt', ['壊れた'])
+  await turn($, 't3')
+  expect(s.writes()).toBe(before)
+  expect(s.raw.get('firstAt')).toEqual(['壊れた'])
+  // 読めるようになれば、取った物を足して知らない欄も残す
+  s.raw.set('firstAt', old)
+  await turn($, 't4')
+  expect(s.raw.get('firstAt')).toEqual({ ...old, 'rpg-lv10': NOW })
+})
+
+test('store に書けなかった時は取った時刻を覚えず、次のターンの終わりにもう一度書く', async ($, on) => {
+  let fails = true
+  const s = await boot($, on, { others: () => ({ hero: { ...RICH.hero, xp: 360, defeated: {} } }), setFails: () => fails })
+  expect(s.raw.get('firstAt')).toBeUndefined()
+  fails = false
+  await turn($, 't1')
+  expect(s.firstAt()).toEqual({ 'rpg-lv5': NOW })
+})
+
+// ここから下は「古い版」の印が残る。新しい試験はこの上に足す
+test('新しい版が入ったら (plugin.json の版が変わったら) 記録を書かず、トーストで 1 回だけ開き直しを頼む', async ($, on) => {
+  let hero = { ...RICH.hero, xp: 360, defeated: {} }
+  const s = await boot($, on, { others: () => ({ hero }) })
+  const before = s.writes()
+  s.setVersion('0.2.0')
+  await s.clock.advance(61_000)
+  hero = { ...hero, xp: 1260 }
+  await turn($, 't1')
+  await turn($, 't2')
+  expect(s.writes()).toBe(before)
+  expect(s.firstAt()['rpg-lv10']).toBeUndefined()
+  expect(s.toasts.filter(t => t.includes('新しい版が入りました'))).toHaveLength(1)
 })

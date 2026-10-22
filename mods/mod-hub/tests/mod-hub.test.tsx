@@ -205,6 +205,7 @@ test('カテゴリーの順に分け、表に無い mod は「その他」', () 
 })
 
 test('並びのボタンで名前順とカテゴリー別を切り替え、次のセッションにも残す', PLUGINS, async ($, on) => {
+  mock.clock(on, { now: 1_000 })
   on('command.list', () => ({ value: COMMANDS.map(c => ({ ...c })) }))
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
   const saved: Record<string, unknown> = {}
@@ -359,6 +360,7 @@ test('vscode ではカードにアイコン、段に色の帯を描く(terminal 
 })
 
 test('固定した mod は一番上の「固定」の段に移り、store は読み直して足す・抜く', PLUGINS, async ($, on) => {
+  mock.clock(on, { now: 1_000 })
   const saved = await openWithStore($, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
   expect(await ui.find({ key: 'group:固定' })).toBeUndefined()
@@ -444,4 +446,70 @@ test('vscode の見出しは今の季節 (JST の月) の飾りを描く', PLUGI
   const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
   const head = (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt).startsWith('画面のある mod'))
   expect(String(head?.props.source)).toContain('id="deco-winter"')
+})
+
+// ---- 0.5.5 で直した物 ----
+
+test('/mod を持てた時は、/mod-hub をその名前の持ち主に回す (横取りしない)', async ($, on) => {
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.list', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', { command: 'mod-hub' }, () => ({ text: '別の mod-hub' }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
+  expect(await $.command.run({ command: 'mod', ...RUN })).toMatchObject({ text: 'mod の一覧を開きました。' })
+  expect(await $.command.run({ command: 'mod-hub', ...RUN })).toMatchObject({ text: '別の mod-hub' })
+})
+
+test('固定・最近の記録が読めない形なら、このセッションの中だけ効かせて store は書かない', PLUGINS, async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  const saved = await openWithStore($, on)
+  saved.pins = { broken: true }
+  saved.recent = 'broken'
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'run:band-mod:band' })
+  await ui.press({ key: 'pin:pane-mod' })
+  expect(saved.pins).toEqual({ broken: true })
+  expect(saved.recent).toBe('broken')
+  expect(await ui.find({ type: 'Text', text: '固定 (1)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /読めなかったので/ })).toBeDefined()
+})
+
+test('最近の記録の知らない欄 (新しい版が足した欄) は、開いた後も store に残る', PLUGINS, async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  const saved = await openWithStore($, on)
+  saved.recent = [
+    { name: 'band-mod', at: 1, futureField: 1 },
+    { name: 'other-mod', at: 2, futureField: 2 },
+  ]
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'run:band-mod:band' })
+  const recent = saved.recent as { name: string; futureField?: number }[]
+  expect(recent.map(r => [r.name, r.futureField])).toEqual([
+    ['band-mod', 1],
+    ['other-mod', 2],
+  ])
+})
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、開き直しを頼む', PLUGINS, async ($, on) => {
+  let version = '0.5.5'
+  on('fs.read', (_$, e) => {
+    if (e.path.replace(/\\/g, '/').endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'mod-hub', version }) }
+    throw new Error('ENOENT')
+  })
+  const clock = mock.clock(on, { now: 1_000 })
+  const saved = await openWithStore($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'pin:pane-mod' })
+  expect(saved.pins).toEqual(['pane-mod'])
+  version = '0.6.0'
+  await clock.advance(61_000)
+  await ui.press({ key: 'pin:band-mod' })
+  await ui.press({ key: 'sort' })
+  expect(await ui.find({ type: 'Text', text: /開き直して/ })).toBeDefined()
+  await ui.press({ key: 'run:band-mod:band' })
+  expect(saved.pins).toEqual(['pane-mod'])
+  expect(saved.sort).toBeUndefined()
+  expect(saved.recent).toBeUndefined()
 })

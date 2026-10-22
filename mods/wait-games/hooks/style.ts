@@ -91,7 +91,7 @@ export function followTheme(on: On) {
 // ---- 小物 ----
 
 /** 外から来る文字列の制御文字を落とす。エンジンは制御文字を含む Text の子や alt を拒み、ペインが閉じる */
-export const clean = (s: string) => s.replace(/[\t\n\r]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, '').trim()
+export const clean = (s: string) => s.replace(/[\t\n\r]+/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim()
 
 /** SVG の文字に入れる前のエスケープ(制御文字も落とす) */
 export const esc = (s: string) =>
@@ -137,53 +137,106 @@ export async function backupDaily($: EngineInterface, dir: string, key: string, 
   if (!dir.trim() || value === undefined) return false
   const day = jstDay(now)
   const path = backupPath(dir, $.plugin.name, key, jstDate(now).getUTCDay())
-  const old = await $.fs.read(path).then(t => (JSON.parse(t) as Backup).day, () => '')
+  // 壊れた枠(途中まで・null)は無いのと同じに扱って上書きする
+  const old = await $.fs.read(path).then(t => parseBackup(t)?.day ?? '', () => '')
   if (old === day) return false
   await $.fs.write(path, JSON.stringify({ day, value } satisfies Backup))
   return true
 }
 
-/** 控えの一覧。新しい日から順。読めない枠は飛ばす */
+/** 控えの 1 枠を読む。壊れていれば undefined */
+export function parseBackup(text: string): Backup | undefined {
+  try {
+    const b = JSON.parse(text) as Partial<Backup> | null
+    return b && typeof b.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.day) && b.value !== undefined ? (b as Backup) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 控えの一覧。新しい日から順。読めない枠・壊れた枠は飛ばす */
 export async function listBackups($: EngineInterface, dir: string, key: string): Promise<Backup[]> {
   if (!dir.trim()) return []
   const all = await Promise.all(
     [0, 1, 2, 3, 4, 5, 6].map(wd =>
-      $.fs.read(backupPath(dir, $.plugin.name, key, wd)).then(
-        t => JSON.parse(t) as Backup,
-        () => undefined,
-      ),
+      $.fs.read(backupPath(dir, $.plugin.name, key, wd)).then(parseBackup, () => undefined),
     ),
   )
-  return all.filter((b): b is Backup => typeof b?.day === 'string' && b.value !== undefined).sort((a, b) => b.day.localeCompare(a.day))
+  return all.filter((b): b is Backup => b !== undefined).sort((a, b) => b.day.localeCompare(a.day))
 }
 
-let loadedVersion: string | undefined
+let loadedPrint: string | undefined
 let staleAt = 0
 let isStaleNow = false
 let toldStale = false
 
-async function diskVersion($: EngineInterface): Promise<string | undefined> {
-  for (const p of [`${$.plugin.root}/.claude-plugin/plugin.json`, `${$.plugin.root}/plugin.json`]) {
-    const v = await $.fs.read(p).then(t => (JSON.parse(t) as { version?: unknown }).version, () => undefined)
-    if (typeof v === 'string') return v
-  }
-  return undefined
-}
+const normPath = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase()
 
-/** 読み込んだ時の版を覚える。mod の session.start で 1 回呼ぶ */
-export async function rememberVersion($: EngineInterface) {
-  loadedVersion ??= await diskVersion($)
+/** FNV-1a 32bit。中身が変わったかを見るだけ */
+function fnv(s: string) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(16)
 }
 
 /**
- * 新しい版が入ったのに、このセッションはまだ古い版で動いているか(ディスクの plugin.json の版が読み込んだ時と違う)。
- * 読み直すのは 60 秒に 1 回まで。版が分からない時は false
+ * 今ディスクにある、この mod の指紋。plugin.json と hooks の .ts / .tsx の中身から作る
+ * (版の数字を上げずに中身だけ変えた時も変わる)。plugin.json が読めなければ undefined
+ */
+async function diskPrint($: EngineInterface): Promise<string | undefined> {
+  const root = $.plugin.root
+  let manifest: string | undefined
+  for (const p of [`${root}/.claude-plugin/plugin.json`, `${root}/plugin.json`]) {
+    manifest = await $.fs.read(p).then(t => t, () => undefined)
+    if (manifest !== undefined) break
+  }
+  if (manifest === undefined) return undefined
+  const names = await $.fs.list(`${root}/hooks`).then(
+    es => es.filter(e => e.kind === 'file' && /\.tsx?$/.test(e.name)).map(e => e.name).sort(),
+    () => [] as string[],
+  )
+  const parts = await Promise.all(names.map(n => $.fs.read(`${root}/hooks/${n}`).then(t => `${n}\n${t}`, () => n)))
+  return fnv([manifest, ...parts].join('\0'))
+}
+
+/**
+ * マーケットプレイスから入れた形(<plugins>/cache/<market>/<name>/<版>)なら、installed_plugins.json に
+ * 今入っている場所が自分と違うか。違えば新しい版が入っている。分からなければ false
+ */
+async function replacedInCache($: EngineInterface): Promise<boolean> {
+  const root = normPath($.plugin.root)
+  const at = root.lastIndexOf('/plugins/cache/')
+  if (at < 0) return false
+  const raw = await $.fs.read(`${$.plugin.root.slice(0, at + '/plugins'.length)}/installed_plugins.json`).then(t => t, () => '')
+  try {
+    const plugins = (JSON.parse(raw) as { plugins?: Record<string, { installPath?: unknown }[]> }).plugins ?? {}
+    const mine = Object.entries(plugins)
+      .filter(([k]) => k.startsWith(`${$.plugin.name}@`))
+      .flatMap(([, v]) => (Array.isArray(v) ? v : []))
+      .map(e => (typeof e.installPath === 'string' ? normPath(e.installPath) : ''))
+    return mine.length > 0 && !mine.includes(root)
+  } catch {
+    return false
+  }
+}
+
+/** 読み込んだ時の指紋を覚える。mod の session.start で 1 回呼ぶ */
+export async function rememberVersion($: EngineInterface) {
+  loadedPrint ??= await diskPrint($)
+}
+
+/**
+ * 新しい版が入ったのに、このセッションはまだ古い版で動いているか。
+ * フォルダから読ませている時は中身の指紋が読み込んだ時と違えば、マーケットプレイスから入れた時は
+ * 入っている場所が自分でなくなれば true。読み直すのは 60 秒に 1 回まで。分からない時は false
  */
 export async function isStale($: EngineInterface, now: number): Promise<boolean> {
-  if (isStaleNow || loadedVersion === undefined || now - staleAt < 60_000) return isStaleNow
+  if (isStaleNow || now - staleAt < 60_000) return isStaleNow
   staleAt = now
-  const v = await diskVersion($)
-  isStaleNow = v !== undefined && v !== loadedVersion
+  if (await replacedInCache($)) return (isStaleNow = true)
+  if (loadedPrint === undefined) return false
+  const p = await diskPrint($)
+  isStaleNow = p !== undefined && p !== loadedPrint
   return isStaleNow
 }
 

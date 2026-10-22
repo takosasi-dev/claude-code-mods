@@ -1,6 +1,6 @@
 {
   "name": "daily-quest",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/quest で、日替わりのお題 3 つ (ターン・編集・テスト・コミットなど) の進みと連続日数をペインで見る。ごほうびは dev-rpg の経験値と turn-gacha のおまけの 1 回。記録は毎日控えを取り、控えから戻せる",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

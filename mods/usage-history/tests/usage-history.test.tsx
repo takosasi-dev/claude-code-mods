@@ -26,15 +26,17 @@ const PANE = {
 const RUN = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 const usage = (input: number, output: number, cache = 0) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: cache, cache_creation_input_tokens: 0, model: 'demo' })
 const rec = (d: Partial<DayRec>): DayRec => ({ ...EMPTY_DAY, ...d })
+const heatOf = (n: number) => Array.from({ length: SLOTS }, (_, k) => (k === 0 ? n : 0))
 
-type Boot = { taken?: boolean; theme?: () => string; store?: Record<string, unknown> }
+type Boot = { taken?: boolean; theme?: () => string; store?: Record<string, unknown>; getFails?: () => boolean; setFails?: (key: string) => boolean }
 
 const boot = async ($: Engine, on: On, opts: Boot = {}) => {
   const clock = mock.clock(on, { now: NOW })
   const m = new Map<string, unknown>(Object.entries(opts.store ?? {}))
   let writes = 0
-  on('store.get', (_$, e) => ({ value: m.get(e.key) }))
+  on('store.get', (_$, e) => (opts.getFails?.() ? { deny: '読めません' } : { value: m.get(e.key) }))
   on('store.set', (_$, e) => {
+    if (opts.setFails?.(e.key)) return { deny: '書けません' }
     if (e.key === 'days') writes++
     m.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
@@ -150,6 +152,70 @@ test('400 日を超えたら古い日から捨てる', async ($, on) => {
   expect(keys.length).toBe(KEEP_DAYS)
   expect(keys).toContain('2026-10-21')
   expect(keys).not.toContain(dayKey(NOW - KEEP_DAYS * DAY))
+})
+
+test('store を読めない時 (reject・形が違う) は書かず、差分を溜めたまま次に足す', async ($, on) => {
+  // 読めない時に空から足すと、168 枠が今回の 1 ターンだけで上書きされる。長さの違う heat は読まない
+  const fromEmpty = mergeHeat([], [0, 1])
+  expect([fromEmpty.length, fromEmpty.reduce((a, b) => a + b, 0)]).toEqual([SLOTS, 1])
+  expect(asHeat(new Array(200).fill(3))).toBeUndefined()
+  const today = '2026-10-21'
+  let fails = false
+  const s = await boot($, on, { store: { days: { futureField: 1, '2026-10-01': rec({ turns: 9 }) }, heat: heatOf(4) }, getFails: () => fails })
+  fails = true
+  await turn($, { id: 'm1' })
+  await s.clock.settle()
+  expect(s.writes()).toBe(0)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '記録を読めなかったので、まだ書いていません。次のターンの終わりにもう一度読みます' })).toBeDefined()
+  // 形が違う (配列) 時も書かない
+  fails = false
+  s.raw.set('days', ['壊れた'])
+  await turn($, { id: 'm2' })
+  await s.clock.settle()
+  expect(s.writes()).toBe(0)
+  expect(s.raw.get('days')).toEqual(['壊れた'])
+  // 読めるようになれば、溜めた 3 ターン分を足し、ほかの日も知らない欄も残す
+  s.raw.set('days', { futureField: 1, '2026-10-01': rec({ turns: 9 }) })
+  await turn($, { id: 'm3' })
+  await s.clock.settle()
+  expect(s.writes()).toBe(1)
+  expect(s.raw.get('days')).toMatchObject({ futureField: 1, '2026-10-01': { turns: 9 }, [today]: { turns: 3 } })
+  expect(s.heat()?.[slot(NOW)]).toBe(3)
+  expect(s.heat()?.[0]).toBe(4)
+  expect(await ui.find({ type: 'Text', text: /記録を読めなかった/ })).toBeUndefined()
+})
+
+test('heat が 168 枠でなければ上書きせず、日ごとの記録だけ書く。直れば溜めた分を足す', async ($, on) => {
+  const today = '2026-10-21'
+  const bad = new Array(200).fill(3)
+  const s = await boot($, on, { store: { heat: bad } })
+  await turn($, { id: 'm1' })
+  await s.clock.settle()
+  expect(s.days()[today]?.turns).toBe(1)
+  expect(s.raw.get('heat')).toEqual(bad)
+  s.raw.set('heat', heatOf(4))
+  await turn($, { id: 'm2' })
+  await s.clock.settle()
+  expect(s.days()[today]?.turns).toBe(2)
+  expect(s.heat()?.[slot(NOW)]).toBe(2)
+  expect(s.heat()?.[0]).toBe(4)
+})
+
+test('store に書けなかった差分は捨てず、次のターンの終わりに足す', async ($, on) => {
+  const today = '2026-10-21'
+  let fails = true
+  const s = await boot($, on, { setFails: () => fails })
+  await turn($, { id: 'm1', tools: 2 })
+  await s.clock.settle()
+  expect(s.raw.get('days')).toBeUndefined()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '記録を書けませんでした。次のターンの終わりにもう一度書きます' })).toBeDefined()
+  fails = false
+  await turn($, { id: 'm2' })
+  await s.clock.settle()
+  expect(s.days()[today]).toMatchObject({ turns: 2, tools: 2 })
+  expect(s.heat()?.[slot(NOW)]).toBe(2)
 })
 
 for (const surface of SURFACES) {

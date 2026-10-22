@@ -130,7 +130,8 @@ export const register: Register = on => {
 
   // /todos を持てなかった時は、その名前の持ち主 (組み込みなど) に回す
   on('command.run', { command: 'todos' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'todo-board' }, async $ => openPane($))
+  // /todos を持てた時は /todo-board を登録していないので、同じ名前の別のコマンドに回す
+  on('command.run', { command: 'todo-board' }, ($, e, next) => (ownsMain ? next(e) : openPane($)))
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)

@@ -88,7 +88,8 @@ export const register: Register = on => {
 
   // /agents を持てなかった時は、元の /agents (組み込み) に回す
   on('command.run', { command: 'agents' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'agent-watch' }, openPane)
+  // /agents を持てた時は /agent-watch を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'agent-watch' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   // サブエージェントのターンの始まり。初めて見る物は一覧から種類と説明を読む
   on('turn.start', async ($, e, next) => {

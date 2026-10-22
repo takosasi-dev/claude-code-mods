@@ -1,6 +1,6 @@
 {
   "name": "trophy-shelf",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/trophies で dev-rpg・turn-gacha・aqua-pet・wait-games・daily-quest の記録を 1 枚の棚にまとめ、全体のトロフィーを集める",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

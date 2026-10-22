@@ -213,6 +213,22 @@ test('/tokens が拒まれたら /token-meter で開き、/tokens には触ら�
   })
 })
 
+test('/tokens を持てた時は /token-meter をその名前の持ち主に回す。別の名前で返されたら持てていない', async ($, on) => {
+  bottom(on)
+  let renamed = false
+  on('command.register', ($, e) => ({ value: { command: renamed && e.name === 'tokens' ? 'tokens-2' : e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('command.run', ($, e) => ({ text: `別の ${e.command}` }))
+  const run = (command: string) => $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  expect(await run('tokens')).toMatchObject({ text: 'トークンのペインを開きました。' })
+  expect(await run('token-meter')).toMatchObject({ text: '別の token-meter' })
+  renamed = true
+  await $.session.start({ cwd: '', surface: 'vscode', isInteractive: true })
+  expect(await run('tokens')).toMatchObject({ text: '別の tokens' })
+  expect(await run('token-meter')).toMatchObject({ text: 'トークンのペインを開きました。' })
+})
+
 test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {
   bottom(on)
   let theme = 'light'

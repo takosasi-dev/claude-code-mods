@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { INPUT_SCHEMA, LIMIT, SVG_SOURCE_MAX, barSvg, fmt, lineSvg, parseShow, pieSvg, svgProblem, tableSvg, ticks } from '../hooks/canvas'
+import { INPUT_SCHEMA, LIMIT, SVG_SOURCE_MAX, barSvg, fmt, hhmm, lineSvg, parseShow, pieSvg, svgProblem, tableSvg, ticks } from '../hooks/canvas'
 
 const NOW = Date.parse('2026-10-20T03:00:00Z')
 const TOOL = 'mcp__canvas-pane__show'
@@ -114,8 +114,44 @@ test('svg: スクリプト・on* 属性・外部参照・先頭違い・長す�
   expect(svgProblem('<svg><style>@import "x.css";</style></svg>')).toContain('CSS から外の物')
   expect(svgProblem(`<svg>${' '.repeat(LIMIT.svg)}</svg>`)).toContain('100000 字まで')
   // 通った svg も制御文字は落とす
-  const r = parseShow({ title: 't', kind: 'svg', svg: '<svg viewBox="0 0 1 1">\x07<text>a\x1bb</text></svg>' })
+  const r = parseShow({ title: 't', kind: 'svg', svg: '<svg viewBox="0 0 1 1">\x07<text>a\x1bb\x85</text></svg>' })
   expect('item' in r && r.item.svg).toBe('<svg viewBox="0 0 1 1"><text>ab</text></svg>')
+})
+
+test('svg: 監査のすり抜け (文字参照・CSS のエスケープ・file:・image-set・制御文字) を断る', () => {
+  const bad: [string, string][] = [
+    ['<svg><image href="&#104;ttps://evil.example/x.png"/></svg>', '外の物'],
+    ['<svg><image href="&#x68;ttps://evil.example/x.png"/></svg>', '外の物'],
+    ['<svg><image href=" h&#116;tps://evil.example/x.png"/></svg>', '外の物'],
+    ['<svg><image href="ht\ntps://evil.example/x.png"/></svg>', '外の物'],
+    ['<svg><rect style="fill:url(&#104;ttps://evil.example/a#b)"/></svg>', 'CSS から外の物'],
+    ['<svg><style>rect{fill:url(\\68ttps://evil.example/a)}</style><rect/></svg>', 'CSS から外の物'],
+    ['<svg><style>rect{fill:url(\\000068 ttps://evil.example/a)}</style><rect/></svg>', 'CSS から外の物'],
+    ['<svg><style>rect{background-image:image-set("https://evil.example/a" 1x)}</style><rect/></svg>', 'CSS から外の物'],
+    ['<svg><style>@\\69mport "https://evil.example/a.css";</style></svg>', 'CSS から外の物'],
+    ['<svg><style>@\\import "a.css";</style></svg>', 'CSS から外の物'],
+    ['<svg><image href="file:///D:/secret.png"/></svg>', '外の物'],
+    ['<svg><style>rect{fill:url(file:///D:/a.svg#g)}</style></svg>', 'CSS から外の物'],
+    ['<svg><a href="javascript&#58;alert(1)"><text>x</text></a></svg>', '外の物'],
+    ['<svg><svg onload=alert(1)/></svg>', 'on で始まる属性'],
+    ['<svg><script>x</script></svg>', '<script>'],
+    ['<svg><scr\u0000ipt>x</script></svg>', '<script>'],
+    ['<svg><scr\u0085ipt>x</script></svg>', '<script>'],
+    ['<svg><svg:script>x</svg:script></svg>', '<script>'],
+    ['<svg><&#115;cript>x</script></svg>', '<script>'],
+  ]
+  for (const [s, why] of bad) expect([s, why, (svgProblem(s) ?? '').includes(why)]).toEqual([s, why, true])
+  // 外れる側: ふつうの文字参照・エスケープ・data: は通す
+  for (const s of [
+    '<svg><text>A &amp; B &#12354; &#x3042;</text></svg>',
+    '<svg><style>text{font-family:"\\30b4\\30b7\\30c3\\30af"}</style><text>x</text></svg>',
+    '<svg><text>C:\\work\\a.txt</text></svg>',
+    '<svg><image href="data:image/png;base64,iVBORw0KGgo="/></svg>',
+    '<svg><text>profile: yes</text></svg>',
+  ])
+    expect([s, svgProblem(s)]).toEqual([s, undefined])
+  // 時刻は日本時間
+  expect(hhmm(Date.parse('2026-10-22T15:30:00Z'))).toBe('00:30')
 })
 
 test('外から来る文字列の制御文字を、題・項目名・系列名・セル・alt・Markdown・SVG から落とす', () => {
@@ -299,6 +335,14 @@ test('C2: /canvas が取れなかった時は /canvas-pane にし、元の /canv
   expect(world.opened).toEqual([])
   expect(await $.command.run({ command: 'canvas-pane', ...run })).toMatchObject({ text: 'キャンバスのペインを開きました。' })
   expect(world.opened).toEqual(['canvas-pane'])
+})
+
+test('/canvas を持てた時は、予備名の /canvas-pane を横取りしない', async ($, on) => {
+  on('command.run', { command: 'canvas-pane' }, () => ({ text: '別の canvas-pane' }))
+  const world = await boot($, on)
+  const run = { args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+  expect(await $.command.run({ command: 'canvas-pane', ...run })).toMatchObject({ text: '別の canvas-pane' })
+  expect(world.opened).toEqual([])
 })
 
 test('/config の theme が light 系なら明るい色で描き、切り替えにも付いていく', async ($, on) => {

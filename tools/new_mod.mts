@@ -56,7 +56,7 @@ export function stateKeys(dts: string, name: string): string[] | null {
     if (ch === '/' && s[i + 1] === '*') { inComment = true; i++; continue }
     if (ch === '/' && s[i + 1] === '/') { i = s.indexOf('\n', i); if (i < 0) break; continue }
     if (ch === '{' || ch === '(' || ch === '[' || ch === '<') depth++
-    else if (ch === '}' || ch === ')' || ch === ']' || ch === '>') depth--
+    else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && s[i - 1] !== '=')) depth--
     else if (depth === 1 && ch === ':' && /^[A-Za-z_$][\w$]*\??$/.test(token.trim())) keys.push(token.trim().replace(/\?$/, ''))
     if (depth === 1 && /[\n;]/.test(ch ?? '')) token = ''
     else if (depth === 1 && ch !== ':') token += ch
@@ -139,19 +139,22 @@ export function gaps(): string[] {
 
 // ---- 雛形 ----
 
+// 書き換えはいったん pending にためて、全部の錨が見つかってから書く(途中で止まると半端に残るため)
+const pending = new Map<string, string>()
+const current = (path: string) => pending.get(path) ?? lf(readText(path))
+
 function insertBefore(path: string, anchor: string, after: string, line: string) {
-  const raw = readText(path)
-  const s = lf(raw)
+  const s = current(path)
   const a = s.indexOf(anchor)
   if (a < 0) throw new Error(`${path} に ${anchor} がありません`)
   const b = s.indexOf(after, a)
   if (b < 0) throw new Error(`${path} の ${anchor} の終わりが見つかりません`)
-  writeText(path, s.slice(0, b) + line + s.slice(b), raw)
+  pending.set(path, s.slice(0, b) + line + s.slice(b))
 }
 
 function scaffold(name: string, cat: string, cmd: string, ja: string, en: string) {
   const dir = join(MODS, name)
-  for (const d of ['.claude-plugin', 'hooks', 'tests', 'types']) mkdirSync(join(dir, d), { recursive: true })
+  if (existsSync(dir)) throw new Error(`もうあります: ${dir}`)
   const title = ja.split(/[。、]/)[0] || name
   const files: Record<string, string> = {
     '.claude-plugin/plugin.json': JSON.stringify({ name, version: '0.1.0', description: ja, author: { name: 'takosasi-dev' }, types: './types/index.d.ts' }, null, 2) + '\n',
@@ -165,7 +168,7 @@ function scaffold(name: string, cat: string, cmd: string, ja: string, en: string
       `import { followTheme, readTheme } from './style'`,
       ``,
       `const PANE = '${name}'`,
-      `const TITLE = '${title}'`,
+      `const TITLE = ${JSON.stringify(title)}`,
       `const DESCRIPTION = ${JSON.stringify(title + 'のペインを開く')}`,
       ``,
       `const OPENED = atom({ plugin: '${name}', key: 'opened' } as const, 0)`,
@@ -196,7 +199,10 @@ function scaffold(name: string, cat: string, cmd: string, ja: string, en: string
       `  })`,
       ``,
       ...(cmd ? [`  on('command.run', { command: '${cmd}' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))`] : []),
-      `  on('command.run', { command: '${name}' }, openPane)`,
+      // 本来の名前を持てた時は予備名を登録していないので、同じ名前の別のコマンドを横取りしない
+      cmd
+        ? `  on('command.run', { command: '${name}' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))`
+        : `  on('command.run', { command: '${name}' }, openPane)`,
       ``,
       `  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {`,
       `    const { Box, Text } = $.ui.resolve(e)`,
@@ -225,27 +231,28 @@ function scaffold(name: string, cat: string, cmd: string, ja: string, en: string
       ``,
     ].join('\n'),
   }
-  for (const [rel, text] of Object.entries(files)) {
-    const p = join(dir, rel)
-    if (existsSync(p)) throw new Error(`もうあります: ${p}`)
-    writeFileSync(p, text)
-  }
-  copyFileSync(join(ROOT, 'shared/style.ts'), join(dir, 'hooks/style.ts'))
-
   insertBefore(P.hub, 'const CATEGORY: Record<string, Category> = {', '\n}', `\n  '${name}': '${cat}',`)
   insertBefore(P.icons, 'const ICONS: Record<string, (c: string, a: string) => string> = {', '\n}',
     `\n  // 仮の絵。描き直す\n  '${name}': (c, a) => \`<rect x="7" y="7" width="18" height="18" rx="4" \${line(c)}/><circle cx="16" cy="16" r="3" fill="\${a}"/>\`,`)
   const row = `  { name: '${name}', category: '${cat}', ${cmd ? `main: '${cmd}', spare: '${name}', ` : ''}hasState: true },\n`
-  const check = lf(readText(P.check))
+  const check = current(P.check)
   const next = /^  \{ name: '([^']+)'/gm
   let at = -1
   for (const m of check.matchAll(next)) if ((m[1] ?? '') > name && m.index! > check.indexOf('export const MODS')) { at = m.index!; break }
   if (at < 0) insertBefore(P.check, 'export const MODS', '\n]', `\n${row.trimEnd()}`)
-  else writeText(P.check, check.slice(0, at) + row + check.slice(at), readText(P.check))
+  else pending.set(P.check, check.slice(0, at) + row + check.slice(at))
+  // marketplace.json は書き換えた後も JSON として読めるかを確かめる
   insertBefore(P.market, '"plugins"', '\n  ]', `,\n    { "name": "${name}", "source": "./mods/${name}", "description": ${JSON.stringify(ja)} }`)
+  JSON.parse(pending.get(P.market) ?? '')
   const call = cmd ? `\`/${cmd}\`` : '常時'
   insertBefore(P.readme, '| mod | 呼び方 | 何をするか |', '\n\n', `\n| ${name} | ${call} | ${ja} |`)
   insertBefore(P.readmeEn, '| mod | How to open | What it does |', '\n\n', `\n| ${name} | ${cmd ? `\`/${cmd}\`` : 'Always on'} | ${en} |`)
+
+  // ここまでで錨が全部見つかったので書く
+  for (const d of ['.claude-plugin', 'hooks', 'tests', 'types']) mkdirSync(join(dir, d), { recursive: true })
+  for (const [rel, text] of Object.entries(files)) writeFileSync(join(dir, rel), text)
+  copyFileSync(join(ROOT, 'shared/style.ts'), join(dir, 'hooks/style.ts'))
+  for (const [path, text] of pending) writeText(path, text, readText(path))
 }
 
 // ---- 入口 ----
@@ -254,7 +261,8 @@ if (import.meta.main) {
   const args = process.argv.slice(2)
   const opt = (k: string) => {
     const i = args.indexOf(k)
-    return i >= 0 ? (args[i + 1] ?? '') : ''
+    const v = i >= 0 ? (args[i + 1] ?? '') : ''
+    return v.startsWith('--') ? '' : v
   }
   if (args[0] === '--check') {
     const g = gaps()
@@ -268,6 +276,8 @@ if (import.meta.main) {
     if (!/^[a-z][a-z0-9-]*$/.test(name) || name.startsWith('claude-')) throw new Error('名前は英小文字・数字・- で、claude- で始めない')
     if (!(CATS as readonly string[]).includes(cat)) throw new Error(`--cat は ${CATS.join('・')} のどれか`)
     if (!opt('--ja') || !opt('--en')) throw new Error('--ja と --en の説明が要ります')
+    if (opt('--cmd') && !/^[a-z][a-z0-9-]*$/.test(opt('--cmd'))) throw new Error('--cmd は英小文字・数字・- だけ')
+    if (/[|\r\n]/.test(opt('--ja') + opt('--en'))) throw new Error('説明に | と改行は使えません(README の表が崩れる)')
     scaffold(name, cat, opt('--cmd'), opt('--ja'), opt('--en'))
     console.log(`mods/${name}/ を作って登録しました。アイコン・撮影(tools/shots.mts)・README の画像は手で足してください`)
   }

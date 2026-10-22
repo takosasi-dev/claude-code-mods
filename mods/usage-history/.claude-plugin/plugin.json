@@ -1,6 +1,6 @@
 {
   "name": "usage-history",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/history で日をまたいだ使い方の記録(日ごとのターン数・トークン・ツール回数)を縦棒グラフと曜日×時間帯のヒートマップで見る (直近 7 日の数をほかの mod にも見せる。記録は毎日 1 回控えを取れる)",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

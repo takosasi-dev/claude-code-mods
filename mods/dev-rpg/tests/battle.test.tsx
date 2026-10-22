@@ -114,7 +114,8 @@ test('能力に振ると強さが上がり、スキルはレベルと SP が要�
 })
 
 test('2 つのセッションの振り分け・スキル・ボス・遭遇も、増えた分だけ足す', () => {
-  const base: RpgSaved = { ...INITIAL_SAVED, alloc: { str: 1, vit: 0, int: 0, agi: 0 }, encounters: 2 }
+  // SP が足りる勇者 (Lv 10 で 18 SP)。足りない時の取り消しは dungeon.test.tsx
+  const base: RpgSaved = { ...INITIAL_SAVED, xp: xpToReach(10), alloc: { str: 1, vit: 0, int: 0, agi: 0 }, encounters: 2 }
   const store: RpgSaved = { ...base, alloc: { str: 3, vit: 0, int: 0, agi: 0 }, learned: { heal: NOW - 5 }, encounters: 4 }
   const mine: RpgSaved = { ...base, alloc: { str: 1, vit: 2, int: 0, agi: 0 }, learned: { slash: NOW }, defeated: { loop: NOW }, encounters: 5, wins: 2 }
   const out = mergeSaved(store, base, mine)

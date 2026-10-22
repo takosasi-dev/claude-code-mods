@@ -59,6 +59,9 @@ export const kindFor = (i: number, tankBornAt: number): KnownFishKind => {
   return pool[pool.length - 1]!
 }
 
+/** 水槽と魚の名前。制御文字を落として 12 文字まで (サロゲートの対は割らない)。文字でなければ空 */
+export const nameOf = (v: unknown) => (typeof v === 'string' ? Array.from(clean(v)).slice(0, 12).join('') : '')
+
 /** 古い記録 (魚の欄が無い) から、今の数だけ魚を作る。来てからのターンは節目から数える */
 export const migrateFish = (turns: number, tankBornAt: number): AquaFish[] =>
   Array.from({ length: fishCount(turns) }, (_, i) => ({ id: i, kind: kindFor(i, tankBornAt), bornAt: tankBornAt, turnsSeen: Math.max(0, turns - arrivalTurn(i)) }))
@@ -68,6 +71,9 @@ export const migrateFish = (turns: number, tankBornAt: number): AquaFish[] =>
  * 0.2.x の state が残ったまま描かれた時 (リロード直後) は fish が無いので、それも空と同じに扱う
  */
 export const fishOf = (t: Pick<AquaTank, 'fish' | 'turns' | 'bornAt'>) => (t.fish && t.fish.length > 0 ? t.fish : migrateFish(t.turns, t.bornAt))
+
+/** 描く・数える魚 (MAX_FISH 匹まで)。新しい版が増やした魚は store に残し、ここで切るだけ */
+export const shownFish = (t: Pick<AquaTank, 'fish' | 'turns' | 'bornAt'>) => fishOf(t).slice(0, MAX_FISH)
 
 /** 1 ターン終わった: みんな 1 つ育ち、節目を越えた分だけ新しい魚が来る。turns は足した後の累計 */
 export const stepFish = (fish: readonly AquaFish[], turns: number, tankBornAt: number, now: number): AquaFish[] => {
@@ -89,7 +95,7 @@ const fishFrom = (raw: unknown, turns: number, tankBornAt: number): AquaFish[] =
     const o = typeof x === 'object' && x !== null ? (x as Record<string, unknown>) : {}
     // 知らない種類 (新しい版の魚) も落とさない。描く時はまる魚の形、名前は「なぞの魚」
     if (!ok(o.id) || typeof o.kind !== 'string' || o.kind === '') return []
-    const name = typeof o.name === 'string' ? clean(o.name).slice(0, 12) : ''
+    const name = nameOf(o.name)
     // 知らない欄 (新しい版が足した物) はそのまま持ち回る。欄の並びも元のまま (変わっていなければ書かない比べのため)
     const f: Record<string, unknown> = {
       ...o,
@@ -102,7 +108,8 @@ const fishFrom = (raw: unknown, turns: number, tankBornAt: number): AquaFish[] =
     else delete f.name
     return [f as AquaFish]
   })
-  return out.length > 0 ? out.slice(0, MAX_FISH) : migrateFish(turns, tankBornAt)
+  // 上限で切るのは描く時だけ (shownFish)。書き戻す配列は切らない
+  return out.length > 0 ? out : migrateFish(turns, tankBornAt)
 }
 
 export const fullnessAt = (t: AquaTank, now: number) =>
@@ -191,7 +198,7 @@ export const fromSaved = (raw: unknown, now: number): Saved => {
     fullness: clamp(num('fullness', 70), 0, 100),
     fedAt: num('fedAt', now) || now,
     murk: clamp(Math.floor(num('murk', 0)), 0, MAX_MURK),
-    name: typeof o.name === 'string' ? o.name.slice(0, 12) : '',
+    name: nameOf(o.name),
     fish: fishFrom(o.fish, turns, bornAt),
     deco: decoFrom(o.deco),
   }
@@ -872,7 +879,7 @@ export const drawTank = (t: AquaTank): string => {
   const extraBubbles = v.season === '夏' ? 8 : 0
   // 育った魚を手前に (後に描く)。城・沈没船があれば、若い順に 1 匹ずつその周りを回る
   const homes = homesOf(t.deco)
-  const fishes = fishOf(t)
+  const fishes = shownFish(t)
     .map((f, i) => ({ f, i }))
     .sort((a, b) => a.f.turnsSeen - b.f.turnsSeen)
     .map(({ f, i }, k) => fish(f, i, mood, homes[k]))

@@ -1,6 +1,6 @@
 {
   "name": "done-chime",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "時間のかかったターンが答え終わったら短い音を鳴らす。/chime で音の種類・しきい値・音量を選ぶ",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

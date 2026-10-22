@@ -100,7 +100,7 @@ async function makeGif(mod: string, make: () => Promise<Pic[]>, o: { light: bool
       pathToFileURL(html).href,
     ],
     // Chrome は TEMP に .tmp や scoped_dir を残すので、TEMP も消す一時フォルダに向ける
-    { stdio: 'ignore', timeout: 120_000, env: { ...process.env, TEMP: o.tmp, TMP: o.tmp } },
+    { stdio: 'ignore', timeout: 120_000, windowsHide: true, env: { ...process.env, TEMP: o.tmp, TMP: o.tmp } },
   )
   // 1 コマの大きさ (画面の画素)。格子の n 番目を切り出す
   const w = Math.round(380 * o.scale)
@@ -114,7 +114,7 @@ async function makeGif(mod: string, make: () => Promise<Pic[]>, o: { light: bool
     '-vf', `crop=${w}:${ch}:mod(n\\,${cols})*${w}:floor(n/${cols})*${ch},tpad=stop_mode=clone:stop_duration=${o.hold},split[a][b];[a]palettegen=stats_mode=diff:max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`,
     '-loop', '0',
     gif,
-  ], { stdio: ['ignore', 'ignore', 'inherit'], timeout: 120_000 })
+  ], { stdio: ['ignore', 'ignore', 'inherit'], timeout: 120_000, windowsHide: true })
   const kb = Math.round(statSync(gif).size / 1024)
   console.log(`${mod}${o.light ? '-light' : ''}.gif  ${w}x${ch}  ${n} コマ  ${kb}KB${kb > 1024 ? '  (1MB を超えました。--scale か --fps を下げてください)' : ''}`)
 }

@@ -1,5 +1,98 @@
 # Changelog
 
+## [0.10.1] - 2026-10-23
+
+全体を見直し、見つかったバグと脆弱性を直した。
+
+### Security
+
+- **release-draft 0.1.2**: `-` で始まるタグ名を git のオプション(`--output=<パス>`)として読み、リポジトリの外のファイルが書かれた。
+  - そういうタグは無い物として扱う。
+  - rev は `refs/tags/<tag>` で、`--end-of-options` の後に渡す。
+- **ship-guard 0.2.2: 許可の判定**
+  - 次のどちらかの時だけ許可にする(答えに断りの言葉が無いこと)。
+    - 答え自体が公開すると言っている。
+    - Claude 自身の AskUserQuestion で、問いが公開を聞いていて答えが肯定。
+  - 前は「いいえ」や、公開と関係の無い問いの「はい」、ほかの mod の確認も許可に数えていた。
+- **ship-guard 0.2.2: 見逃し**: 書き方の違いで外に出す操作を見逃していた。語に分けて読むようにし、次の書き方を見分ける。
+  - 引用符の名前・`& '…git.exe'`
+  - env / sudo / xargs の前置き
+  - if / for の中
+  - `bash -c` / `powershell -Command` / `iex` の中
+  - `--git-dir`・`-C`・`-c alias`
+  - `yarn npm publish`・`npx gh`
+- **ship-guard 0.2.2: 公開前のチェックの範囲**: `<ref> --not --remotes=<リモート>` で見る。前は 2 つ目のリモートへの push で何も見ていなかった。
+- **run-guard 0.1.1: `claude -p` の隔離の判定**
+  - 値を見るようにした。本物の設定フォルダや本物の API の URL では「隔離済み」にしない。
+  - `CLAUDE_CODE_PLUGIN_DIRS` を消しているかも見る。
+  - echo の中は数えない。
+  - if / xargs / npx / `-p"x"` の見逃しを直した。
+- **run-guard 0.1.1: 窓と音の見逃し**: iex・`-EncodedCommand`・`Process::Start`・winsound・playwright の `--ui` / `codegen` / `open`・MessageBeep を足した。
+- **canvas-pane 0.2.2**: SVG の検査を、制御文字や文字参照・CSS のエスケープですり抜けられた。
+  - 先にほどいてから検査する。
+  - `file:`・`image-set(`・`@import` も断る。
+- **done-chime 0.2.2**: powershell を絶対パスで、mod のフォルダから起こす。
+- **fail-log 0.1.2**: 失敗したコマンドとエラーの文の秘密らしい所を伏せてから残す(前の版が残した物も、読む時に伏せる)。
+- **turn-haiku 0.3.2**: モデルへ渡す材料を囲み、指示として読まれないようにした。
+- **git を読む mod**: `-c log.showSignature=false` を付けた。リポジトリの設定の gpg.program を走らせない。
+  - 対象: release-draft・git-pane 0.2.2・edit-log 0.2.2・pre-check 0.2.1
+- **project-board 0.2.2**: 本文に `file:` がありうるメモでは、どのリンクも押しても開かない。
+- **公開前の検査(tools/sync_public.py)**
+  - 次の物を見つけるようにした。
+    - 日本語の直後のパス
+    - Git Bash・WSL の書き方
+    - 秘密の形(`ghp_`・`sk-ant-`・`AKIA` など)
+    - UTF-16 のファイル
+    - PNG の文字の札
+  - 写し先にまだコミットしていない変更がある時は止める。origin は末尾で比べる。
+- **tools/export_standalone.mts**
+  - 作業ツリーではなく HEAD から写す。
+  - 写す前に公開前の検査を通し、写し先がまだコミットしていない変更を持つ時は止める。
+- 試験の題材から、作者の姓を消した。
+
+### Fixed
+
+- **記録が消える・増える**
+  - dev-rpg 0.6.1
+    - 2 つの窓でダンジョンの袋を何度も持ち帰れた。
+    - 「やり直し」「控えから戻す」を、別の窓が次のターンで戻していた。
+    - SP を二重に振れた。
+  - 記録を読めなかった時に、手元の写しで上書きして記録が丸ごと消えることがあった。読めない時は書かない。
+    - 対象: week-card 0.1.1・usage-history 0.2.1・trophy-shelf 0.2.1・fail-log・toast-inbox 0.3.0・mod-hub 0.5.5・cc-dash 0.3.2・code-omikuji 0.3.2
+- **古い版で書かない(共通の手)**
+  - plugin.json の版だけでなく、hooks の中身の指紋で見る。
+  - マーケットプレイスから入れた時は、`installed_plugins.json` の場所で見る。
+  - これを入れていなかった次の mod にも入れた: prompt-book 0.2.2・rule-switch 0.2.3・code-omikuji・turn-haiku・focus-timer 0.2.3・cc-dash・face-band 0.4.1・live-commentary 0.2.2・toast-inbox・mod-hub・fail-log・trophy-shelf・done-chime。
+- **新しい版の欄が消えないようにした**: 記録の要素を作り直す所で、知らない欄を残す。上限で切るのは、表示と足す時だけにした。
+  - 対象: prompt-book・rule-switch・code-omikuji・turn-haiku・fail-log・toast-inbox・mod-hub・turn-gacha 0.4.1・aqua-pet 0.5.1・run-guard
+- **控えのファイル**: 1 つ壊れていると「控えから戻す」の一覧が全部出なくなっていた。壊れた枠は飛ばし、上書きする。
+- **画面が出なくなる制御文字**
+  - 対象: aqua-pet の名前・todo-board 0.3.2(CR だけの改行)・release-draft のコミットの題・edit-log の label・reply-frame 0.2.2 の返事・test-runner 0.4.1・控えの日付
+  - `clean` が C1 も落とす。
+- **test-runner 0.4.1**: `npm test | tail` のようにパイプした時、失敗を通過と見ていた。
+- **release-draft**
+  - 差分を読む時に index を書いていた。
+  - Claude のコミットのたびに、読み込みを待っていた。
+- **予備名の横取り**: 本来の名前を持てた時は、予備名のコマンドを同じ名前の別のコマンドに回す。
+  - 対象: 21 本と、tools/new_mod.mts の雛形
+- **toast-inbox 0.3.0**: 実況のステータス行で受け箱が埋まっていた。既定ではトーストだけを残し、設定 `keepStatus` でステータス行も残せる。
+- **日付と時刻を JST にそろえた**
+  - 対象: dev-rpg・turn-gacha・focus-timer・turn-haiku・ship-guard・run-guard・test-runner・canvas-pane・release-draft
+- **そのほか**
+  - live-commentary: オフにする時の後始末
+  - devlog-pane 0.3.1: 相対パスを未設定と同じに扱う
+  - usage-pane 0.3.1: ペインが開いている時だけ読む
+  - todo-board: 歩く読み方の締切
+- **版を上げた物**
+  - daily-quest 0.2.1・wait-games 0.3.1・agent-watch 0.2.2・session-timeline 0.1.2・token-meter 0.2.2・mod-check 0.2.1
+- **道具**
+  - check_all: 閉じた API の口で試験する。時間切れの時は子のプロセスごと止める。
+  - new_mod
+    - 書き換えは錨が全部見つかってから書く。
+    - 説明の引用符をエスケープする。
+    - `=>` を含む型を読む。
+  - shots・gif: 窓を隠す。
+
 ## [0.10.0] - 2026-10-22
 
 ### Added

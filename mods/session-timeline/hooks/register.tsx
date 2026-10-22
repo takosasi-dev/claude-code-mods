@@ -54,7 +54,8 @@ export const register: Register = on => {
 
   // /timeline を持てなかった時は、その名前の持ち主に回す
   on('command.run', { command: 'timeline' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'session-timeline' }, openPane)
+  // /timeline を持てた時は /session-timeline を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'session-timeline' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') await update($, TURNS, () => [])

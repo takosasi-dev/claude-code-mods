@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptFilled, Register, Timer } from 'claude-code'
 
 import type { PromptBookDraft, PromptBookItem, PromptBookSort } from '../types'
-import { followTheme, readTheme } from './style'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 import { SORTS, arrange, chartSvg, fromSaved, isSort, newId, parseTags, seeds, short, summaryLines, tagCounts, titleOf } from './book'
 
 const PANE = 'prompt-book'
@@ -23,6 +23,7 @@ const FLASH = atom({ plugin: 'prompt-book', key: 'isFlashing' } as const, false)
 type $ = EngineInterface
 
 const say = ($: $, text: string) => update($, NOTICE, () => text)
+const STALE = '新しい版が入ったので保存していません。VS Code を開き直してください'
 
 // 同じ store を同時に開いた別のセッション (VS Code とターミナルなど) と分け合う。
 // 書く直前に store を読み直し、その一覧に今回の操作 (id で足す・数える・消す) だけを当てて書く
@@ -57,6 +58,11 @@ const change = ($: $, fn: (items: PromptBookItem[], now: number) => PromptBookIt
       return false
     }
     const now = await $.clock.now()
+    // 新しい版が入ったのに古い版のまま動いている時は書かない (新しい版の欄を消さないように)
+    if (!(await mayWrite($, now))) {
+      await say($, STALE)
+      return false
+    }
     const items = fn(fresh.items ?? [], now)
     try {
       await $.store.set(STORE_KEY, items)
@@ -148,6 +154,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     await readTheme($)
+    await rememberVersion($).catch(() => {})
     // /prompts が拒まれたら (組み込みと被ったら) /prompt-book にする
     const got = await $.command.register({ name: 'prompts', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'prompts'
@@ -157,7 +164,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'prompts' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'prompt-book' }, openPane)
+  // /prompts を持てた時は /prompt-book を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'prompt-book' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)

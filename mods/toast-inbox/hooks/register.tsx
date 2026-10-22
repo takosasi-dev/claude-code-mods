@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { InboxItem } from '../types'
-import { asItems, asReadAt, commandsByMod, countByMod, inboxSvg, merge, modLabel, toItem, unreadCount, when } from './inbox'
-import { followTheme, readTheme } from './style'
+import { KEEP, asItems, asReadAt, commandsByMod, countByMod, inboxSvg, merge, modLabel, toItem, unreadCount, when } from './inbox'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 type $ = EngineInterface
 
@@ -38,16 +38,39 @@ const serial = <T,>(f: () => Promise<T>) => {
   return p
 }
 
-// 書く直前に読み直し、溜めた分だけを足す (他のセッションが足した分を消さない)
+const BROKEN = '通知の記録を読めなかったので、保存していません(上書きしないよう止めています)'
+const STALE = '新しい版が入ったので保存していません。VS Code を開き直してください'
+const SET_FAILED = '通知を保存できませんでした。次の通知の時にもう一度書きます'
+const STORE_NOTES = [BROKEN, STALE, SET_FAILED]
+
+/** store の値を読む。キーが無ければ空 (readAt は 0)。読めない時 (例外・形が違う) は undefined */
+async function readKey<T>($: $, key: string, as: (v: unknown) => T | undefined, empty: T): Promise<T | undefined> {
+  try {
+    const raw = await $.store.get(key)
+    return raw === undefined ? empty : as(raw)
+  } catch {
+    return undefined
+  }
+}
+
+// 書く直前に読み直し、溜めた分だけを足す (他のセッションが足した分を消さない)。
+// 読めない・古い版のまま・書けない時は書かずに、溜めた分を戻して次の通知の時にもう一度
 const flush = ($: $) =>
   serial(async () => {
     if (pending.length === 0) return
     const batch = pending
     pending = []
-    const saved = asItems(await $.store.get('items').catch(() => undefined)) ?? (await read($, ITEMS))
+    const putBack = async (text: string) => {
+      pending = merge(batch, pending)
+      await update($, NOTICE, () => text)
+    }
+    const saved = await readKey($, 'items', asItems, [])
+    if (!saved) return putBack(BROKEN)
+    if (!(await mayWrite($, await $.clock.now()))) return putBack(STALE)
     const next = merge(saved, batch)
+    if (!(await $.store.set('items', next).then(() => true, () => false))) return putBack(SET_FAILED)
     await update($, ITEMS, () => next)
-    await $.store.set('items', next).catch(() => {})
+    await update($, NOTICE, n => (STORE_NOTES.includes(n) ? '' : n))
   })
 
 async function note($: $, plugin: string, text: string | undefined, kind: InboxItem['kind']) {
@@ -66,10 +89,16 @@ async function markRead($: $) {
   await update($, CONFIRM, () => false)
   const now = await $.clock.now()
   await serial(async () => {
-    const saved = asReadAt(await $.store.get('readAt').catch(() => undefined)) ?? 0
+    const saved = await readKey($, 'readAt', asReadAt, 0)
+    // 読めない・古い版のまま動いている時は、このセッションの中だけ既読にする
+    if (saved === undefined) {
+      await update($, READ_AT, r => Math.max(r, now))
+      return void (await update($, NOTICE, () => BROKEN))
+    }
     const next = Math.max(saved, now)
     await update($, READ_AT, () => next)
-    await $.store.set('readAt', next).catch(() => {})
+    if (!(await mayWrite($, now))) return void (await update($, NOTICE, () => STALE))
+    await $.store.set('readAt', next).catch(() => update($, NOTICE, () => '既読を保存できませんでした'))
   })
 }
 
@@ -81,6 +110,7 @@ async function pressClear($: $) {
   }
   await update($, CONFIRM, () => false)
   await serial(async () => {
+    if (!(await mayWrite($, await $.clock.now()))) return void (await update($, NOTICE, () => STALE))
     pending = []
     await update($, ITEMS, () => [])
     await update($, FILTER, () => '')
@@ -105,23 +135,28 @@ async function openMod($: $, command: string) {
 }
 
 const openPane = async ($: $) => {
-  await update($, NOTICE, () => '')
+  // 保存できていない知らせは残す (開き直しても消えない)
+  await update($, NOTICE, n => (STORE_NOTES.includes(n) ? n : ''))
   await loadCommands($).catch(() => {})
   await $.ui.open({ id: PANE, title: TITLE })
   return { text: '通知の受け箱を開きました。' }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  // ステータス行も残すか (既定はオフ。live-commentary のように 1 ターンに何十回も出す mod で埋まるので、トーストだけ残す)
+  const keepStatus = options.keepStatus === true
   followTheme(on)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await rememberVersion($).catch(() => {})
     const got = await $.command.register({ name: 'inbox', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'inbox'
     if (!ownsMain) await $.command.register({ name: 'toast-inbox', description: DESCRIPTION }).catch(() => {})
     await readTheme($)
-    const items = asItems(await $.store.get('items').catch(() => undefined))
-    if (items) await update($, ITEMS, () => items)
+    const items = await readKey($, 'items', asItems, [])
+    if (items) await update($, ITEMS, () => items.slice(-KEEP))
+    else await update($, NOTICE, () => BROKEN)
     const readAt = asReadAt(await $.store.get('readAt').catch(() => undefined))
     if (readAt !== undefined) await update($, READ_AT, () => readAt)
     await loadCommands($).catch(() => {})
@@ -143,6 +178,7 @@ export const register: Register = on => {
 
   on('ui.status', ($, e, next) => {
     const shown = next(e)
+    if (!keepStatus) return shown
     const name = next.origin.plugin
     if (e.text === undefined) lastStatus.delete(name)
     else if (lastStatus.get(name) !== e.text) {
@@ -153,7 +189,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'inbox' }, ($, e, next) => (ownsMain ? openPane($) : next(e))).catch(($, e, next) => next(e))
-  on('command.run', { command: 'toast-inbox' }, openPane)
+  // /inbox を持てた時は /toast-inbox を登録していないので、その名前の持ち主に回す
+  on('command.run', { command: 'toast-inbox' }, ($, e, next) => (ownsMain ? next(e) : openPane($))).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = $.ui.resolve(e)
@@ -202,7 +239,7 @@ export const register: Register = on => {
             <Button key="clear" dimColor={!confirm} label={confirm ? 'もう一度押すと空にします' : '空にする'} onPress={() => pressClear($)} />
           </Box>
         )}
-        {items.length === 0 && <Text dimColor>まだ通知はありません。ほかの mod がトーストやステータス行を出すと、ここに残ります</Text>}
+        {items.length === 0 && <Text dimColor>{`まだ通知はありません。ほかの mod が${keepStatus ? 'トーストやステータス行' : 'トースト'}を出すと、ここに残ります`}</Text>}
         {notice !== '' && (
           <Text key="notice" dimColor>
             {notice}

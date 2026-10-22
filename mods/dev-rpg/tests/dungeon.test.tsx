@@ -136,12 +136,104 @@ test('store: 古い形は入口にいる。壊れた潜りは捨てる。2 つ�
   expect(mergeSaved(store, base, { ...base, xp: 3 })).toMatchObject({ deepest: 9, delve: { floor: 9 } })
   // こちらで帰った (潜りを変えた) なら、こちらが勝つ。一番深い階は大きい方
   expect(mergeSaved(store, base, { ...base, deepest: 6, delve: null })).toMatchObject({ deepest: 9, delve: null })
+  // こちらが帰っても、別のセッションが新しく入った潜りは消さない
+  const other: RpgSaved = { ...base, delve: { ...d, startedAt: NOW + 5, floor: 1 } }
+  expect(mergeSaved(other, base, { ...base, delve: null }).delve).toMatchObject({ startedAt: NOW + 5 })
   expect(toSaved({ ...heroAt(3), delve: d }).delve).toEqual(d)
   // 知らない欄: 同じ潜りなら中の欄も残す。新しく潜り直したら残さない
   const raw = { ...base, delve: { ...d, futureLamp: 2 } }
   expect(withUnknown(raw, base).delve).toEqual({ ...d, futureLamp: 2 } as never)
   expect(withUnknown(raw, { ...base, delve: { ...d, startedAt: NOW + 1 } }).delve).toEqual({ ...d, startedAt: NOW + 1 })
   expect(withUnknown(raw, { ...base, delve: null }).delve).toBeNull()
+})
+
+// 監査の再現 (audit/store/t1.mjs) をそのまま。2 つのセッションが同じ潜りを持っている時
+test('2 つのセッションが同じ潜りを持っていても、袋は 1 回分しか持ち帰れない (終わった潜りは書き戻さない)', () => {
+  const delve: RpgDelve = { startedAt: 1, floor: 5, step: 3, hp: 80, mp: 80, loot: 100, cleared: 4, seed: 7, last: null }
+  let store: RpgSaved = { ...INITIAL_SAVED, xp: 1000, delve }
+  let A = startSession(store, 0)
+  let B = startSession(store, 0)
+  const save = (h: RpgHero): RpgHero => {
+    const w = mergeSaved(store, h.synced, toSaved(h))
+    store = w
+    return { ...h, ...w, synced: w }
+  }
+  A = save(A)
+  B = save(B)
+  A = save(leaveDelve(A))
+  expect(store).toMatchObject({ xp: 1100, delve: null, doneDelves: [{ id: 1, xp: 100 }] })
+  // B が 1 歩進めて保存しても、終わった潜りは書き戻さず、B も入口に戻る
+  B = save({ ...B, delve: { ...B.delve!, step: B.delve!.step + 1 } })
+  expect(store).toMatchObject({ xp: 1100, delve: null })
+  expect(B.delve).toBeNull()
+  A = save(A)
+  expect(A.delve).toBeNull()
+  A = save(leaveDelve(A))
+  expect(store.xp).toBe(1100)
+  B = save(leaveDelve(B))
+  expect(store.xp).toBe(1100)
+
+  // B が保存する前に (同じ潜りを持ったまま) 帰っても、2 度目の持ち帰りは引く
+  store = { ...INITIAL_SAVED, xp: 1000, delve }
+  A = startSession(store, 0)
+  B = startSession(store, 0)
+  A = save(leaveDelve(A))
+  B = save(leaveDelve(B))
+  expect(store).toMatchObject({ xp: 1100, delve: null })
+  expect(B.xp).toBe(1100)
+  expect(store.doneDelves).toEqual([{ id: 1, xp: 100 }])
+
+  // 力尽きた時の持ち帰りも同じ。A が先に新しい潜りに入っていれば、B の古い潜りでなくそちらが残る
+  store = { ...INITIAL_SAVED, xp: 1000, delve: { ...delve, step: DELVE.steps - 1, floor: 999 } }
+  A = startSession(store, 0)
+  B = startSession(store, 0)
+  const lost = stepDelve(A, A)
+  expect(lost.event?.kind).toBe('lost')
+  A = save(enterDelve(lost.hero, 50, 1))
+  expect(store.xp).toBe(1050)
+  B = save(stepDelve(B, B).hero)
+  expect(store.xp).toBe(1050)
+  expect(store.delve?.startedAt).toBe(50)
+  expect(B.delve?.startedAt).toBe(50)
+
+  // 終わった潜りの印は 20 件まで。古い物から落ちる
+  let many: RpgSaved = INITIAL_SAVED
+  for (let i = 1; i <= 25; i++) many = mergeSaved(many, many, toSaved(leaveDelve({ ...startSession(many, 0), delve: { ...delve, startedAt: i } })))
+  expect(many.doneDelves.map(d => d.id)).toEqual(Array.from({ length: 20 }, (_, i) => i + 6))
+  expect(fromSaved({ doneDelves: [{ id: 3, xp: 9 }, 'x', { id: 'y', xp: 1 }, null] }).doneDelves).toEqual([{ id: 3, xp: 9 }])
+  // 印の中の知らない欄も残す
+  const raw = { ...INITIAL_SAVED, doneDelves: [{ id: 3, xp: 9, futureNote: 'n' }] }
+  expect(withUnknown(raw, fromSaved(raw)).doneDelves).toEqual([{ id: 3, xp: 9, futureNote: 'n' }] as never)
+})
+
+// 監査の再現 (t1.mjs の後半)。やり直し・控えから戻すは世代を上げ、別のセッションはその差分を足さない
+test('別のセッションがやり直した後に保存しても、実績・スキル・ボス・最深階を戻さない', () => {
+  const full: RpgSaved = { ...INITIAL_SAVED, xp: 50000, achievements: { 'first-bash': 1, 'turns-100': 2 }, learned: { slash: 3 }, defeated: { loop: 4 }, deepest: 30 }
+  let Bs = startSession(full, 0)
+  const fresh = startSession({ ...INITIAL_SAVED, epoch: 1 }, 0)
+  const st2 = toSaved(fresh) // A がやり直した
+  Bs = { ...Bs, xp: Bs.xp + 10 } // B が 1 ターン
+  const w = mergeSaved(st2, Bs.synced, toSaved(Bs))
+  expect(w).toEqual(st2)
+  expect(w).toMatchObject({ xp: 0, achievements: {}, learned: {}, defeated: {}, deepest: 0, epoch: 1 })
+  // 世代が同じなら今までどおり差分を足す
+  expect(mergeSaved(st2, st2, { ...st2, xp: 10 }).xp).toBe(10)
+  expect(fromSaved({ epoch: 3 }).epoch).toBe(3)
+  expect(fromSaved({ epoch: 'x' }).epoch).toBe(0)
+})
+
+// 監査の再現 (t1.mjs の最後)。2 つのセッションで同じ SP を振った時
+test('2 つのセッションが同じ SP を使って、もらった分を超えたら、後から書いた方の使った分を取り消す', () => {
+  const base: RpgSaved = { ...INITIAL_SAVED, xp: 0, achievements: { 'first-bash': 1, 'first-edit': 1, 'recover-3': 1, 'day-50': 1 } }
+  expect(spOf(base).free).toBe(4)
+  let s3 = base
+  s3 = mergeSaved(s3, base, { ...base, alloc: { ...base.alloc, str: 4 } })
+  s3 = mergeSaved(s3, base, { ...base, alloc: { ...base.alloc, vit: 4 } })
+  expect(s3.alloc).toEqual({ str: 4, vit: 0, int: 0, agi: 0 })
+  expect(spOf(s3).used).toBeLessThanOrEqual(spOf(s3).earned)
+  // 振り直し (減る差分) は取り消さない
+  const spent = { ...base, alloc: { ...base.alloc, str: 4 } }
+  expect(mergeSaved(spent, spent, { ...spent, alloc: { ...spent.alloc, str: 0 } }).alloc.str).toBe(0)
 })
 
 test('SP は 10 階ごとに 2 入り、実績が 2 つ増えた', () => {
@@ -189,7 +281,7 @@ const boot = async ($: Engine, on: On, saved?: Partial<RpgSaved> & Record<string
     return { value: undefined }
   })
   await $.session.start({ cwd: '/tmp/demo', surface: 'vscode', isInteractive: true })
-  return { stored: () => m.get('hero') as RpgSaved & Record<string, unknown>, toasts }
+  return { stored: () => m.get('hero') as RpgSaved & Record<string, unknown>, put: (v: unknown) => m.set('hero', v), toasts }
 }
 
 let turnNo = 0
@@ -240,6 +332,22 @@ test('ダンジョンで力尽きるとトーストで知らせ、入口に戻�
   expect(stored().deepest).toBe(40)
   expect(toasts).toContain('ダンジョン 41 階で力尽きた。入口に戻った')
   expect(await ui.find({ type: 'Button', key: 'delve:enter' })).toBeDefined()
+})
+
+test('別の窓が先に帰った潜りから「帰る」を押しても、袋の経験値は 2 度入らない', async ($, on) => {
+  const delve = { startedAt: NOW - 1000, floor: 3, step: 1, hp: 90, mp: 90, loot: 100, cleared: 2, seed: 4, last: null }
+  const { stored, put } = await boot($, on, { ...INITIAL_SAVED, xp: 1000, delve })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'dungeon' })
+  // 別の窓が帰った (袋を持ち帰り、終えた印を残した)
+  const now = stored()
+  put({ ...now, xp: now.xp + 100, delve: null, doneDelves: [{ id: delve.startedAt, xp: 100 }] })
+  await ui.press({ key: 'delve:leave' })
+  expect(stored()).toMatchObject({ xp: now.xp + 100, delve: null, doneDelves: [{ id: delve.startedAt, xp: 100 }] })
+  // 画面の勇者も store に合わせて入口に戻る。もう一度ターンを終えても潜りは戻らない
+  expect(await ui.find({ type: 'Button', key: 'delve:enter' })).toBeDefined()
+  await turn($)
+  expect(stored()).toMatchObject({ xp: now.xp + 100 + 10, delve: null })
 })
 
 test('知らない欄 (新しい版が書いた物) は、潜っていても 1 ターン後も store に残る', async ($, on) => {
