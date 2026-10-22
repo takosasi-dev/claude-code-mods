@@ -168,7 +168,7 @@ export const register: Register = on => {
         )}
         {latest && <Text dimColor>{`${stamp(latest.at)} に詠みました`}</Text>}
         <Box flexDirection="row" flexWrap="wrap" gap={1}>
-          <Button key="auto" label={`自動で詠む: ${isAuto ? 'オン' : 'オフ'}`} onPress={() => void toggleAuto($)} />
+          <Button key="auto" dimColor label={`自動で詠む: ${isAuto ? 'オン' : 'オフ'}`} onPress={() => void toggleAuto($)} />
           {isBusy ? (
             <Text dimColor>詠んでいます</Text>
           ) : (

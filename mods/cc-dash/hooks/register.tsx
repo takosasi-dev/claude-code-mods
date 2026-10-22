@@ -223,7 +223,7 @@ export const register: Register = (on, options) => {
       <Box key="tabs" flexDirection="row" flexWrap="wrap" gap={1}>
         {TABS.map(([id, label]) => (
           <Button
-            key={`tab-${id}`}
+            key={`tab-${id}`} dimColor={tab !== id}
             label={label}
             variant={tab === id ? 'primary' : 'secondary'}
             onPress={async () => {
@@ -356,12 +356,12 @@ export const register: Register = (on, options) => {
                   {`${i + 1}. ${PANEL_LABEL[id]}${isHidden ? '  隠しています' : ''}`}
                 </Text>
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                  {i > 0 && <Button key={`up-${id}`} label="上へ" onPress={() => changeLayout($, l => move(l, id, -1))} />}
-                  {i < order.length - 1 && <Button key={`down-${id}`} label="下へ" onPress={() => changeLayout($, l => move(l, id, 1))} />}
+                  {i > 0 && <Button key={`up-${id}`} dimColor label="上へ" onPress={() => changeLayout($, l => move(l, id, -1))} />}
+                  {i < order.length - 1 && <Button key={`down-${id}`} dimColor label="下へ" onPress={() => changeLayout($, l => move(l, id, 1))} />}
                   {isHidden ? (
-                    <Button key={`show-${id}`} label="出す" onPress={() => changeLayout($, l => setShown(l, id, true))} />
+                    <Button key={`show-${id}`} dimColor label="出す" onPress={() => changeLayout($, l => setShown(l, id, true))} />
                   ) : (
-                    <Button key={`hide-${id}`} label="隠す" onPress={() => changeLayout($, l => setShown(l, id, false))} />
+                    <Button key={`hide-${id}`} dimColor label="隠す" onPress={() => changeLayout($, l => setShown(l, id, false))} />
                   )}
                 </Box>
               </Box>
@@ -377,7 +377,7 @@ export const register: Register = (on, options) => {
                 if (shownOf(await read($, layoutA)).includes('usage')) await refreshUsage($, file)
               }}
             />
-            <Button key="arrange-reset" label="初めの並びに戻す" onPress={() => changeLayout($, reset)} />
+            <Button key="arrange-reset" dimColor label="初めの並びに戻す" onPress={() => changeLayout($, reset)} />
           </Box>
         </Box>
       )
@@ -386,7 +386,7 @@ export const register: Register = (on, options) => {
       body = (
         <Box key="mine" flexDirection="column" gap={1}>
           {shown.length === 0 ? <Text dimColor>出す枠がありません。「並べ替える」で選んでください</Text> : await panels(shown)}
-          <Button key="arrange" label="並べ替える" onPress={() => update($, arrangingA, () => true)} />
+          <Button key="arrange" dimColor label="並べ替える" onPress={() => update($, arrangingA, () => true)} />
         </Box>
       )
     }

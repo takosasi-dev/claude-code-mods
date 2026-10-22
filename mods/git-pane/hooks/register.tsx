@@ -154,8 +154,8 @@ export const register: Register = on => {
         )}
         <Box flexDirection="column">
           <Button key="reload" label="再読込" variant="primary" onPress={() => void reload($)} />
-          <Button key="review" label="差分をレビューして" onPress={() => void fill($, REVIEW)} />
-          <Button key="commit-msg" label="コミットメッセージを考えて" onPress={() => void fill($, COMMIT_MSG)} />
+          <Button key="review" dimColor label="差分をレビューして" onPress={() => void fill($, REVIEW)} />
+          <Button key="commit-msg" dimColor label="コミットメッセージを考えて" onPress={() => void fill($, COMMIT_MSG)} />
         </Box>
         {note !== '' && <Text dimColor>{note}</Text>}
         {snap.kind === 'repo' && <Text dimColor>{`読込 ${clockLabel(snap.loadedAt)}`}</Text>}

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1] - 2026-10-22
+
+### Changed
+
+- test-runner 0.4.0: 操作の欄を色枠のカードにした。枠と見出しの色が状態で変わり(落ちたら赤・通ったら緑・走っている間は青・まだなら灰)、見出しに件数、その下にコマンドとかかった時間。落ちている時は「この失敗を直して」を主にし、走らせ直しは「もう一度走らせる」の脇のボタンにした
+- ボタンを「主と脇」にそろえた: 主の操作のボタンは 1 つにして、ほかは `dimColor`(VS Code では枠だけの控えめなボタン)にした。タブ・絞り込み・オン/オフのように選ぶボタンは、選んでいる物だけをふつうに描く。agent-watch 0.2.1・aqua-pet 0.4.1・canvas-pane 0.2.1・cc-dash 0.3.1・code-omikuji 0.3.1・done-chime 0.2.1・edit-log 0.2.1・fail-log 0.1.1・file-map 0.1.1・focus-timer 0.2.2・git-pane 0.2.1・live-commentary 0.2.1・mod-hub 0.5.3・port-watch 0.2.2・project-board 0.2.1・prompt-book 0.2.1・release-draft 0.1.1・rule-switch 0.2.2・session-recap 0.2.1・session-timeline 0.1.1・ship-guard 0.2.1・spec-board 0.2.1・toast-inbox 0.2.1・todo-board 0.3.1・token-meter 0.2.1・turn-gacha 0.3.2・turn-haiku 0.3.1・usage-history 0.1.2・work-bar 0.2.1
+- docs/mod-guide.md: VS Code でボタンと Box の見た目のうち効く物・効かない物の表と、ボタン周りの 3 つの形(主と脇・色枠のカード・SVG の絵 + ボタン)を足した
+
 ## [0.9.0] - 2026-10-22
 
 ### Added

@@ -236,7 +236,7 @@ export const register: Register = on => {
         ) : null}
         <Box key="detail-actions" flexDirection="row" gap={1}>
           <Button key="summarize-upto" label="この時点までを要約" onPress={() => summarize($, sel)} />
-          <Button key="detail-close" label="閉じる" onPress={() => update($, selectedA, () => null)} />
+          <Button key="detail-close" dimColor label="閉じる" onPress={() => update($, selectedA, () => null)} />
         </Box>
       </Box>
     )

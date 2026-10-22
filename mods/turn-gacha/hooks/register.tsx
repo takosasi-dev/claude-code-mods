@@ -234,13 +234,13 @@ export const register: Register = on => {
         {body}
         <Box key="actions" flexDirection="column">
           <Button
-            key="pull"
+            key="pull" dimColor={left <= 0}
             label={left > 0 ? `もう一回引く(今日あと ${left} 回)` : '今日の手動はおしまい'}
             variant={left > 0 ? 'primary' : 'secondary'}
             onPress={() => void draw($, { isClean: false, isManual: true })}
           />
           <Button
-            key="book"
+            key="book" dimColor
             label={view === 'book' ? 'カードに戻る' : '図鑑'}
             onPress={() => void update($, VIEW, v => (v === 'book' ? 'card' : 'book'))}
           />

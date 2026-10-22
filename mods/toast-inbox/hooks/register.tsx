@@ -198,8 +198,8 @@ export const register: Register = on => {
         )}
         {items.length > 0 && (
           <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-            <Button key="mark-read" label="全部既読にする" variant={unread > 0 ? 'primary' : undefined} onPress={() => markRead($)} />
-            <Button key="clear" label={confirm ? 'もう一度押すと空にします' : '空にする'} onPress={() => pressClear($)} />
+            <Button key="mark-read" dimColor={unread === 0} label="全部既読にする" variant={unread > 0 ? 'primary' : undefined} onPress={() => markRead($)} />
+            <Button key="clear" dimColor={!confirm} label={confirm ? 'もう一度押すと空にします' : '空にする'} onPress={() => pressClear($)} />
           </Box>
         )}
         {items.length === 0 && <Text dimColor>まだ通知はありません。ほかの mod がトーストやステータス行を出すと、ここに残ります</Text>}

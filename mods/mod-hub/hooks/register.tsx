@@ -140,7 +140,7 @@ export const register: Register = on => {
               {`/${c.name}`} <Text dimColor>{short(c.description, 22)}</Text>
             </Button>
           ))}
-          <Button key={`pin:${l.name}`} onPress={() => void setPin($, l.name, !isPinned)}>
+          <Button key={`pin:${l.name}`} dimColor onPress={() => void setPin($, l.name, !isPinned)}>
             <Text dimColor>{isPinned ? '外す' : '固定'}</Text>
           </Button>
         </Box>
@@ -179,7 +179,7 @@ export const register: Register = on => {
           />
         )}
         {all.length > 0 && (
-          <Button key="sort" onPress={() => void toggleSort($)}>
+          <Button key="sort" dimColor onPress={() => void toggleSort($)}>
             <Text>{SORT_LABEL[sort]}</Text> <Text dimColor>押して切り替え</Text>
           </Button>
         )}

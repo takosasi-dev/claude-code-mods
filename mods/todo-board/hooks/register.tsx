@@ -161,9 +161,9 @@ export const register: Register = on => {
       list = (
         <Box key="list" flexDirection="column" gap={1}>
           <Box key="filters" flexDirection="row" flexWrap="wrap" columnGap={1}>
-            <Button key="filter-ALL" label={`全部 ${snap.total}`} variant={filter === 'ALL' ? 'primary' : undefined} onPress={setFilter('ALL')} />
+            <Button key="filter-ALL" dimColor={filter !== 'ALL'} label={`全部 ${snap.total}`} variant={filter === 'ALL' ? 'primary' : undefined} onPress={setFilter('ALL')} />
             {KINDS.map(k => (
-              <Button key={`filter-${k}`} label={`${k} ${snap.counts[k]}`} variant={filter === k ? 'primary' : undefined} onPress={setFilter(k)} />
+              <Button key={`filter-${k}`} dimColor={filter !== k} label={`${k} ${snap.counts[k]}`} variant={filter === k ? 'primary' : undefined} onPress={setFilter(k)} />
             ))}
           </Box>
           {open ? (
@@ -171,8 +171,8 @@ export const register: Register = on => {
               <Text bold color={kindColor(open.kind)}>{`${open.kind}  ${loc(open)}`}</Text>
               <Text>{open.text}</Text>
               <Button key="fix" label={`この ${open.kind} を片付けて`} variant="primary" onPress={() => void fill($, fixPrompt(open))} />
-              <Button key="cause" label={`この ${open.kind} の原因を調べて`} onPress={() => void fill($, causePrompt(open))} />
-              <Button key="close" label="閉じる" onPress={() => void update($, SELECTED, () => '')} />
+              <Button key="cause" dimColor label={`この ${open.kind} の原因を調べて`} onPress={() => void fill($, causePrompt(open))} />
+              <Button key="close" dimColor label="閉じる" onPress={() => void update($, SELECTED, () => '')} />
             </Box>
           ) : null}
           <Box key="items" flexDirection="column">

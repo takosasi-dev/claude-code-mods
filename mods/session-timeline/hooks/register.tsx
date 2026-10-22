@@ -140,7 +140,7 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        {turns.length > 0 && <Button key="reset" label="記録を消す" onPress={() => void update($, TURNS, () => [])} />}
+        {turns.length > 0 && <Button key="reset" dimColor label="記録を消す" onPress={() => void update($, TURNS, () => [])} />}
       </Box>
     )
   })

@@ -130,10 +130,10 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
           {([7, 30] as const).map(n => (
-            <Button key={`range-${n}`} label={`${n} 日`} variant={range === n ? 'primary' : undefined} onPress={() => update($, RANGE, () => n)} />
+            <Button key={`range-${n}`} dimColor={range !== n} label={`${n} 日`} variant={range === n ? 'primary' : undefined} onPress={() => update($, RANGE, () => n)} />
           ))}
           <Button
-            key="metric"
+            key="metric" dimColor
             label={metric === 'turns' ? '出力トークンで見る' : 'ターン数で見る'}
             onPress={() => update($, METRIC, m => (m === 'turns' ? 'output' : 'turns'))}
           />

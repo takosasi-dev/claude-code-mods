@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { TestRunnerResult } from '../types'
-import { HISTORY, UNSET_HINT, claudeResult, countResults, failingLine, fixPrompt, isCommitCommand, isTestCommand, paneLines, paneSvg, splitCommand, statusOf, tailOf } from './runner'
+import { HISTORY, UNSET_HINT, cardOf, claudeResult,countResults, failingLine, fixPrompt, isCommitCommand, isTestCommand, paneLines, paneSvg, splitCommand, statusOf, tailOf } from './runner'
 import { followTheme, readTheme } from './style'
 
 const PANE = 'test-runner'
@@ -198,6 +198,7 @@ export const register: Register = (on, options) => {
     const lines = paneLines(run, history, cfg.command)
     const isRunning = run.kind === 'running'
     const failed = run.kind === 'done' && (run.result.status === 'fail' || run.result.status === 'timeout') ? run.result : undefined
+    const card = cardOf(run, cfg.command)
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -212,18 +213,29 @@ export const register: Register = (on, options) => {
             ))}
           </Box>
         )}
-        <Box flexDirection="column">
-          {isRunning ? (
-            <Button
-              key="stop"
-              label="止める"
-              // リロードで止め方を失っていたら (子はもう止まっている) 未実行に戻す
-              onPress={() => (stopActive ? stopActive('user') : void update($, RUN, () => ({ kind: 'idle' as const })))}
-            />
-          ) : (
-            <Button key="run" label="テストを走らせる" variant="primary" onPress={() => void runTests($).catch(() => {})} />
-          )}
-          {failed && <Button key="fix" label="この失敗を直して" onPress={() => void fixIt($)} />}
+        {/* 操作のカード: 状態の色の枠と見出し、主のボタン 1 つと脇のボタン */}
+        <Box key="card" flexDirection="column" borderStyle="round" borderColor={card.tone} paddingX={1} paddingY={1} gap="xs">
+          <Text bold color={card.tone}>
+            {card.title}
+          </Text>
+          <Text dimColor>{card.sub}</Text>
+          <Box key="card-buttons" flexDirection="row" flexWrap="wrap" gap="sm">
+            {isRunning ? (
+              <Button
+                key="stop"
+                label="止める"
+                // リロードで止め方を失っていたら (子はもう止まっている) 未実行に戻す
+                onPress={() => (stopActive ? stopActive('user') : void update($, RUN, () => ({ kind: 'idle' as const })))}
+              />
+            ) : failed ? (
+              [
+                <Button key="fix" label="この失敗を直して" variant="primary" onPress={() => void fixIt($)} />,
+                <Button key="run" label="もう一度走らせる" dimColor onPress={() => void runTests($).catch(() => {})} />,
+              ]
+            ) : (
+              <Button key="run" label="テストを走らせる" variant="primary" onPress={() => void runTests($).catch(() => {})} />
+            )}
+          </Box>
         </Box>
         {note !== '' && <Text dimColor>{note}</Text>}
         {run.kind === 'done' && run.result.tail !== '' && <Code source={run.result.tail} />}

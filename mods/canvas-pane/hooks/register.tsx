@@ -122,7 +122,7 @@ export const register: Register = on => {
         <Box key="actions" flexDirection="row" gap={1}>
           <Button key="prev" label="前へ" dimColor={isFirst} onPress={() => void move($, -1)} />
           <Button key="next" label="次へ" dimColor={isLast} onPress={() => void move($, 1)} />
-          <Button key="remove" label="消す" onPress={() => void remove($)} />
+          <Button key="remove" dimColor label="消す" onPress={() => void remove($)} />
         </Box>
       </Box>
     )

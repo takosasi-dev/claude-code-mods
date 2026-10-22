@@ -115,6 +115,24 @@ export function failingLine(run: TestRunnerRun) {
   return `テストが落ちたままです:${n} ${headFit(r.command, 48)} (/testrun で見る)`
 }
 
+/**
+ * 操作のカード (色枠の Box) の色・見出し・説明。色はテーマの名前で返す (明るいテーマにも付いていく)。
+ * VS Code では Button の色を変えられないので、状態の色はカードの枠と見出しで出す (docs/mod-guide.md の 1 節)
+ */
+export function cardOf(run: TestRunnerRun, command: string): { tone: string; title: string; sub: string } {
+  const what = command === '' ? 'testCommand が未設定です' : headFit(command, 40)
+  if (run.kind === 'idle') return { tone: 'inactive', title: 'まだ走らせていません', sub: what }
+  if (run.kind === 'running') return { tone: 'suggestion', title: '走っています', sub: headFit(run.command, 40) }
+  if (run.kind === 'error') return { tone: 'error', title: '起動できませんでした', sub: headFit(run.message, 40) }
+  const r = run.result
+  const by = r.source === 'claude' ? ' ・ Claude が実行' : ''
+  const sub = `${headFit(r.command, 30)} ・ ${seconds(r.ms)}${by}`
+  if (r.status === 'pass') return { tone: 'success', title: r.passed ? `通りました(${r.passed} 件)` : '通りました', sub }
+  if (r.status === 'fail') return { tone: 'error', title: r.failed ? `落ちています(${r.failed} 件)` : '落ちています', sub }
+  if (r.status === 'timeout') return { tone: 'error', title: '時間切れで止めました', sub }
+  return { tone: 'warning', title: '途中で止めました', sub }
+}
+
 /** 終わり方から状態を決める */
 export const statusOf = (exitCode: number | null, stoppedBy: 'user' | 'timeout' | undefined): TestRunnerStatus =>
   stoppedBy === 'user' ? 'stopped' : stoppedBy === 'timeout' ? 'timeout' : exitCode === 0 ? 'pass' : 'fail'

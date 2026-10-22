@@ -158,7 +158,7 @@ export const register: Register = on => {
 
     const ruleButton = (r: (typeof rules)[number]) => (
       <Button
-        key={`rule-${r.id}`}
+        key={`rule-${r.id}`} dimColor={!r.isOn}
         label={`${r.isOn ? '●' : '○'} ${r.text}`}
         variant={r.isOn ? 'primary' : 'secondary'}
         onPress={() => void toggle($, r.id, !r.isOn)}
@@ -183,7 +183,7 @@ export const register: Register = on => {
               <Box key={`row-${r.id}`} flexDirection="column">
                 {ruleButton(r)}
                 <Button
-                  key={`del-${r.id}`}
+                  key={`del-${r.id}`} dimColor={armed !== r.id}
                   label={armed === r.id ? '本当に消す(もう一度押す)' : '消す'}
                   onPress={() => void remove($, r.id)}
                 />

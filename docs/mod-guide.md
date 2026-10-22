@@ -27,6 +27,28 @@ API はまだ先行公開の段階で変わることがあります。最新の�
 
 - vscode ではキー操作(Button の `hotkey`)は当てにしないでください。操作はすべて Button / Select / Input にします。
 
+### ボタンと Box の見た目(VS Code)
+
+VS Code は Button を自前の部品で描くので、mod から変えられる所はわずかです(2026-10-22 に試し用の mod で 1 つずつ確かめた)。
+
+| 指定 | VS Code | 備考 |
+|---|---|---|
+| Button の `dimColor` | ○ | 枠だけの控えめなボタンになる。主と脇を分ける唯一の手 |
+| Button の `variant="primary"` / `"secondary"` | × | ふつうのボタンと同じ見た目。terminal では primary が強調色になるので付けておいてよい |
+| Button の `plain`・`hotkey` の数字 | × | 枠は付いたまま、数字も出ない |
+| Button の中の `<Text>` の色・大きさ | × | 色も大きさも変わらない |
+| Button の `hover` | × | |
+| Box の `borderStyle` / `borderColor` | ○ | 違いが出るのは round(角が丸い)かそれ以外(四角)かだけ。double・bold も細い 1 本線 |
+| Box の `hover`(枠・背景を変える) | × | |
+| ボタンの外の Text の `color` / `backgroundColor` | ○ | テーマの名前(`error` など)も 16 進も効く。背景は横いっぱいに広がる |
+| Text の `size` | × | 大きくならない。`bold` は効く |
+
+この結果から、ボタン周りは次の 3 つの形にそろえます。
+
+1. **主と脇**: 主の操作は普通の Button 1 つ(terminal 向けに `variant="primary"` も付ける)。ほかは `dimColor` にする。タブのように選ぶボタンは、選んでいる物を普通に、ほかを `dimColor` にする
+2. **色枠のカード**: 操作のまとまりは `borderStyle="round"`・`borderColor` の Box に入れ、`paddingX={1}`・`paddingY={1}` を付ける。見出しの Text は枠と同じ色の `bold`、説明は `dimColor`、その下に主と脇のボタンを横に並べる。色は `C`(`hooks/style.ts`)から取ると、明るいテーマにも付いていく
+3. **SVG の絵 + ボタン**: 状態の絵は Svg で描き、ボタンはその下に置く。Svg とボタンの列を `gap` のある Box に入れて、くっつけない
+
 ## 2. Svg の性質(VS Code)
 
 - Svg は `<img>` として読み込まれ、キャンバスにコマ送りで描かれます

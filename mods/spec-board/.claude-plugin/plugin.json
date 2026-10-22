@@ -1,6 +1,6 @@
 {
   "name": "spec-board",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/specs で SpecStatus の確認待ち・途中・おすすめの仕様書を件数のタイルと一覧でペインに出す (読むだけ)",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

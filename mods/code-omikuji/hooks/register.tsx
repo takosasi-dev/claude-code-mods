@@ -165,8 +165,8 @@ export const register: Register = on => {
         )}
         <Box flexDirection="column">
           <Button key="shake" label="もう一度振る" variant="primary" onPress={() => void shakeAgain($)} />
-          {play !== null && <Button key="back" label="本番の結果に戻す" onPress={() => void backToToday($)} />}
-          <Button key="fill" label="今日の運勢を入力欄へ" onPress={() => void fill($)} />
+          {play !== null && <Button key="back" dimColor label="本番の結果に戻す" onPress={() => void backToToday($)} />}
+          <Button key="fill" dimColor label="今日の運勢を入力欄へ" onPress={() => void fill($)} />
         </Box>
         {note !== '' && <Text dimColor>{note}</Text>}
       </Box>

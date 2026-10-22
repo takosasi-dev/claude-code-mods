@@ -1,6 +1,6 @@
 {
   "name": "project-board",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/projects で引き継ぎメモを一覧するプロジェクト横断ボードをペインに開く",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

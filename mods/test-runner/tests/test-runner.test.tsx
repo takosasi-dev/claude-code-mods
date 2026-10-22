@@ -146,6 +146,11 @@ for (const surface of SURFACES) {
       expect(await ui.find({ type: 'Text', text: /^直近 ■ / })).toBeDefined()
     }
     expect((await ui.find({ type: 'Code' }))?.text).toContain('Tests:       1 failed, 3 passed, 4 total')
+    // 操作のカード: 赤い枠と見出し、主は「この失敗を直して」、走らせ直しは脇 (dimColor)
+    expect((await ui.find({ key: 'card' }))?.props.borderColor).toBe('error')
+    expect((await ui.find({ type: 'Text', text: '落ちています(1 件)' }))?.props.color).toBe('error')
+    expect((await ui.find({ type: 'Button', key: 'run' }))?.props).toMatchObject({ label: 'もう一度走らせる', dimColor: true })
+    expect((await ui.find({ type: 'Button', key: 'fix' }))?.props.dimColor).toBeUndefined()
 
     await ui.press({ key: 'fix' })
     expect(filled).toHaveLength(1)

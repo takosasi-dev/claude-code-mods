@@ -142,7 +142,7 @@ export const register: Register = (on, options) => {
                 />,
               ]
             : presets.map((p, i) => <Button key={`preset-${i}`} label={p.label} onPress={() => fill(p.text)} />)}
-          <Button key="hide" label="隠す" onPress={hide} />
+          <Button key="hide" dimColor label="隠す" onPress={hide} />
         </Box>
       )
 

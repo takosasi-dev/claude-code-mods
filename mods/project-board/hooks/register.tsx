@@ -142,7 +142,7 @@ export const register: Register = (on, options) => {
 
       return (
         <Box flexDirection="column" gap={1}>
-          <Button key="back" label="戻る" onPress={() => void update($, DETAIL, () => null)} />
+          <Button key="back" dimColor label="戻る" onPress={() => void update($, DETAIL, () => null)} />
           {Svg ? (
             <Svg source={cardSvg(p, now)} alt={`${p.name}: ${p.lines.join(' / ')}`} />
           ) : (
@@ -199,7 +199,7 @@ export const register: Register = (on, options) => {
         )}
         <Box flexDirection="column">
           <Select key="sort" options={SORTS} value={sort} onSelect={v => void update($, SORT, () => v as ProjectBoardSort)} />
-          <Button key="reload" label="再読込" onPress={() => void load($, memoDir)} />
+          <Button key="reload" dimColor label="再読込" onPress={() => void load($, memoDir)} />
         </Box>
         <Input
           key="filter"

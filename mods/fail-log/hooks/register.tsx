@@ -138,10 +138,10 @@ export const register: Register = on => {
           (confirming ? (
             <Box key="confirm" flexDirection="row" gap={1}>
               <Button key="clear" label="もう一度押すと消します" variant="primary" onPress={() => void clear($)} />
-              <Button key="cancel" label="やめる" onPress={() => void update($, CONFIRMING, () => false)} />
+              <Button key="cancel" dimColor label="やめる" onPress={() => void update($, CONFIRMING, () => false)} />
             </Box>
           ) : (
-            <Button key="clear" label="記録を消す" onPress={() => void update($, CONFIRMING, () => true)} />
+            <Button key="clear" label="記録を消す" dimColor onPress={() => void update($, CONFIRMING, () => true)} />
           ))}
       </Box>
     )

@@ -1,6 +1,6 @@
 {
   "name": "file-map",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "/filemap で、このセッションで読んだ・書いたファイルをフォルダごとの四角(ツリーマップ)でペインに描く",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

@@ -203,8 +203,8 @@ export const register: Register = (on, options) => {
         {run === null && <Button key="start" label="開始" variant="primary" onPress={start} />}
         {run !== null && run.endsAt !== null && <Button key="pause" label="一時停止" onPress={pause} />}
         {run !== null && run.endsAt === null && <Button key="resume" label="再開" variant="primary" onPress={resume} />}
-        {run?.mode === 'break' && <Button key="skip" label="休憩をとばす" onPress={skip} />}
-        {run !== null && <Button key="stop" label="やめる" onPress={stop} />}
+        {run?.mode === 'break' && <Button key="skip" dimColor label="休憩をとばす" onPress={skip} />}
+        {run !== null && <Button key="stop" dimColor label="やめる" onPress={stop} />}
       </Box>
     )
 

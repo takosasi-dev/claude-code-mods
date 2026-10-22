@@ -105,8 +105,8 @@ export const register: Register = on => {
           </Box>
         )}
         <Box key="filters" flexDirection="row" gap={1}>
-          <Button key="filter-all" label="全部" variant={filter === 'all' ? 'primary' : undefined} onPress={setFilter('all')} />
-          <Button key="filter-written" label="書いた物だけ" variant={filter === 'written' ? 'primary' : undefined} onPress={setFilter('written')} />
+          <Button key="filter-all" label="全部" variant={filter === 'all' ? 'primary' : undefined} dimColor={filter !== 'all'} onPress={setFilter('all')} />
+          <Button key="filter-written" label="書いた物だけ" variant={filter === 'written' ? 'primary' : undefined} dimColor={filter !== 'written'} onPress={setFilter('written')} />
         </Box>
         {top.length > 0 && (
           <Box key="top" flexDirection="column">
@@ -118,7 +118,7 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        {files.length > 0 && <Button key="reset" label="記録を消す" onPress={() => void update($, FILES, () => [])} />}
+        {files.length > 0 && <Button key="reset" dimColor label="記録を消す" onPress={() => void update($, FILES, () => [])} />}
       </Box>
     )
   })

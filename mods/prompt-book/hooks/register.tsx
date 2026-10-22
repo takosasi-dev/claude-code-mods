@@ -214,7 +214,7 @@ export const register: Register = on => {
               <Button key={`use:${p.id}`} plain onPress={() => void use($, p)}>
                 {short(p.title, 14)} <Text dimColor>{`${p.uses}回${p.tags.length > 0 ? ` ${p.tags.join(',')}` : ''}`}</Text>
               </Button>
-              <Button key={`del:${p.id}`} label={armed === p.id ? '本当に消す' : '消す'} onPress={() => void remove($, p)} />
+              <Button key={`del:${p.id}`} dimColor={armed !== p.id} label={armed === p.id ? '本当に消す' : '消す'} onPress={() => void remove($, p)} />
             </Box>
           ))}
         </Box>
@@ -245,7 +245,7 @@ export const register: Register = on => {
             onSubmit={v => void setDraft($, 'tags', v)}
           />
           <Button key="save" label="保存" variant="primary" onPress={() => void (async () => save($, await read($, DRAFT)))()} />
-          <Button key="from-prompt" label="今の入力欄を保存" onPress={() => void saveFromPrompt($)} />
+          <Button key="from-prompt" dimColor label="今の入力欄を保存" onPress={() => void saveFromPrompt($)} />
         </Box>
       </Box>
     )

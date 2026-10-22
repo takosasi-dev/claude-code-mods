@@ -1,6 +1,6 @@
 {
   "name": "git-pane",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "/git で今の作業フォルダの git の様子(ブランチ・変更行数・直近コミット)をペインに SVG で表示する",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

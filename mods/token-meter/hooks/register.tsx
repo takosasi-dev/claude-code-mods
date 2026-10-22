@@ -99,7 +99,7 @@ export const register: Register = on => {
     const heaviest = await read($, heaviestA)
     const rate = hitRate(total)
     const rateText = rate === null ? '─' : `${Math.round(rate * 100)}%`
-    const resetButton = <Button key="reset" label="リセット" onPress={() => reset($)} />
+    const resetButton = <Button key="reset" dimColor label="リセット" onPress={() => reset($)} />
 
     // terminal の部品表にも Svg の名前はあるので、画面の種類でも分ける
     if (e.surface === 'terminal' || !('Svg' in t)) {

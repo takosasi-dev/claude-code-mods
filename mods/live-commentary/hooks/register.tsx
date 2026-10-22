@@ -179,7 +179,7 @@ export const register: Register = (on, options) => {
         )}
         <Box flexDirection="row" gap={1}>
           <Button key="toggle" label={isOn ? '実況オフ' : '実況オン'} variant="primary" onPress={() => void setOn($, !isOn)} />
-          <Button key="clear" label="ログを消す" onPress={() => void clearLog($)} />
+          <Button key="clear" dimColor label="ログを消す" onPress={() => void clearLog($)} />
         </Box>
         <Box key="log" flexDirection="column">
           <Text dimColor>{`実況ログ ${log.length} 行 (新しい順)`}</Text>

@@ -210,7 +210,7 @@ export const register: Register = (on, options) => {
             {detail.kind === 'ok' && <Code source={detail.text} />}
             {detail.kind === 'error' && <Text color="red">{`show が失敗しました: ${detail.message}`}</Text>}
             {detail.kind === 'error' && detail.head !== '' && <Code source={detail.head} />}
-            <Button key="close-detail" label="詳細を閉じる" onPress={() => void update($, DETAIL, () => ({ kind: 'none' as const }))} />
+            <Button key="close-detail" dimColor label="詳細を閉じる" onPress={() => void update($, DETAIL, () => ({ kind: 'none' as const }))} />
           </Box>
         )}
         {snap.kind === 'ok' && (

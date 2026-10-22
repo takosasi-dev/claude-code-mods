@@ -144,7 +144,7 @@ export const register: Register = (on, options) => {
         {input.isOff ? (
           <Button key="on" label="見張りを戻す" variant="primary" onPress={() => void update($, OFF, () => false)} />
         ) : (
-          <Button key="off" label="このセッションは見張らない" onPress={() => void update($, OFF, () => true)} />
+          <Button key="off" dimColor label="このセッションは見張らない" onPress={() => void update($, OFF, () => true)} />
         )}
         <Text dimColor>見るのは git push・gh release (create/upload/edit/delete)・gh repo create・npm/pnpm/yarn publish です。</Text>
         {cfg.isChecking ? <Text dimColor>git push の前は、送るコミットの作者のメールと、足した行の個人のメール・ユーザー名入りのパスも確かめます。</Text> : null}

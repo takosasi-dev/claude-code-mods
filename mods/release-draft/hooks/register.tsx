@@ -171,8 +171,8 @@ export const register: Register = on => {
         ) : null}
         <Box key="buttons" flexDirection="row" gap={1}>
           {report.kind === 'ready' ? <Button key="ask" label="これで CHANGELOG を書いて" variant="primary" onPress={() => void ask($)} /> : null}
-          <Button key="reload" label="読み直す" onPress={() => void load($)} />
-          {repo !== '' ? <Button key="here" label="セッションの場所で読む" onPress={() => void update($, REPO, () => '').then(() => load($))} /> : null}
+          <Button key="reload" dimColor={report.kind === 'ready'} label="読み直す" onPress={() => void load($)} />
+          {repo !== '' ? <Button key="here" dimColor label="セッションの場所で読む" onPress={() => void update($, REPO, () => '').then(() => load($))} /> : null}
         </Box>
         <Text dimColor>git は読むだけです。「これで CHANGELOG を書いて」は入力欄に入れるだけで、送信はしません。</Text>
       </Box>

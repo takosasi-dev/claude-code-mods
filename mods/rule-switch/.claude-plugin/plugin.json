@@ -1,6 +1,6 @@
 {
   "name": "rule-switch",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "/rules で約束ごと(日本語で答える・commit しない など)をボタンでオン/オフし、オンの物をシステムプロンプトの節にして入れる",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts"

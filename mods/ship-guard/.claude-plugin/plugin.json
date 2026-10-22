@@ -1,6 +1,6 @@
 {
   "name": "ship-guard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "git push・gh release・gh repo create・npm publish を Claude が打つ時、直前に AskUserQuestion で公開してよいと答えていなければ、その場で聞いて断られたら止める。git push の前は作者が noreply か・個人のメールやユーザー名入りのパスが入っていないかも確かめる。/guard で記録とオン/オフ",
   "author": { "name": "takosasi-dev" },
   "types": "./types/index.d.ts",

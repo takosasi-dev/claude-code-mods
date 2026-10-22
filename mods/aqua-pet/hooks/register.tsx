@@ -160,9 +160,9 @@ export const register: Register = on => {
     const buttons = (
       <Box flexDirection="row" flexWrap="wrap" gap={1}>
         <Button key="feed" label="えさをやる" variant="primary" onPress={() => void feed($)} />
-        <Button key="rename" label="名前" onPress={() => void update($, tank, x => ({ ...x, isNaming: !x.isNaming }))} />
-        <Button key="clean" label="掃除" onPress={() => void change($, x => ({ ...x, murk: 0 }))} />
-        <Button key="list" label={t.isListing ? '水槽' : '一覧'} onPress={() => void update($, tank, x => ({ ...x, isListing: !x.isListing }))} />
+        <Button key="rename" dimColor label="名前" onPress={() => void update($, tank, x => ({ ...x, isNaming: !x.isNaming }))} />
+        <Button key="clean" dimColor label="掃除" onPress={() => void change($, x => ({ ...x, murk: 0 }))} />
+        <Button key="list" dimColor label={t.isListing ? '水槽' : '一覧'} onPress={() => void update($, tank, x => ({ ...x, isListing: !x.isListing }))} />
       </Box>
     )
     const naming =

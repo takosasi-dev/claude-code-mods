@@ -99,7 +99,7 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1}>
         {e.surface !== 'terminal' && 'Svg' in t ? <t.Svg source={waveSvg(s)} alt={line} /> : <Text color={s.isOn ? 'green' : undefined}>{line}</Text>}
         <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-          <Button key="toggle" label={s.isOn ? 'オフにする' : 'オンにする'} onPress={async () => change($, 'isOn', !(await read($, SETTINGS)).isOn)} />
+          <Button key="toggle" dimColor label={s.isOn ? 'オフにする' : 'オンにする'} onPress={async () => change($, 'isOn', !(await read($, SETTINGS)).isOn)} />
           <Button key="try" label="試しに鳴らす" variant="primary" onPress={async () => play($, await read($, SETTINGS))} />
         </Box>
         {'Select' in t && (

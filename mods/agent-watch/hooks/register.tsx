@@ -159,8 +159,8 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1}>
         <Box key="top" flexDirection="column">
-          <Button key="main" label="メインに戻る" variant={viewingId !== undefined ? 'primary' : 'secondary'} onPress={() => view($, {})} />
-          <Button key="hide" label={hideDone ? '終わった物も出す' : '終わった物を隠す'} onPress={() => update($, HIDE, v => !v)} />
+          <Button key="main" label="メインに戻る" variant={viewingId !== undefined ? 'primary' : 'secondary'} dimColor={viewingId === undefined} onPress={() => view($, {})} />
+          <Button key="hide" dimColor label={hideDone ? '終わった物も出す' : '終わった物を隠す'} onPress={() => update($, HIDE, v => !v)} />
         </Box>
         {Svg ? (
           <Svg
@@ -187,7 +187,7 @@ export const register: Register = on => {
           <Box key="views" flexDirection="column">
             {shown.map(r => (
               <Button
-                key={`view-${r.id}`}
+                key={`view-${r.id}`} dimColor={r.id !== viewingId}
                 label={`${r.id === viewingId ? '表示中' : '会話を見る'}: ${cut(titleOf(r), 16)} ${cut(r.description, 12)}`.trim()}
                 onPress={() => view($, { agentId: r.id })}
               />

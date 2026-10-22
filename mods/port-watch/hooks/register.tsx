@@ -159,7 +159,7 @@ export const register: Register = on => {
         {list.kind === 'idle' && <Text dimColor>読み込み中…</Text>}
         <Box key="top" flexDirection="row" gap={1}>
           <Button key="reload" label="読み直す" onPress={() => void refresh($).catch(() => {})} />
-          <Button key="narrow" label={isNarrow ? '全部出す' : '開発用だけ'} onPress={() => void update($, NARROW, v => !v)} />
+          <Button key="narrow" dimColor label={isNarrow ? '全部出す' : '開発用だけ'} onPress={() => void update($, NARROW, v => !v)} />
         </Box>
         {list.kind === 'ok' && shown.length === 0 && (
           <Text dimColor>{hidden > 0 ? `開発用の待ち受けはありません (ほか ${hidden} 本)` : '待ち受けているポートはありません'}</Text>
@@ -178,7 +178,7 @@ export const register: Register = on => {
                 <Button key={`copy-${id}`} label="URL を写す" onPress={press => void copyUrl($, r, press.surface)} />
                 {canStop(r) && (
                   <Button
-                    key={`stop-${id}`}
+                    key={`stop-${id}`} dimColor={!isArmed}
                     label={isArmed ? 'もう一度押すと止めます' : '止める'}
                     variant={isArmed ? 'primary' : undefined}
                     onPress={() => void pressStop($, r).catch(() => {})}

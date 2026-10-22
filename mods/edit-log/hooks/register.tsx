@@ -188,7 +188,7 @@ export const register: Register = on => {
               ))}
             </Box>
           )}
-          {entries.length > 0 && <Button key="reset" label="リセット" onPress={() => void reset($)} />}
+          {entries.length > 0 && <Button key="reset" dimColor label="リセット" onPress={() => void reset($)} />}
           {noteText}
         </Box>
       )
@@ -217,8 +217,8 @@ export const register: Register = on => {
         {diff}
         <Box key="actions" flexDirection="column">
           <Button key="review" label="このファイルをレビューして" variant="primary" onPress={() => void fill($, reviewText(selected))} />
-          <Button key="explain" label="この変更を説明して" onPress={() => void fill($, explainText(selected))} />
-          <Button key="back" label="一覧に戻る" onPress={() => void closeDetail($)} />
+          <Button key="explain" dimColor label="この変更を説明して" onPress={() => void fill($, explainText(selected))} />
+          <Button key="back" dimColor label="一覧に戻る" onPress={() => void closeDetail($)} />
         </Box>
         {noteText}
       </Box>
