@@ -36,6 +36,11 @@ export type AquaFish = {
   name?: string
 }
 
+/** この版の知っているかざり。turn-gacha で持っているカードのレア度と種類の数で手に入る */
+export type KnownDecoId = 'kusa' | 'ishi' | 'ryuboku' | 'kai' | 'tsubo' | 'shiro' | 'takara' | 'chinbotsu'
+/** かざりの id。'' は空き。新しい版が足したかざり (この版の知らない文字列) も消さずに持ち回る */
+export type DecoId = KnownDecoId | (string & {})
+
 export type AquaTank = {
   // $.store に残す値
   turns: number
@@ -48,7 +53,15 @@ export type AquaTank = {
   name: string
   /** 魚。空なら turns から決まる数を描く (古い記録・見本の絵) */
   fish: AquaFish[]
+  /** 底の置き場 (5 つ、左から)。'' は空き。新しい版が置き場を増やした分も消さずに持ち回る */
+  deco: DecoId[]
   // セッションの間だけの値
+  /** かざりを選ぶ欄を出している */
+  isDecorating: boolean
+  /** かざりの欄で選んでいる置き場 (0 から) */
+  pickSlot: number
+  /** 控えから戻す欄。null は閉じている。days は控えのある日 (新しい順)、pick は選んだ日 ('' はまだ) */
+  restore: { days: string[]; pick: string } | null
   isRunning: boolean
   lastActiveAt: number
   upsetUntil: number
@@ -62,5 +75,14 @@ export type AquaTank = {
 declare module 'claude-code' {
   interface PluginState {
     'aqua-pet': { tank: AquaTank }
+    /**
+     * turn-gacha が他の mod に見せている物のうち、aqua-pet が読む分だけ (書くのは turn-gacha)。
+     * turn-gacha の types/index.d.ts の写し。plugin.json の dependencies は使わない (無くても水槽は動く)。
+     * 入っていない時は undefined なので、読んだ値は tank.ts の gachaCounts で確かめる
+     */
+    'turn-gacha': {
+      save: { book: Record<string, { count: number; firstAt: number }> }
+      cards: { id: string; rarity: 'N' | 'R' | 'SR' | 'SSR'; slot: string; name: string }[]
+    }
   }
 }

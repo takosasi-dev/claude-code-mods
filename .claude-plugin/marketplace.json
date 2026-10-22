@@ -48,6 +48,8 @@
     { "name": "danger-frame", "source": "./mods/danger-frame", "description": "危ないコマンドの行を赤枠で囲む" },
     { "name": "long-turn-toast", "source": "./mods/long-turn-toast", "description": "長くかかったターンをトーストで知らせる" },
     { "name": "usage-pane", "source": "./mods/usage-pane", "description": "/usage-pane で使用量の JSON をバーで表示" },
-    { "name": "devlog-pane", "source": "./mods/devlog-pane", "description": "/devlog で今日の開発ログを表示" }
+    { "name": "devlog-pane", "source": "./mods/devlog-pane", "description": "/devlog で今日の開発ログを表示" },
+    { "name": "run-guard", "source": "./mods/run-guard", "description": "確かめのための窓の起動・音・隔離なしの claude -p を、実行の前に止めて直し方を返す" },
+    { "name": "week-card", "source": "./mods/week-card", "description": "/week で 1 週間の使い方と、お題・ガチャ・冒険の書・水槽の増え方を 1 枚のカードにする" }
   ]
 }

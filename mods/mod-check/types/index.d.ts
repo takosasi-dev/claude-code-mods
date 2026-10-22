@@ -49,10 +49,18 @@ export type CheckReport = {
   at: number
   env: CheckEnv
   rows: CheckRow[]
+  /** 調べた時に版が変わっていた mod。無ければ空か無し */
+  updated?: ModUpdate[]
 }
 
 /** plugin.register で見えた mod(mod-check より後に読み込まれた物だけ) */
 export type CheckSeen = { name: string; version: string; refused: string }
+
+/** セッションの途中で plugin.json の版が変わった mod(このセッションは古い版のまま動いている) */
+export type ModUpdate = { name: string; from: string; to: string }
+
+/** 点検表の 1 項目の印。good はよい、bad はだめ、todo はまだ(store には残さない) */
+export type CheckMark = 'good' | 'bad' | 'todo'
 
 declare module 'claude-code' {
   interface PluginState {
@@ -63,6 +71,14 @@ declare module 'claude-code' {
       seen: CheckSeen[]
       /** session.start で受け取った画面の種類 */
       surface: string
+      /** 版が変わった mod(帯・ペイン・貼る文に出す) */
+      updated: ModUpdate[]
+      /** ペインのタブ。check は点検、list は点検表 */
+      tab: 'check' | 'list'
+      /** 点検表の印(id ごと。まだの物は無い) */
+      marks: Record<string, CheckMark>
+      /** 「点検の結果を貼る文」で出した文。まだなら空 */
+      listText: string
     }
     // ここから下は、書かれたかどうか(version)だけを見る他の mod の state
     'agent-watch': { agents: unknown; now: unknown; hideDone: unknown; note: unknown }
@@ -73,7 +89,7 @@ declare module 'claude-code' {
     'code-omikuji': { today: unknown; play: unknown; plays: unknown; history: unknown; mode: unknown; isOpened: unknown; note: unknown }
     'compact-cue': { context: unknown; phase: unknown; lastBreak: unknown; told: unknown }
     'daily-quest': { today: unknown; streak: unknown; totalDone: unknown; saved: unknown; pending: unknown; turnErrors: unknown; note: unknown }
-    'dev-rpg': { hero: unknown; tab: unknown; isConfirmingReset: unknown; news: unknown; battle: unknown }
+    'dev-rpg': { hero: unknown; tab: unknown; isConfirmingReset: unknown; news: unknown; battle: unknown; restore: unknown }
     'devlog-pane': { log: unknown }
     'done-chime': { settings: unknown; note: unknown }
     'edit-log': { entries: unknown; selected: unknown; detail: unknown; note: unknown }
@@ -91,7 +107,8 @@ declare module 'claude-code' {
     'prompt-book': { items: unknown; draft: unknown; tag: unknown; sort: unknown; armed: unknown; notice: unknown; isFlashing: unknown }
     'release-draft': { report: unknown; repo: unknown }
     'rule-switch': { save: unknown; armed: unknown; note: unknown }
-    'rule-watch': { misses: unknown; counts: unknown; history: unknown; asks: unknown; memoPending: unknown }
+    'rule-watch': { misses: unknown; counts: unknown; history: unknown; asks: unknown; memoPending: unknown; log: unknown }
+    'run-guard': { saved: unknown }
     'session-recap': { turns: unknown; startedAt: unknown; pending: unknown; selected: unknown; summary: unknown; notice: unknown; command: unknown }
     'session-timeline': { turns: unknown }
     'ship-guard': { isOff: unknown; log: unknown; permit: unknown; turn: unknown }
@@ -103,9 +120,10 @@ declare module 'claude-code' {
     'trophy-shelf': { firstAt: unknown }
     'turn-gacha': { save: unknown; cards: unknown; view: unknown; note: unknown; turnErrors: unknown }
     'turn-haiku': { poems: unknown; isAuto: unknown; isComposing: unknown; lastTurn: unknown; note: unknown }
-    'usage-history': { days: unknown; heat: unknown; range: unknown; metric: unknown }
+    'usage-history': { days: unknown; heat: unknown; week: unknown; range: unknown; metric: unknown; restore: unknown; note: unknown }
     'usage-pane': { usage: unknown }
     'wait-games': { game: unknown; g2048: unknown; mines: unknown; flagMode: unknown; fifteen: unknown; lights: unknown; sudoku: unknown; memory: unknown; stats: unknown; isPlaying: unknown; turnNote: unknown; note: unknown }
+    'week-card': { snaps: unknown }
     'work-bar': { run: unknown; last: unknown; isHidden: unknown; pick: unknown }
   }
 }

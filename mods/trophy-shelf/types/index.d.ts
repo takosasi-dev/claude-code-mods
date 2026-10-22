@@ -7,7 +7,7 @@ export type ShelfMod = 'dev-rpg' | 'turn-gacha' | 'aqua-pet' | 'wait-games' | 'd
 
 /** 他の mod の state から作る、トロフィーの判定に使う数。入っていない mod は undefined */
 export type ShelfSnapshot = {
-  rpg?: { level: number; achievements: number; wins: number; bosses: number }
+  rpg?: { level: number; achievements: number; wins: number; bosses: number; deepest: number }
   gacha?: { owned: number; total: number; ssr: number; pulls: number }
   aqua?: { kinds: number; fish: number; days: number }
   games?: { kinds: number; best2048: number; wins2048: number; wins: number }
@@ -25,7 +25,7 @@ declare module 'claude-code' {
     }
     /** ここから下は他の mod の state の、trophy-shelf が読む欄だけ(書くのは各 mod) */
     'dev-rpg': {
-      hero: { xp: number; achievements: Record<string, number>; wins: number; defeated: Record<string, number> }
+      hero: { xp: number; achievements: Record<string, number>; wins: number; defeated: Record<string, number>; deepest?: number }
     }
     'turn-gacha': {
       save: { book: Record<string, { count: number; firstAt: number }>; total: number }

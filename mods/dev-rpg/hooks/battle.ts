@@ -102,7 +102,7 @@ export const BOSS_SPAWN = { chance: 0.05, every: 20, xp: 1.5 } as const
 // ---------------------------------------------------------------- 乱数 (種から決まる)
 
 /** mulberry32。同じ種なら同じ並び。戦いの種は 1 手ごとに進めて state に置く */
-function rngOf(seed: number) {
+export function rngOf(seed: number) {
   let t = seed >>> 0
   const next = () => {
     t = (t + 0x6d2b79f5) >>> 0
@@ -162,7 +162,11 @@ export function startBattle(h: RpgHero, seed: number, isBoss: boolean, isSpawned
     const level = Math.max(1, L + [-2, -1, 0, 0, 1][Math.floor(r.next() * 5)]!)
     enemy = enemyOf(kind, level, false)
   }
-  const me = fighterOf(h)
+  return openBattle(fighterOf(h), enemy, r.seed(), isBoss ? `${enemy.name}が立ちはだかった!${isSpawned ? ' (経験値 1.5 倍)' : ''}` : `${enemy.name}があらわれた!`)
+}
+
+/** 戦いの始まりの形 (ダンジョンも使う) */
+export function openBattle(me: RpgFighter, enemy: RpgEnemy, seed: number, first: string): RpgBattle {
   return {
     enemy,
     me,
@@ -171,8 +175,8 @@ export function startBattle(h: RpgHero, seed: number, isBoss: boolean, isSpawned
     isExposed: false,
     isCharging: false,
     usedRollback: false,
-    seed: r.seed(),
-    log: [isBoss ? `${enemy.name}が立ちはだかった!${isSpawned ? ' (経験値 1.5 倍)' : ''}` : `${enemy.name}があらわれた!`],
+    seed,
+    log: [first],
     result: 'fight',
     gainedXp: 0,
     hitEnemy: 0,
@@ -477,7 +481,7 @@ const SHAPES: Record<Shape, string[]> = {
   ],
 }
 
-function monster(shape: string, color: string, x: number, y: number, px: number) {
+export function monster(shape: string, color: string, x: number, y: number, px: number) {
   const rows = SHAPES[shape as Shape] ?? SHAPES.slime
   const colors: Record<string, string> = { x: color, d: color, w: '#ffffff', e: '#0d1117', r: '#f85149' }
   let s = ''
@@ -638,7 +642,7 @@ export function growthSvg(h: RpgHero) {
   let s = win(8, 8, 364, 84)
   s += `<text x="24" y="34" font-size="15" font-weight="bold" fill="${K.text}">▶ 成長</text>`
   s += `<text x="358" y="40" font-size="26" font-weight="bold" font-family="${MONO}" fill="${sp.free > 0 ? K.yellow : K.offText}" text-anchor="end">${sp.free} SP</text>`
-  s += `<text x="24" y="60" font-size="12" fill="${K.weak}">レベル ${sp.fromLevel} + 実績 ${sp.fromAchievements} + 勝利 ${sp.fromWins} + ボス ${sp.fromBosses}</text>`
+  s += `<text x="24" y="60" font-size="12" fill="${K.weak}">レベル ${sp.fromLevel} + 実績 ${sp.fromAchievements} + 勝利 ${sp.fromWins} + ボス ${sp.fromBosses} + 深さ ${sp.fromDeep}</text>`
   s += `<text x="24" y="80" font-size="12" fill="${K.weak}">もらった ${sp.earned} / 使った ${sp.used}</text>`
 
   // ── 能力
@@ -680,7 +684,7 @@ export function growthLines(h: RpgHero): Line[] {
   const sp = st.sp
   return [
     { text: `SP ${sp.free} (もらった ${sp.earned} / 使った ${sp.used})`, isBold: true, color: sp.free > 0 ? 'yellow' : undefined },
-    { text: `内訳 レベル ${sp.fromLevel} + 実績 ${sp.fromAchievements} + 勝利 ${sp.fromWins} + ボス ${sp.fromBosses}`, isDim: true },
+    { text: `内訳 レベル ${sp.fromLevel} + 実績 ${sp.fromAchievements} + 勝利 ${sp.fromWins} + ボス ${sp.fromBosses} + 深さ ${sp.fromDeep}`, isDim: true },
     { text: STATS.map(k => `${STAT_LABEL[k]} ${h.alloc[k]}`).join('  ') },
     ...SKILLS.map((sk): Line => {
       const has = h.learned[sk.id] !== undefined

@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.10.0] - 2026-10-22
+
+### Added
+
+- run-guard 0.1.0(新しい mod、/runguard): Claude が確かめのために次のことをしようとした時に、実行の前に止めて直し方を返す
+  - 窓のあるアプリを起動する: `-WindowStyle Hidden` の無い Start-Process・start・Invoke-Item・explorer・code、`--headless` の無い godot / chrome / msedge / chromium / firefox、playwright の `--headed` / `headless: false`
+  - 音を鳴らす: [console]::Beep・SoundPlayer・SpeechSynthesizer・PlaySound・ffplay / afplay / aplay / paplay / say、`--no-audio` の無い mpv / vlc
+  - `claude -p` を隔離なしで走らせる: 同じコマンドの中に CLAUDE_CONFIG_DIR と ANTHROPIC_BASE_URL の両方が無い
+  - 設定: `mode` で 止める(既定)・聞く・伝えるだけ を選ぶ。`windowApps` に入れた名前は、いつも窓とみなす
+  - 文字列・コメント・ヒアドキュメントの中は数えない
+  - ペイン: 組ごとのオン/オフ・数・最近の記録
+- week-card 0.1.0(新しい mod、/week): 1 週間をまとめて 1 枚のカードにする
+  - 載せる物: 1 週間の使い方と、この 1 週間で増えた分(お題・ガチャの図鑑・冒険の書のレベルと一番深い階・水槽の魚)
+  - 「週報に貼る文を入力欄に入れる」で、Markdown を入力欄に入れる(送信はしない)
+- 記録の控え: 遊びの記録が消えた時に戻せるようにした
+  - 対象: aqua-pet 0.5.0・dev-rpg 0.6.0・turn-gacha 0.4.0・daily-quest 0.2.0・wait-games 0.3.0・usage-history 0.2.0
+  - 設定 `backupDir` を入れると、毎日 1 回、記録を知らない欄ごと 7 日分控える
+  - ペインの「控えから戻す」で日を選び、確かめてから戻す
+- 古い版で書かない: 記録を書く mod は、セッション中に新しい版が入ったと気づくと記録を書くのを止め、トーストで開き直しを頼む(共通の `rememberVersion` / `mayWrite`)
+- dev-rpg 0.6.0: /rpg に「ダンジョン」
+  - ターンごとに 1 歩進み、8 歩でその階の敵と自動で戦う。装備・SP・スキルが効く
+  - 10 階ごとに番人、5 階ごとに休み場があり、休み場から潜り直せる
+  - 勝った分は袋の経験値にたまり、「帰る」で持ち帰る。力尽きると半分だけ持ち帰る
+  - 一番深い階を記録し、10 階ごとに SP +2
+  - 実績「地下へ」「番人越え」
+- aqua-pet 0.5.0: 水槽の「かざり」
+  - turn-gacha のカードで 8 種(水草・石・流木・貝・つぼ・城・宝箱・沈没船)が手に入り、底の 5 つの置き場に置ける
+  - 時刻と季節で色が変わる(夜は城の窓が灯り、冬は雪が積もる)
+  - 城と沈没船の周りを、若い魚が回って泳ぐ
+- trophy-shelf 0.2.0: ダンジョンのトロフィー 3 つ(番人越え・地下三十階・百階の主)
+- rule-watch 0.2.0: 開発ログの見張り(設定 `logDir`)。次の 3 つを帯で知らせる
+  - コミットの後に、今日の `YYYY-MM-DD.md` を書いていない
+  - 開発ログを書いたのに、「📝」の 1 行が無い
+  - 締めの言葉なのに、開発ログが無い
+- mod-check 0.2.0
+  - 隣の mod の版がセッション中に変わったら、帯とトーストで開き直しを頼む
+  - 「点検表」タブ: 実画面で見てほしい 17 項目に よい・だめ・まだ を付け、結果を貼る文にする
+- usage-history 0.2.0: 直近 7 日の数を `$.state` の `week` でほかの mod に見せる
+- tools/new_mod.mts
+  - 新しい mod の雛形を作り、mod-hub・mod-check・marketplace.json・README の表に登録する
+  - `--sync`: mod-check の state の読みを、各 mod の types から作り直す
+  - `--check`: 登録の抜けを見つける。check_all も呼ぶ
+
+### Changed
+
+- mod-hub 0.5.4: run-guard・week-card のアイコン
+- mod-check の試験は、本数を表から数える(mod を足すたびに直さない)
+- docs/mod-guide.md: 記録の控え・古い版で書かない・new_mod.mts の使い方
+
 ## [0.9.1] - 2026-10-22
 
 ### Changed

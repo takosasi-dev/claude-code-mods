@@ -1,16 +1,31 @@
 // 約束ごとの見分けと、帯・ペインの文と SVG。どれも純関数
 import type { RuleEvent, RuleKind, RuleMiss } from '../types'
-import { C, HEADER_H, esc, frame, growBar, header, panel, short } from './style'
+import { C, HEADER_H, esc, frame, growBar, header, jstDay, panel, short } from './style'
 
 export const HISTORY_MAX = 20
-export const KINDS: readonly RuleKind[] = ['english', 'question', 'memo']
+export const KINDS: readonly RuleKind[] = ['english', 'question', 'memo', 'log', 'logLine', 'closing']
+/** ファイルを書くまで帯に残す約束 (次のターンの頭で下ろさない) */
+export const STICKY: readonly RuleKind[] = ['memo', 'log']
 
-/** 約束ごとの名前と、外れた時の短い言葉 */
-export const RULE: Record<RuleKind, { name: string; miss: string }> = {
+/** 約束ごとの名前と、外れた時の短い言葉。tell は「Claude に伝える」で足す直し方 */
+export const RULE: Record<RuleKind, { name: string; miss: string; tell?: string }> = {
   english: { name: '日本語で答える', miss: '返事が英語でした' },
   question: { name: '確認は選択肢で聞く', miss: '選択肢を使わずに文で質問しました' },
   memo: { name: '区切りで引き継ぎメモ', miss: 'コミットの後、引き継ぎメモが未更新です' },
+  log: { name: '区切りで開発ログ', miss: 'コミットの後、今日の開発ログが未記入です', tell: '今日の日付の開発ログに、この作業のブロックを書いてください' },
+  logLine: { name: '開発ログの報告の 1 行', miss: '開発ログを書いたのに、記録しましたの 1 行がありません', tell: '返事に「📝 Obsidianに開発ログを記録しました(ファイル名)」の 1 行を入れてください' },
+  closing: { name: '締めの言葉で開発ログ', miss: '締めの言葉があったのに、開発ログを書いていません', tell: '今日の開発ログを書き、その日の総括も書き直してください' },
 }
+
+// ── 開発ログの見分け
+
+const CLOSING = /ありがと|お疲れ|おつかれ|一旦ここまで|いったんここまで|今日はここまで/
+
+/** 依頼者の入力に締めの言葉があるか */
+export const isClosing = (text: string) => CLOSING.test(text)
+
+/** 返事に「📝」と「開発ログ」を含む行があるか */
+export const hasLogLine = (answer: string) => answer.split('\n').some(l => l.includes('📝') && l.includes('開発ログ'))
 
 // ── 返事の読み方
 
@@ -91,14 +106,20 @@ export const isAbsolute = (p: string) => /^[a-zA-Z]:[\\/]/.test(p) || p.startsWi
 /** path が dir の下か */
 export const isUnder = (path: string, dir: string) => dir !== '' && norm(path).startsWith(`${norm(dir)}/`)
 
-/** シェルのコマンドが dir を指しているか (D:\x と /d/x の両方の書き方を見る) */
-export function mentionsDir(command: string, dir: string) {
+/** シェルのコマンドが dir の下 (tail を足した物) を指しているか (D:\x と /d/x の両方の書き方を見る) */
+export function mentionsDir(command: string, dir: string, tail = '') {
   if (dir === '') return false
-  const d = norm(dir)
+  const d = `${norm(dir)}/${tail.toLowerCase()}`
   const msys = d.replace(/^([a-z]):/, (_, x: string) => `/${x}`)
   const c = command.replace(/\\/g, '/').toLowerCase()
-  return c.includes(`${d}/`) || c.includes(`${msys}/`)
+  return c.includes(d) || c.includes(msys)
 }
+
+/** 今日の開発ログのファイル名 (JST の YYYY-MM-DD.md) */
+export const logName = (now: number) => `${jstDay(now)}.md`
+
+/** path が dir の直下の、今日の開発ログか */
+export const isTodayLog = (path: string, dir: string, now: number) => dir !== '' && norm(path) === `${norm(dir)}/${logName(now)}`
 
 // ── 帯とペイン
 
@@ -107,7 +128,7 @@ export const bandText = (misses: readonly RuleMiss[]) => `約束ごと: ${misses
 
 /** 「Claude に伝える」で入力欄に入れる文 */
 export function remindText(misses: readonly RuleMiss[]) {
-  const lines = misses.map(m => `- ${RULE[m.rule].name}: ${RULE[m.rule].miss}${m.detail ? `(${m.detail})` : ''}`)
+  const lines = misses.map(m => `- ${RULE[m.rule].name}: ${RULE[m.rule].miss}${m.detail ? `(${m.detail})` : ''}${RULE[m.rule].tell ? `。${RULE[m.rule].tell}` : ''}`)
   return `さっきの返事は約束ごとから外れていました。\n${lines.join('\n')}\n約束に沿って直してください。`
 }
 
@@ -116,8 +137,8 @@ const clock = (ms: number) => {
   return [d.getHours(), d.getMinutes()].map(n => String(n).padStart(2, '0')).join(':')
 }
 
-const KIND_COLOR = (k: RuleKind) => ({ english: C.blue, question: C.yellow, memo: C.green })[k]
-const KIND_TERM = (k: RuleKind) => ({ english: 'suggestion', question: 'warning', memo: 'success' })[k]
+const KIND_COLOR = (k: RuleKind) => ({ english: C.blue, question: C.yellow, memo: C.green, log: C.purple, logLine: C.orange, closing: C.red })[k]
+const KIND_TERM = (k: RuleKind) => ({ english: 'suggestion', question: 'warning', memo: 'success', log: 'success', logLine: 'warning', closing: 'warning' })[k]
 
 export type PaneInput = {
   misses: RuleMiss[]
@@ -125,18 +146,30 @@ export type PaneInput = {
   history: RuleEvent[]
   /** コミットの後でメモを待っているか */
   isMemoPending: boolean
+  /** コミットの後で今日の開発ログを待っているか */
+  isLogPending: boolean
   /** 見ている約束 */
   watching: RuleKind[]
 }
 
 const statusWord = (i: PaneInput) => (i.misses.length === 0 ? '前の返事は約束どおりでした' : `前の返事で ${i.misses.length} つ外れました`)
 
+/** 待っている物の 1 行。無ければ空 */
+const waitWord = (i: PaneInput) =>
+  i.isMemoPending && i.isLogPending
+    ? 'コミットの後、引き継ぎメモと開発ログを待っています'
+    : i.isMemoPending
+      ? 'コミットの後、引き継ぎメモを待っています'
+      : i.isLogPending
+        ? 'コミットの後、開発ログを待っています'
+        : ''
+
 /** ペインの SVG 1 枚 */
 export function paneSvg(i: PaneInput) {
   const accent = i.misses.length === 0 ? C.green : C.yellow
   let s = panel(8, 8, 364, 56)
   s += `<text x="20" y="34" font-size="15" font-weight="bold" fill="${accent}">${esc(statusWord(i))}</text>`
-  s += `<text x="20" y="52" font-size="12" fill="${C.dim}">${i.isMemoPending ? 'コミットの後、引き継ぎメモを待っています' : 'このセッションで外れた数'}</text>`
+  s += `<text x="20" y="52" font-size="12" fill="${C.dim}">${esc(waitWord(i) || 'このセッションで外れた数')}</text>`
   // 約束ごとの数の棒
   const max = Math.max(1, ...KINDS.map(k => i.counts[k]))
   const y0 = 72
@@ -159,7 +192,7 @@ export function paneSvg(i: PaneInput) {
   rows.forEach((r, n) => {
     const y = y1 + 36 + n * 36
     s += `<rect x="20" y="${y}" width="4" height="28" rx="2" fill="${KIND_COLOR(r.rule)}"/>`
-    s += `<text x="32" y="${y + 12}" font-size="12" font-weight="bold" fill="${C.text}">${esc(RULE[r.rule].miss)}</text>`
+    s += `<text x="32" y="${y + 12}" font-size="12" font-weight="bold" fill="${C.text}">${esc(short(RULE[r.rule].miss, 22))}</text>`
     s += `<text x="360" y="${y + 12}" font-size="11" text-anchor="end" fill="${C.dim}">${clock(r.at)}</text>`
     if (r.detail) s += `<text x="32" y="${y + 26}" font-size="11" fill="${C.dim}">${esc(short(r.detail, 32))}</text>`
   })
@@ -173,7 +206,7 @@ export type Line = { text: string; color?: string; isDim?: boolean; isBold?: boo
 export function paneLines(i: PaneInput): Line[] {
   const lines: Line[] = [{ text: statusWord(i), isBold: true, color: i.misses.length === 0 ? 'success' : 'warning' }]
   for (const m of i.misses) lines.push({ text: `・${RULE[m.rule].miss}${m.detail ? `(${m.detail})` : ''}`, color: 'warning' })
-  if (i.isMemoPending) lines.push({ text: 'コミットの後、引き継ぎメモを待っています', isDim: true })
+  if (waitWord(i) !== '') lines.push({ text: waitWord(i), isDim: true })
   for (const k of KINDS) lines.push({ text: `${RULE[k].name}${i.watching.includes(k) ? '' : '(見ていない)'}: ${i.counts[k]} 回`, isDim: !i.watching.includes(k) })
   if (i.history.length > 0) lines.push({ text: '最近外れたもの', isBold: true })
   for (const r of i.history.slice(-6).reverse()) lines.push({ text: `${clock(r.at)} ${RULE[r.rule].miss}${r.detail ? ` ─ ${short(r.detail, 40)}` : ''}`, color: KIND_TERM(r.rule) })

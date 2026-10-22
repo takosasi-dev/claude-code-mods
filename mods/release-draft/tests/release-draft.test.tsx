@@ -119,7 +119,7 @@ const READY: Extract<DraftReport, { kind: 'ready' }> = {
 }
 
 test('純関数: コミットした場所・版・次の版', () => {
-  expect(commitDirOf(`cd "D:/github公開用/claude-code-mods" && git add -A && git commit -m "x"`)).toBe('D:/github公開用/claude-code-mods')
+  expect(commitDirOf(`cd "D:/public-copy/claude-code-mods" && git add -A && git commit -m "x"`)).toBe('D:/public-copy/claude-code-mods')
   expect(commitDirOf('git -C sub commit -m x')).toBe('sub')
   expect(commitDirOf('git commit -m x')).toBeUndefined()
   expect(resolveDir('/d/repo', 'C:/w')).toBe('D:/repo')

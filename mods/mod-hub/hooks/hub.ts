@@ -35,6 +35,8 @@ const CATEGORY: Record<string, Category> = {
   'toast-inbox': '道具', 'mod-check': '道具',
   'aqua-pet': '遊び', 'face-band': '遊び', 'turn-haiku': '遊び', 'live-commentary': '遊び', 'turn-gacha': '遊び',
   'dev-rpg': '遊び', 'code-omikuji': '遊び', 'wait-games': '遊び', 'daily-quest': '遊び', 'trophy-shelf': '遊び',
+  'run-guard': '開発',
+  'week-card': '遊び',
 }
 export const categoryOf = (name: string): Category => CATEGORY[name] ?? 'その他'
 /** 表に載っている mod の名前 (アイコンが揃っているかの試験で回す) */

@@ -1,5 +1,5 @@
 // mod の表と、見つかった物から判定を作る純関数・SVG。$ に触らない
-import type { CheckEnv, CheckKind, CheckReport, CheckRow, CheckSeen } from '../types'
+import type { CheckEnv, CheckKind, CheckReport, CheckRow, CheckSeen, ModUpdate } from '../types'
 import { C, clean, countUp, esc, fadeIn, frame, growBar, header, HEADER_H, panel, short } from './style'
 
 export const SELF = 'mod-check'
@@ -54,6 +54,7 @@ export const MODS: readonly ModEntry[] = [
   { name: 'reply-frame', category: '道具', hasState: false },
   { name: 'rule-switch', category: '道具', main: 'rules', spare: 'rule-switch', hasState: true },
   { name: 'rule-watch', category: '開発', main: 'rulewatch', spare: 'rule-watch', hasState: true },
+  { name: 'run-guard', category: '開発', main: 'runguard', spare: 'run-guard', hasState: true },
   { name: 'session-recap', category: '状況', main: 'recap', spare: 'session-recap', hasState: true },
   { name: 'session-timeline', category: '状況', main: 'timeline', spare: 'session-timeline', hasState: true },
   { name: 'ship-guard', category: '開発', main: 'guard', spare: 'ship-guard', hasState: true },
@@ -68,6 +69,7 @@ export const MODS: readonly ModEntry[] = [
   { name: 'usage-history', category: '状況', main: 'history', spare: 'usage-history', hasState: true },
   { name: 'usage-pane', category: '状況', main: 'usage-pane', hasState: true },
   { name: 'wait-games', category: '遊び', main: 'games', spare: 'wait-games', hasState: true },
+  { name: 'week-card', category: '遊び', main: 'week', spare: 'week-card', hasState: true },
   { name: 'work-bar', category: '状況', main: 'work-bar', hasState: true },
 ]
 
@@ -188,13 +190,54 @@ export function countLine(c: Counts): string {
 
 /** /mod-check の返事。コピーしてそのまま貼れる形 */
 export function reportText(report: CheckReport): string {
+  const updated = report.updated ?? []
   return [
     `mod-check の結果 ${jstStamp(report.at)} (日本時間)`,
     envLine(report.env),
     countLine(countRows(report.rows)),
+    ...(updated.length === 0 ? [] : [updatedLine(updated)]),
     ...report.rows.map(rowLine),
   ].join('\n')
 }
+
+// ---- 版の見張り ----
+
+/** フォルダの 1 つ上(末尾の区切りは無視)。上が無ければ空 */
+export const parentDir = (dir: string) => {
+  const d = dir.replace(/[\\/]+$/, '')
+  const at = Math.max(d.lastIndexOf('/'), d.lastIndexOf('\\'))
+  return at <= 0 ? '' : d.slice(0, at)
+}
+
+/** 隣に並ぶ mod の plugin.json(依頼者の mods/<name> の並び。マーケットプレイスの形では無い) */
+export const siblingManifest = (root: string, name: string) => `${parentDir(root)}/${name}/.claude-plugin/plugin.json`
+
+/** plugin.json の中身から版。読めなければ undefined */
+export function versionOf(text: string): string | undefined {
+  try {
+    const v = (JSON.parse(text) as { version?: unknown }).version
+    return typeof v === 'string' && v !== '' ? clean(v) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 覚えた版と今の版を比べ、変わった物(表の順)。どちらかが読めなかった mod は飛ばす */
+export const diffVersions = (loaded: Readonly<Record<string, string>>, now: Readonly<Record<string, string>>): ModUpdate[] =>
+  MODS.flatMap(m => {
+    const from = loaded[m.name]
+    const to = now[m.name]
+    return from !== undefined && to !== undefined && from !== to ? [{ name: m.name, from, to }] : []
+  })
+
+const updateWord = (u: ModUpdate) => `${u.name} ${u.from}→${u.to}`
+
+/** 帯とトーストの文 */
+export const updateBand = (updated: readonly ModUpdate[]) =>
+  `mod が新しくなりました(${updated[0] ? updateWord(updated[0]) : ''}${updated.length > 1 ? ` ほか ${updated.length - 1} 本` : ''})。VS Code を開き直してください`
+
+/** 貼る文とペインの 1 行 */
+export const updatedLine = (updated: readonly ModUpdate[]) => `開き直し待ち ${updated.map(updateWord).join('  ')}`
 
 // ---- 色 ----
 

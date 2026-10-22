@@ -10,7 +10,7 @@
 // → bundled-skills の一番新しい版の plugin-authoring/types/claude-code.d.ts の順で探す。
 // tsconfig は os.tmpdir() の下に作って最後に消す。claude は一時の CLAUDE_CONFIG_DIR で走らせ、
 // 本物の ~/.claude と、settings の env の CLAUDE_CODE_PLUGIN_DIRS に触らせない。
-// 最後に node tools/copy_shared.mts --check も走らせる。1 つでも落ちれば 1 で終わる。
+// 最後に node tools/copy_shared.mts --check と node tools/new_mod.mts --check(登録の抜け)も走らせる。1 つでも落ちれば 1 で終わる。
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -134,6 +134,7 @@ try {
   )
   results.sort((a, b) => a.mod.localeCompare(b.mod))
   const shared = await run(process.execPath, [join(ROOT, 'tools', 'copy_shared.mts'), '--check'], baseEnv)
+  const reg = await run(process.execPath, [join(ROOT, 'tools', 'new_mod.mts'), '--check'], baseEnv)
 
   const isTestOk = (r: Result) => r.test.code === 0 && r.fail === 0 && r.pass > 0
   const isOk = (r: Result) => r.validate.code === 0 && isTestOk(r) && (!r.tsc || r.tsc.code === 0)
@@ -149,6 +150,7 @@ try {
   const failed = results.filter(r => !isOk(r))
   console.log(`\n通過 ${results.length - failed.length} / ${results.length} 本、試験 ${total} 件 (落ち ${results.reduce((n, r) => n + r.fail, 0)} 件)`)
   console.log(`copy_shared --check: ${shared.code === 0 ? 'ok' : 'NG'}  ${shared.out.trim().split('\n')[0]}`)
+  console.log(reg.code === 0 ? reg.out.trim() : `new_mod --check: NG\n${reg.out.trim().split('\n').map(l => `  ${l}`).join('\n')}`)
 
   // 落ちた mod は、どこで落ちたかの最初の数行
   const head = (out: string, re: RegExp) => {
@@ -162,7 +164,7 @@ try {
     if (!isTestOk(r)) console.log(`  試験:\n${head(r.test.out, /\(fail\)|error/i)}`)
     if (r.tsc && r.tsc.code !== 0) console.log(`  tsc:\n${head(r.tsc.out, /error TS/)}`)
   }
-  process.exitCode = failed.length || shared.code !== 0 ? 1 : 0
+  process.exitCode = failed.length || shared.code !== 0 || reg.code !== 0 ? 1 : 0
 } finally {
   rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })
 }

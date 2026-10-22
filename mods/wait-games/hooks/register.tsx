@@ -27,7 +27,8 @@ import {
   sudokuSvg,
 } from './svg'
 import type { Head } from './svg'
-import { followTheme, readTheme } from './style'
+import { backup, backupDir, backupOf, closeRestore, isBackedToday, resetRestore, restoreButton, restoreCard, setBackupDir } from './backup'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'wait-games'
 const TITLE = 'ミニゲーム'
@@ -79,10 +80,41 @@ async function readStore($: $): Promise<{ stats: GameStats | undefined; raw: unk
 }
 
 async function load($: $) {
-  const saved = (await readStore($)).stats
+  const { stats: saved, raw } = await readStore($)
   if (saved) await update($, STATS, () => saved)
   else await update($, NOTE, () => BROKEN)
+  // その日はじめてなら、読んだ生の値 (知らない欄ごと) を控える
+  if (backupDir) await backup($, STORE_KEY, raw, await $.clock.now())
 }
+
+/** ターンの終わりに、その日まだ控えていなければ控える (日をまたいで動き続けるセッション)。控え済みなら store も読まない */
+async function backupIfDue($: $) {
+  const now = await $.clock.now()
+  if (!isBackedToday(STORE_KEY, now)) await backup($, STORE_KEY, (await readStore($)).raw, now)
+}
+
+/** day の控えに戻し、メモリの中の記録も読み直す。古い版のままなら戻さない */
+const restoreDay = ($: $, day: string) =>
+  serial(async () => {
+    if (!(await mayWrite($, await $.clock.now()))) return
+    const value = await backupOf($, STORE_KEY, day)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      $.ui.toast('控えを読めなかったので、戻していません', { timeoutMs: 8000 })
+      return
+    }
+    const isSaved = await $.store.set(STORE_KEY, value).then(
+      () => true,
+      () => false,
+    )
+    if (!isSaved) {
+      $.ui.toast('控えの記録を書けませんでした', { timeoutMs: 8000 })
+      return
+    }
+    await update($, NOTE, () => '')
+    await load($)
+    closeRestore($)
+    $.ui.toast(`${day} の記録に戻しました`)
+  })
 
 /** 増えた分だけを、書く直前に読み直した store に足して書く (別のセッションの分を消さない) */
 const record = ($: $, d: StatsDelta) =>
@@ -92,6 +124,10 @@ const record = ($: $, d: StatsDelta) =>
       await update($, NOTE, () => BROKEN)
       return
     }
+    const now = await $.clock.now()
+    if (backupDir) await backup($, STORE_KEY, raw, now)
+    // 新しい版が入ったのに古い版のまま動いている時は書かない (トーストで開き直しを頼む)
+    if (!(await mayWrite($, now))) return
     const next = addStats(saved, d)
     // 知らない欄 (新しい版が足した物) は読み直した生の値から残す
     const isSaved = await $.store.set(STORE_KEY, keepUnknown(raw, next)).then(
@@ -149,12 +185,15 @@ const openPane = async ($: $) => {
   return { text: 'ミニゲームを開きました。' }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  setBackupDir(options)
   followTheme(on)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    await rememberVersion($).catch(() => {})
+    resetRestore()
     // /games が拒まれたら (組み込みと被ったら) /wait-games にする
     const got = await $.command.register({ name: 'games', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'games'
@@ -179,6 +218,7 @@ export const register: Register = on => {
   // メインのターンの間に遊んでいたら、終わった時に 1 回だけ知らせる。中断は自分で止めたので知らせない
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    if (e.agentId === undefined && backupDir) await backupIfDue($).catch(() => {})
     if (e.agentId === undefined && e.reason !== 'aborted' && (await read($, PLAYING))) {
       const text = e.reason === 'answer' ? 'Claude のターンが終わりました' : 'Claude のターンが止まりました'
       await update($, PLAYING, () => false)
@@ -432,6 +472,8 @@ export const register: Register = on => {
         {picker}
         {body}
         {note !== '' && <Text color={C.yellow}>{note}</Text>}
+        {restoreButton($, t, STORE_KEY)}
+        {restoreCard($, t, day => void restoreDay($, day))}
       </Box>
     )
   })

@@ -33,7 +33,8 @@ export function snapshotOf(raw: ShelfRaw): ShelfSnapshot {
   const s: ShelfSnapshot = {}
   const hero = raw.hero
   if (isObj(hero) && typeof hero.xp === 'number') {
-    s.rpg = { level: levelOf(num(hero.xp)), achievements: keysOf(hero.achievements).length, wins: num(hero.wins), bosses: keysOf(hero.defeated).length }
+    // deepest は dev-rpg 0.6.0 から (古い版なら 0)
+    s.rpg = { level: levelOf(num(hero.xp)), achievements: keysOf(hero.achievements).length, wins: num(hero.wins), bosses: keysOf(hero.defeated).length, deepest: num(hero.deepest) }
   }
   const save = raw.save
   if (isObj(save) && isObj(save.book)) {
@@ -90,6 +91,10 @@ export const TROPHIES: Trophy[] = [
   { id: 'rpg-lv30', mod: 'dev-rpg', name: '歴戦の勇者', glyph: '勇', hint: 'dev-rpg で Lv 30', progress: s => at(s.rpg, r => [r.level, 30]) },
   { id: 'rpg-ach10', mod: 'dev-rpg', name: '実績の山', glyph: '績', hint: 'dev-rpg の実績を 10 個', progress: s => at(s.rpg, r => [r.achievements, 10]) },
   { id: 'rpg-boss', mod: 'dev-rpg', name: '竜を倒す', glyph: '竜', hint: 'dev-rpg のボスを 1 体倒す', progress: s => at(s.rpg, r => [r.bosses, 1]) },
+  // dev-rpg 0.6.0 のダンジョン (勝ち抜いた一番深い階)。10 階ごとに番人がいる
+  { id: 'rpg-deep10', mod: 'dev-rpg', name: '番人越え', glyph: '番', hint: 'ダンジョン 10 階の番人を倒す', progress: s => at(s.rpg, r => [r.deepest, 10]) },
+  { id: 'rpg-deep30', mod: 'dev-rpg', name: '地下三十階', glyph: '潜', hint: 'ダンジョンの 30 階を勝ち抜く', progress: s => at(s.rpg, r => [r.deepest, 30]) },
+  { id: 'rpg-deep100', mod: 'dev-rpg', name: '百階の主', glyph: '淵', hint: 'ダンジョンの 100 階を勝ち抜く', progress: s => at(s.rpg, r => [r.deepest, 100]) },
   { id: 'gacha-10', mod: 'turn-gacha', name: '集め始め', glyph: '集', hint: 'ガチャの図鑑を 10 種', progress: s => at(s.gacha, g => [g.owned, 10]) },
   {
     id: 'gacha-half',

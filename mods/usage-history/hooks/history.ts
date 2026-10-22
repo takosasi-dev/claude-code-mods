@@ -1,5 +1,5 @@
 // 日ごとの使い方の純関数(日付・足し方・刈り込み・集計・SVG)
-import type { DayRec, Days, HistoryMetric, HistoryRange } from '../types'
+import type { DayRec, Days, HistoryMetric, HistoryRange, HistoryWeekDay } from '../types'
 import { C, HEADER_H, W, countUp, esc, fadeIn, frame, growColumn, header, panel } from './style'
 
 /** 残す日数 */
@@ -86,7 +86,18 @@ export function lastDays(days: Days, now: number, n: number) {
   })
 }
 
-export const metricOf = (rec: DayRec, metric: HistoryMetric) => (metric === 'turns' ? rec.turns : rec.outputTokens)
+/** 直近 7 日の日ごとの数 (state の week。他の mod が読む形) */
+export const weekOf = (days: Days, now: number): HistoryWeekDay[] =>
+  lastDays(days, now, 7).map(({ key, rec }) => ({
+    day: key,
+    turns: rec.turns,
+    tools: rec.tools,
+    inputTokens: rec.inputTokens,
+    outputTokens: rec.outputTokens,
+    minutes: Math.round(rec.durationMs / 60_000),
+  }))
+
+export const metricOf =(rec: DayRec, metric: HistoryMetric) => (metric === 'turns' ? rec.turns : rec.outputTokens)
 
 export function summarize(list: readonly { key: string; rec: DayRec }[], metric: HistoryMetric) {
   const total = list.reduce((a, d) => addDay(a, d.rec), EMPTY_DAY)

@@ -83,6 +83,8 @@ const ICONS: Record<string, (c: string, a: string) => string> = {
     `<rect x="5" y="8" width="22" height="18" rx="2" ${line(c)}/><path d="M5 13h22 M10 5v5 M22 5v5" ${line(c)}/><circle cx="20.5" cy="20" r="2.8" fill="${a}"/>`,
   'trophy-shelf': (c, a) =>
     `<path d="M10 6h12v6a6 6 0 0 1-12 0z" ${line(c)}/><path d="M10 8H6.5a3.5 3.5 0 0 0 4 6 M22 8h3.5a3.5 3.5 0 0 1-4 6" ${line(c)}/><path d="M16 18v4 M11 26h10 M13 22h6" ${line(a)}/>`,
+  'run-guard': (c, a) => `<rect x="4" y="6" width="19" height="15" rx="2" ${line(c)}/><path d="M4 10.5h19" ${line(c)}/><path d="M18 22h3l4-3v10l-4-3h-3z" fill="${c}"/><path d="M6 27L27 6" ${line(a, 2.5)}/>`,
+  'week-card': (c, a) => `<rect x="5" y="6" width="22" height="20" rx="3" ${line(c)}/>${[9, 7, 11, 6, 10, 8, 12].map((h, i) => `<rect x="${8 + i * 2.6}" y="${23 - h}" width="1.8" height="${h}" rx="0.9" fill="${i === 6 ? a : c}"/>`).join('')}`,
 }
 
 /** 表に無い mod: カテゴリーの色の 4 つの点 */

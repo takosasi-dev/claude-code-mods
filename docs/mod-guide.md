@@ -156,6 +156,10 @@ claude plugin validate mods/<名前>   # マニフェストとフックの読み
 claude plugin test mods/<名前>       # tests/*.test.tsx を走らせる
 ```
 
+まとめて確かめる時は `node tools/check_all.mts [mod...]` です(validate・試験・tsc・写しのずれ・登録の抜け)。
+
+新しい mod は `node tools/new_mod.mts <名前> --cat 遊び --cmd <コマンド> --ja "説明" --en "description"` で作ります。雛形を置き、mod-hub の分類とアイコン(仮の絵)、mod-check の表、marketplace.json、README の表 2 つに登録します。撮影(`tools/shots.mts`)と README の画像は手で足します。`types/index.d.ts` の state を変えたら `node tools/new_mod.mts --sync` で mod-check の読みを作り直します。抜けは check_all が見つけます。
+
 各 mod の `tsconfig.json` は、エンジンが mod を読み込んだ時に置く `.claude-plugin/types/tsconfig.json` を継いでいます。clone した直後は一度 Claude Code に読み込ませてから `tsc -p mods/<名前>` を使ってください。
 
 - テストは `vscode` と `terminal` の両方で mount し、主な要素が描かれることと、ボタンを押すと値が変わることを確かめます
@@ -166,6 +170,7 @@ claude plugin test mods/<名前>       # tests/*.test.tsx を走らせる
 
 - `$.store` はプラグインごとに 1 つで、同時に開いた複数のセッションが共有します。セッション開始時に読んだ写しを丸ごと書き戻すと、もう一方の進み具合が消えます。書く直前に読み直し、増えた分だけを足します
 - `$.store` に物(object)を書く時は、書く直前に読み直した生の値のうち、**自分の知らない欄をそのまま残して**書きます(`{ ...unknownOf(raw, 知っている欄), ...mine }`。`hero` の中の実績や `book` の中のカードのような入れ子の物も同じです)。古い版の mod を読んだまま動いているセッションが、知っている欄だけを書き戻すと、新しい版で足した欄が消えます(実際に魚・装備・SP の割り振りが消えました)。知っている欄で消した物(外した装備・刈り込んだ古い日)は戻しません。`{ ...今の形, futureField: 1 }` を store に置き、1 ターン後(書いた後)も `futureField` が残る試験を 1 つ入れます。配列だけ・数だけを書くキーは対象外です
+- 記録を書く mod は、`session.start` で `rememberVersion($)` を呼び、`$.store.set` の前に `mayWrite($, now)` を確かめます(どちらも `hooks/style.ts`)。新しい版が入ったのに古い版のまま動いているセッションは、書かずにトーストで開き直しを頼みます。消えて困る記録(遊びの mod・使い方の記録)は、設定 `backupDir` と `backupDaily` で 1 日 1 回控えを取り、ペインの「控えから戻す」(`listBackups`)で戻せるようにします
 - コマンドの名前が拒まれて予備の名前にした時は、元の名前の `command.run` に `next(e)` を返します。返さないと、同じ名前の別のコマンドを横取りします
 - 制御文字を含む文字列を Text の子や Svg の `alt` に入れると、エンジンは木ごと拒みます。外から来る文字列は先に制御文字を落とします
 - `$.prompt.fill` の `mode: 'replace'` は入力欄の下書きを消します。`insert` を使います

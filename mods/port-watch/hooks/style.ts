@@ -119,6 +119,87 @@ export const season = (now: number): Season => {
 /** n 文字を超えたら … で切る */
 export const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s)
 
+// ---- 記録を守る(docs/mod-guide.md の 9 節) ----
+
+/** JST の YYYY-MM-DD */
+export const jstDay = (now: number) => jstDate(now).toISOString().slice(0, 10)
+
+export type Backup = { day: string; value: unknown }
+
+// ponytail: $.fs に消す手が無いので、曜日ごとの 7 つの枠を上書きして 7 日分だけ残す。もっと残すなら枠を日付にして process で消す
+const backupPath = (dir: string, plugin: string, key: string, wd: number) => `${dir.replace(/[\\/]+$/, '')}/${plugin}/${key}-${wd}.json`
+
+/**
+ * $.store の key の値を、その日はじめて呼ばれた時だけ dir に控える(曜日ごとの枠で 7 日分)。
+ * dir が空なら何もしない(公開の既定は空。入れた人が backupDir を設定する)。書いたら true
+ */
+export async function backupDaily($: EngineInterface, dir: string, key: string, value: unknown, now: number): Promise<boolean> {
+  if (!dir.trim() || value === undefined) return false
+  const day = jstDay(now)
+  const path = backupPath(dir, $.plugin.name, key, jstDate(now).getUTCDay())
+  const old = await $.fs.read(path).then(t => (JSON.parse(t) as Backup).day, () => '')
+  if (old === day) return false
+  await $.fs.write(path, JSON.stringify({ day, value } satisfies Backup))
+  return true
+}
+
+/** 控えの一覧。新しい日から順。読めない枠は飛ばす */
+export async function listBackups($: EngineInterface, dir: string, key: string): Promise<Backup[]> {
+  if (!dir.trim()) return []
+  const all = await Promise.all(
+    [0, 1, 2, 3, 4, 5, 6].map(wd =>
+      $.fs.read(backupPath(dir, $.plugin.name, key, wd)).then(
+        t => JSON.parse(t) as Backup,
+        () => undefined,
+      ),
+    ),
+  )
+  return all.filter((b): b is Backup => typeof b?.day === 'string' && b.value !== undefined).sort((a, b) => b.day.localeCompare(a.day))
+}
+
+let loadedVersion: string | undefined
+let staleAt = 0
+let isStaleNow = false
+let toldStale = false
+
+async function diskVersion($: EngineInterface): Promise<string | undefined> {
+  for (const p of [`${$.plugin.root}/.claude-plugin/plugin.json`, `${$.plugin.root}/plugin.json`]) {
+    const v = await $.fs.read(p).then(t => (JSON.parse(t) as { version?: unknown }).version, () => undefined)
+    if (typeof v === 'string') return v
+  }
+  return undefined
+}
+
+/** 読み込んだ時の版を覚える。mod の session.start で 1 回呼ぶ */
+export async function rememberVersion($: EngineInterface) {
+  loadedVersion ??= await diskVersion($)
+}
+
+/**
+ * 新しい版が入ったのに、このセッションはまだ古い版で動いているか(ディスクの plugin.json の版が読み込んだ時と違う)。
+ * 読み直すのは 60 秒に 1 回まで。版が分からない時は false
+ */
+export async function isStale($: EngineInterface, now: number): Promise<boolean> {
+  if (isStaleNow || loadedVersion === undefined || now - staleAt < 60_000) return isStaleNow
+  staleAt = now
+  const v = await diskVersion($)
+  isStaleNow = v !== undefined && v !== loadedVersion
+  return isStaleNow
+}
+
+/**
+ * $.store に書いてよいか。古い版のままなら書かず、1 回だけトーストで開き直しを頼む
+ * (古い版は新しい版の欄を知らないので、書くと消してしまう)
+ */
+export async function mayWrite($: EngineInterface, now: number): Promise<boolean> {
+  if (!(await isStale($, now))) return true
+  if (!toldStale) {
+    toldStale = true
+    $.ui.toast(`${$.plugin.name}: 新しい版が入りました。VS Code を開き直すまで記録は書きません`)
+  }
+  return false
+}
+
 // ---- SVG の部品 ----
 
 export const W = 380

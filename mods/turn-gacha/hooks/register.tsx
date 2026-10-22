@@ -21,7 +21,8 @@ import {
   statsSvg,
   withUnknown,
 } from './gacha'
-import { followTheme, readTheme } from './style'
+import { backup, backupDir, backupOf, closeRestore, isBackedToday, isRestoring, resetRestore, restoreButton, restoreCard, setBackupDir } from './backup'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'turn-gacha'
 const TITLE = 'ガチャ'
@@ -59,12 +60,50 @@ async function readStore($: $): Promise<{ saved: GachaSave; raw: unknown } | und
   }
 }
 
-/** store を state に写す。読めなければ知らせるだけ */
+/** store を state に写す。読めなければ知らせるだけ。その日はじめてなら、読んだ生の値を控える */
 async function load($: $) {
-  const saved = (await readStore($))?.saved
-  if (saved) await update($, SAVE, () => saved)
+  const got = await readStore($)
+  if (got) await update($, SAVE, () => got.saved)
   else await update($, NOTE, () => BROKEN)
+  await backupAll($, got?.raw)
 }
+
+/** 図鑑 (save) と受け取り済みのお題 (questClaimed) を、その日はじめての時だけ控える。save の生の値は読んだ物があれば渡す */
+async function backupAll($: $, raw?: unknown) {
+  if (!backupDir) return
+  const now = await $.clock.now()
+  if (!isBackedToday(STORE_KEY, now)) await backup($, STORE_KEY, raw ?? (await $.store.get(STORE_KEY).catch(() => undefined)), now)
+  if (!isBackedToday(CLAIM_KEY, now)) await backup($, CLAIM_KEY, await $.store.get(CLAIM_KEY).catch(() => undefined), now)
+}
+
+/**
+ * day の控えに戻す。図鑑はその日の値で置き換え、受け取り済みのお題は今の物と合わせる
+ * (古い日に戻しても、今日もう受け取ったごほうびをもう一度引かないように)。古い版のままなら戻さない
+ */
+const restoreDay = ($: $, day: string) =>
+  serial(async () => {
+    if (!(await mayWrite($, await $.clock.now()))) return
+    const value = await backupOf($, STORE_KEY, day)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      $.ui.toast('控えを読めなかったので、戻していません', { timeoutMs: 8000 })
+      return
+    }
+    try {
+      await $.store.set(STORE_KEY, value)
+      const old = claimedFrom(await backupOf($, CLAIM_KEY, day))
+      if (old.length > 0) {
+        const now = claimedFrom(await $.store.get(CLAIM_KEY))
+        await $.store.set(CLAIM_KEY, [...new Set([...now, ...old])].slice(-KEEP_CLAIMED))
+      }
+    } catch {
+      $.ui.toast('控えの記録を書けませんでした', { timeoutMs: 8000 })
+      return
+    }
+    await load($)
+    await update($, NOTE, () => '')
+    closeRestore($)
+    $.ui.toast(`${day} の記録に戻しました`)
+  })
 
 /**
  * 1 枚引いて store と state に書く。SR 以上だけトースト。
@@ -84,6 +123,10 @@ const draw = ($: $, flags: { isClean: boolean; isManual: boolean }) =>
       await update($, NOTE, () => '今日の手動はおしまいです(また明日。ターンが終わるたびには引けます)')
       return
     }
+    // 日をまたいで動き続けるセッションも、その日はじめて書く前に控える
+    await backupAll($, got.raw)
+    // 新しい版が入ったのに古い版のまま動いている時は、引かない (書くと新しい版の欄を消す。トーストで開き直しを頼む)
+    if (!(await mayWrite($, now))) return
     const card = pull(Math.random(), Math.random(), flags.isClean)
     const next = addDraw(saved, card, now, flags)
     // この版の知らない欄 (新しい版が足した物) は読んだまま残す
@@ -118,7 +161,7 @@ async function claim($: $) {
     const claimed = await $.store.get(CLAIM_KEY).then(claimedFrom, () => undefined)
     if (!claimed) return
     const fresh = questRewards(today, claimed)
-    if (fresh.length === 0) return
+    if (fresh.length === 0 || !(await mayWrite($, await $.clock.now()))) return
     // ponytail: 読んでから書くまでの間に別のセッションが受け取ると 2 度引ける。間は数ミリ秒なので見送り
     const isSaved = await $.store.set(CLAIM_KEY, [...claimed, ...fresh.map(g => g.key)].slice(-KEEP_CLAIMED)).then(
       () => true,
@@ -140,12 +183,15 @@ const openPane = async ($: $) => {
   return { text: 'ガチャを開きました。' }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  setBackupDir(options)
   followTheme(on)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    await rememberVersion($).catch(() => {})
+    resetRestore()
     await $.state.set(CARDS_REF, PUBLIC_CARDS).catch(() => {})
     // /gacha が拒まれたら (組み込みと被ったら) /turn-gacha にする
     const got = await $.command.register({ name: 'gacha', description: DESCRIPTION }).catch(() => undefined)
@@ -229,14 +275,16 @@ export const register: Register = on => {
       )
     }
 
+    // 戻す欄を開いている間は、その欄の「戻す」を主にする (主のボタンは 1 つ)
+    const isOpen = isRestoring()
     return (
       <Box flexDirection="column" gap={1}>
         {body}
         <Box key="actions" flexDirection="column">
           <Button
-            key="pull" dimColor={left <= 0}
+            key="pull" dimColor={left <= 0 || isOpen}
             label={left > 0 ? `もう一回引く(今日あと ${left} 回)` : '今日の手動はおしまい'}
-            variant={left > 0 ? 'primary' : 'secondary'}
+            variant={left > 0 && !isOpen ? 'primary' : 'secondary'}
             onPress={() => void draw($, { isClean: false, isManual: true })}
           />
           <Button
@@ -244,7 +292,9 @@ export const register: Register = on => {
             label={view === 'book' ? 'カードに戻る' : '図鑑'}
             onPress={() => void update($, VIEW, v => (v === 'book' ? 'card' : 'book'))}
           />
+          {restoreButton($, t, STORE_KEY)}
         </Box>
+        {restoreCard($, t, day => void restoreDay($, day))}
         {note !== '' && <Text color="#d29922">{note}</Text>}
       </Box>
     )

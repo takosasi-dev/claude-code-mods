@@ -352,3 +352,106 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   expect(await source()).toMatch(/fill="#0d1117"/)
   setTheme(false)
 })
+
+// ---- 0.2.0 記録の控え・古い版では書かない ----
+
+const BACKUP = { options: { backupDir: 'C:/work/backup' } }
+const DIR = 'C:/work/backup/daily-quest'
+const slash = (p: string) => p.replace(/\\/g, '/')
+
+/** $.fs の代わり。控えのファイルは Map、plugin.json は version() の版を返す。書いた控えの path を数える */
+const fakeFs = (on: On, files: Record<string, unknown> = {}, version: () => string = () => '0.2.0') => {
+  const m = new Map(Object.entries(files).map(([p, v]) => [p, JSON.stringify(v)]))
+  const writes: string[] = []
+  on('fs.read', (_$, e) => {
+    const p = slash(e.path)
+    if (p.endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'daily-quest', version: version() }) }
+    const t = m.get(p)
+    if (t === undefined) throw new Error('ENOENT')
+    return { value: t }
+  })
+  on('fs.write', (_$, e) => {
+    m.set(slash(e.path), e.text)
+    writes.push(slash(e.path))
+    return { value: undefined }
+  })
+  return { writes, file: (p: string) => JSON.parse(m.get(p) ?? 'null') as { day: string; value: unknown } | null }
+}
+
+test('控えは設定のフォルダに 1 日 1 回だけ、知らない欄ごと書く', BACKUP, async ($, on) => {
+  const fs = fakeFs(on)
+  const init = { ...EMPTY, totalDone: 4, futureField: 1 }
+  const { clock } = await boot($, on, init)
+  // 2026-10-20 は火曜 (曜日の枠 2)
+  expect(fs.writes).toEqual([`${DIR}/quest-2.json`])
+  expect(fs.file(`${DIR}/quest-2.json`)).toEqual({ day: '2026-10-20', value: init })
+  await turn($)
+  await turn($)
+  expect(fs.writes).toHaveLength(1)
+  // 日をまたいで動き続けても、次の日の最初の書き込みの前に控える (水曜の枠 3)
+  await clock.advance(DAY)
+  await turn($)
+  expect(fs.writes).toEqual([`${DIR}/quest-2.json`, `${DIR}/quest-3.json`])
+  expect(fs.file(`${DIR}/quest-3.json`)).toMatchObject({ day: '2026-10-21', value: { totalDone: 4, futureField: 1, days: { [DATE]: { turns: 2 } } } })
+})
+
+test('設定が空なら控えず、戻す欄には設定のしかたを出す', async ($, on) => {
+  const fs = fakeFs(on)
+  await boot($, on, { ...EMPTY, totalDone: 2 })
+  await turn($)
+  expect(fs.writes).toEqual([])
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'restore' })
+  expect(await ui.find({ type: 'Text', text: '設定の backupDir を入れると控えが取れます' })).toBeDefined()
+  expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 控えから戻すと、選んだ日の記録になる (確かめてから書く)`, BACKUP, async ($, on) => {
+    const old = { days: { '2026-10-19': { turns: 9 } }, fullDays: ['2026-10-18', '2026-10-19'], totalDone: 30, futureField: 1 }
+    fakeFs(on, { [`${DIR}/quest-1.json`]: { day: '2026-10-19', value: old } })
+    const { stored, total, toasts } = await boot($, on, { ...EMPTY, totalDone: 3 })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ key: 'restore' }))?.props.dimColor).toBe(true)
+    await ui.press({ key: 'restore' })
+    // 今日の控え (開いた時に取った) と昨日の控えが、新しい順に並ぶ
+    expect((await ui.find({ key: 'day-2026-10-20' }))?.props.label).toBe('2026-10-20')
+    expect(await ui.find({ key: 'day-2026-10-19' })).toBeDefined()
+    expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+    await ui.press({ key: 'day-2026-10-19' })
+    expect(await ui.find({ type: 'Text', text: '2026-10-19: この日の記録に戻しますか。今の記録は上書きされます' })).toBeDefined()
+    // やめると書かない
+    await ui.press({ key: 'restore-no' })
+    expect(stored()?.totalDone).toBe(3)
+    await ui.press({ key: 'day-2026-10-19' })
+    await ui.press({ key: 'restore-ok' })
+    expect(stored()).toEqual(old as never)
+    // メモリの中 (他の mod が読む通算) も読み直す
+    expect(total()).toBe(30)
+    expect(toasts).toContain('2026-10-19 の記録に戻しました')
+    expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+    // 戻した後の進みは、戻した記録に足す
+    await turn($)
+    expect(stored() as object).toMatchObject({ totalDone: 30, futureField: 1, days: { '2026-10-19': { turns: 9 }, [DATE]: { turns: 1 } } })
+  })
+}
+
+// isStale は style.ts のモジュールの値を持つので、この試験はファイルの一番下に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、控えからも戻さない', BACKUP, async ($, on) => {
+  let version = '0.2.0'
+  fakeFs(on, { [`${DIR}/quest-1.json`]: { day: '2026-10-19', value: { ...EMPTY, totalDone: 50 } } }, () => version)
+  const { stored, clock, toasts } = await boot($, on, { ...EMPTY, totalDone: 3 })
+  await turn($)
+  expect(stored()?.days[DATE]?.turns).toBe(1)
+  version = '0.3.0'
+  await clock.advance(61_000)
+  await turn($)
+  expect(stored()?.days[DATE]?.turns).toBe(1)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'restore' })
+  await ui.press({ key: 'day-2026-10-19' })
+  await ui.press({ key: 'restore-ok' })
+  expect(stored()?.totalDone).toBe(3)
+  // 開き直しのお願いは 1 回だけ
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
+})

@@ -1,0 +1,24 @@
+{
+  "name": "run-guard",
+  "version": "0.1.0",
+  "description": "Claude が確かめのために窓のあるアプリを起動する・音を鳴らす・claude -p を隔離なしで走らせるのを、実行の前に止める (設定で聞く・伝えるだけにもできる)。/runguard で数と記録と、組ごとのオン/オフ",
+  "author": {
+    "name": "takosasi-dev"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "見つけた時",
+      "description": "止める: 実行せずに直し方を Claude に返す。聞く: 実行してよいかその場で聞く (聞けない時は止める)。伝えるだけ: 実行の後で Claude に直し方を伝える",
+      "default": "止める",
+      "options": ["止める", "聞く", "伝えるだけ"]
+    },
+    "windowApps": {
+      "type": "string",
+      "title": "いつも窓とみなすアプリ",
+      "description": "起動したら窓が出るとみなす exe の名前。カンマ区切り (例: mygame, tool.exe)。空なら足さない",
+      "default": ""
+    }
+  }
+}

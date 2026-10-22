@@ -1,9 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { RpgBattle, RpgGachaCard, RpgHero, RpgSaved, RpgSlot, RpgStat, RpgTab } from '../types'
+import type { RpgBattle, RpgGachaCard, RpgHero, RpgRestore, RpgSaved, RpgSlot, RpgStat, RpgTab } from '../types'
 import { act, battleLines, battleSvg, canUse, endBattle, growthLines, growthSvg, nextBoss, spawnBoss, startBattle } from './battle'
 import type { Command } from './battle'
+import { checkpoint, dungeonLines, dungeonSvg, enterDelve, eventText, leaveDelve, stepDelve } from './dungeon'
+import type { DelveEvent } from './dungeon'
 import {
   INITIAL,
   INITIAL_SAVED,
@@ -48,7 +50,7 @@ import {
   wornOf,
 } from './rpg'
 import type { Achievement } from './rpg'
-import { followTheme, readTheme } from './style'
+import { backupDaily, followTheme, jstDay, listBackups, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'dev-rpg'
 const TITLE = '冒険の書'
@@ -60,6 +62,7 @@ const TAB = atom({ plugin: 'dev-rpg', key: 'tab' } as const, 'status' as RpgTab)
 const CONFIRM = atom({ plugin: 'dev-rpg', key: 'isConfirmingReset' } as const, false)
 const NEWS = atom({ plugin: 'dev-rpg', key: 'news' } as const, '')
 const BATTLE = atom({ plugin: 'dev-rpg', key: 'battle' } as const, null as RpgBattle | null)
+const RESTORE = atom({ plugin: 'dev-rpg', key: 'restore' } as const, { list: null, pick: null } as RpgRestore)
 // turn-gacha の state (読むだけ。turn-gacha が無ければ undefined のまま)
 const GACHA_SAVE = { plugin: 'turn-gacha', key: 'save' } as const
 const GACHA_CARDS = { plugin: 'turn-gacha', key: 'cards' } as const
@@ -72,6 +75,29 @@ type $ = EngineInterface
 const BROKEN = '記録を読めなかったので、今の冒険は保存していません'
 
 let ownsMain = false
+
+/** 設定の backupDir (絶対パスでなければ空 = 控えない)。register で入れる */
+let backupDir = ''
+/** 控えを書いた (書かなくてよいと分かった) JST の日。同じ日は fs を読みに行かない */
+let backedDay = ''
+
+// 絶対パス (/x、\x、C:\x、C:/x) だけを受け付ける。相対パスや「C:」は今のフォルダから読まれてしまう
+const folderOption = (value: unknown) => {
+  const raw = String(value ?? '').trim()
+  return /^(?:[\\/]|[A-Za-z]:[\\/])/.test(raw) ? raw : ''
+}
+
+/** その日はじめての保存の前に、store の生の値 (知らない欄ごと) を控える */
+async function backup($: $, raw: unknown, now: number) {
+  if (backupDir === '' || raw === undefined || backedDay === jstDay(now)) return
+  const isDone = await backupDaily($, backupDir, STORE_KEY, raw, now).then(
+    () => true,
+    () => false,
+  )
+  if (isDone) backedDay = jstDay(now)
+}
+
+const OLD_VERSION = '新しい版が入りました。VS Code を開き直すまで記録は書きません'
 
 // store に書く物 (保存・やり直し) は 1 本ずつ流す。重なると同じ差分を 2 回足してしまう
 let chain: Promise<unknown> = Promise.resolve()
@@ -108,11 +134,14 @@ const readHero = async ($: $) => upgradeHero(await read($, HERO))
 /** 今の store を読み直し、前に合わせた時から増えた分だけを足して書く。画面も store に合わせる */
 const save = ($: $) =>
   serial(async () => {
+    const now = await $.clock.now()
+    if (!(await mayWrite($, now))) return
     const got = await readStore($)
     if (!got) {
       await update($, NEWS, () => BROKEN)
       return
     }
+    await backup($, got.raw, now)
     const store = got.saved
     // $.state.get は 1 つの dispatch の中では同じ時点を読むので、差分は update の中 (最新の値) で取る
     let written: RpgSaved | undefined
@@ -204,6 +233,7 @@ async function claim($: $) {
     if (!claimed) return
     const fresh = questRewards(today, claimed)
     if (fresh.length === 0) return
+    if (!(await mayWrite($, await $.clock.now()))) return
     // ponytail: 読んでから書くまでの間に別のセッションが受け取ると 2 度入る。間は数ミリ秒なので見送り
     const isSaved = await $.store.set(CLAIM_KEY, [...claimed, ...fresh.map(g => g.key)].slice(-KEEP_CLAIMED)).then(
       () => true,
@@ -306,6 +336,11 @@ async function unspend($: $) {
 const reset = ($: $) =>
   serial(async () => {
     const now = await $.clock.now()
+    if (!(await mayWrite($, now))) {
+      await update($, CONFIRM, () => false)
+      await update($, NEWS, () => OLD_VERSION)
+      return
+    }
     const fresh = startSession(INITIAL_SAVED, now)
     const hero = { ...fresh, synced: toSaved(fresh) }
     await $.store.set(STORE_KEY, hero.synced)
@@ -316,16 +351,93 @@ const reset = ($: $) =>
     await update($, NEWS, () => '冒険をやり直しました。Lv 1 から')
   })
 
+// ---------------------------------------------------------------- ダンジョン
+
+/** 潜り始める (from の階から。休み場より深くは選べない)。もう潜っていれば何もしない */
+async function enterDungeon($: $, from: number) {
+  const lead: string[] = []
+  await change(
+    $,
+    (h, now) => {
+      lead.length = 0
+      if (h.delve) return h
+      const next = enterDelve(h, now, from)
+      lead.push(`ダンジョンの ${next.delve?.floor ?? 1} 階に潜った。ターンを終えるたびに 1 歩進む`)
+      return next
+    },
+    false,
+    lead,
+  )
+  await save($)
+}
+
+/** 帰る: 袋の経験値を持ち帰る */
+async function leaveDungeon($: $) {
+  const lead: string[] = []
+  await change(
+    $,
+    h => {
+      lead.length = 0
+      if (h.delve) lead.push(`ダンジョンから帰った。袋の経験値 ${h.delve.loot} を持ち帰った`)
+      return leaveDelve(h)
+    },
+    false,
+    lead,
+  )
+  await save($)
+}
+
+// ---------------------------------------------------------------- 控えから戻す
+
+const CLOSED: RpgRestore = { list: null, pick: null }
+
+async function openRestore($: $) {
+  // 日付はファイルから来るので、形の合う物だけ (画面の文字に制御文字を入れない)
+  const list = (await listBackups($, backupDir, STORE_KEY).catch(() => [])).filter(b => /^\d{4}-\d{2}-\d{2}$/.test(b.day))
+  await update($, RESTORE, () => ({ list, pick: null }))
+}
+
+/** 控えの日の記録に戻す。store を丸ごと控えの値にして、画面の勇者も読み直す */
+const restore = ($: $, day: string) =>
+  serial(async () => {
+    const now = await $.clock.now()
+    const b = (await read($, RESTORE)).list?.find(x => x.day === day)
+    if (!b) return
+    if (!(await mayWrite($, now))) {
+      await update($, NEWS, () => OLD_VERSION)
+      return
+    }
+    if (typeof b.value !== 'object' || b.value === null || Array.isArray(b.value)) {
+      await update($, NEWS, () => 'この控えは読めない形でした')
+      return
+    }
+    const isSaved = await $.store.set(STORE_KEY, b.value).then(
+      () => true,
+      () => false,
+    )
+    if (!isSaved) {
+      await update($, NEWS, () => '記録を書けませんでした')
+      return
+    }
+    const saved = fromSaved(b.value)
+    await update($, HERO, x => ({ ...(x.s.startedAt === 0 ? startSession(saved, now) : x), ...saved, synced: saved, xpFrom: levelInfo(saved.xp).frac }))
+    await update($, BATTLE, () => null)
+    await update($, RESTORE, () => CLOSED)
+    await update($, NEWS, () => `${day} の記録に戻しました`)
+  })
+
 const openPane = async ($: $) => {
   await $.ui.open({ id: PANE, title: TITLE })
   return { text: '冒険の書を開きました。' }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  backupDir = folderOption(options.backupDir)
   followTheme(on)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await rememberVersion($)
     await readTheme($)
     // /rpg が拒まれたら (組み込みと被ったら) /dev-rpg にする
     const got = await $.command.register({ name: 'rpg', description: DESCRIPTION }).catch(() => undefined)
@@ -359,14 +471,26 @@ export const register: Register = on => {
     if (!e.agentId) {
       if (e.reason === 'answer') {
         const lead: string[] = []
+        const owned = await readOwned($)
+        let isBoss = false
+        let event: DelveEvent | undefined
         const fn = (h: RpgHero, now: number) => {
           const after = spawnBoss(onTurnEnd(h, now), now)
           lead.length = 0
-          if (after.bossSign > h.bossSign) lead.push(`ボスの気配! ${nextBoss(after).name}が待っている (気配を使わずに挑めて、経験値 1.5 倍)`)
-          return after
+          isBoss = after.bossSign > h.bossSign
+          if (isBoss) lead.push(`ボスの気配! ${nextBoss(after).name}が待っている (気配を使わずに挑めて、経験値 1.5 倍)`)
+          // ダンジョンで 1 歩。戦いの強さは持っている装備だけで
+          const step = stepDelve(after, wear(after, owned))
+          event = step.event
+          const said = eventText(event)
+          if (said) lead.push(said)
+          return step.hero
         }
         await change($, fn, true, lead)
-        if (lead.length > 0) $.ui.toast(`ボスの気配! ${nextBoss(await readHero($)).name}が湧いた`)
+        if (isBoss) $.ui.toast(`ボスの気配! ${nextBoss(await readHero($)).name}が湧いた`)
+        const ev = event as DelveEvent | undefined
+        if (ev?.kind === 'lost') $.ui.toast(`ダンジョン ${ev.fight.floor} 階で力尽きた。入口に戻った`)
+        else if (ev?.kind === 'won' && ev.fight.isBoss) $.ui.toast(`ダンジョン ${ev.fight.floor} 階の番人を倒した!`)
       }
       await save($)
     }
@@ -404,6 +528,8 @@ export const register: Register = on => {
     const sp = spOf(hero)
     const level = levelInfo(hero.xp).level
     const boss = nextBoss(hero)
+    const restoring = await read($, RESTORE)
+    const from = checkpoint(hero.deepest)
     const lines =
       tab === 'status'
         ? statusLines(hero)
@@ -413,7 +539,9 @@ export const register: Register = on => {
             ? battleLines(hero, battle)
             : tab === 'growth'
               ? growthLines(hero)
-              : achievementLines(hero)
+              : tab === 'dungeon'
+                ? dungeonLines(hero)
+                : achievementLines(hero)
     const source =
       tab === 'status'
         ? statusSvg(hero)
@@ -423,7 +551,9 @@ export const register: Register = on => {
             ? battleSvg(hero, battle)
             : tab === 'growth'
               ? growthSvg(hero)
-              : achievementsSvg(hero)
+              : tab === 'dungeon'
+                ? dungeonSvg(hero)
+                : achievementsSvg(hero)
     const worn = wornOf(hero.equip, owned)
     const go = (to: RpgTab) =>
       void (async () => {
@@ -512,23 +642,70 @@ export const register: Register = on => {
             {STATS.some(k => hero.alloc[k] > 0) && <Button key="respec" label="能力の振り分けを戻す" onPress={() => void unspend($)} />}
           </Box>
         )}
+        {tab === 'dungeon' && (
+          <Box key="dungeon" flexDirection="column">
+            {hero.delve ? (
+              <Button key="delve:leave" label={`帰る (袋の経験値 ${hero.delve.loot} を持ち帰る)`} variant="primary" onPress={() => void leaveDungeon($)} />
+            ) : (
+              <Button key="delve:enter" label={`${from} 階から潜る`} variant="primary" onPress={() => void enterDungeon($, from)} />
+            )}
+            {!hero.delve && from > 1 && <Button key="delve:enter1" label="1 階から潜る" dimColor onPress={() => void enterDungeon($, 1)} />}
+          </Box>
+        )}
+        {restoring.list !== null && (
+          <Box key="restore" flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} paddingY={1}>
+            <Text color="yellow" bold>
+              控えから戻す
+            </Text>
+            {backupDir === '' ? (
+              <Text dimColor>設定の backupDir を入れると控えが取れます</Text>
+            ) : restoring.list.length === 0 ? (
+              <Text dimColor>まだ控えがありません (毎日はじめての保存の時に取ります)</Text>
+            ) : restoring.pick === null ? (
+              restoring.list.map(b => (
+                <Button
+                  key={`restore:${b.day}`}
+                  label={`${b.day} の記録 (Lv ${levelInfo(fromSaved(b.value).xp).level})`}
+                  dimColor
+                  onPress={() => void update($, RESTORE, r => ({ ...r, pick: b.day }))}
+                />
+              ))
+            ) : (
+              <Box key="restore-ask" flexDirection="column">
+                <Text>{`${restoring.pick} の記録に戻しますか。今の記録は上書きされます`}</Text>
+                <Button key="restore:yes" label="戻す" variant="primary" onPress={() => void restore($, restoring.pick ?? '')} />
+                <Button key="restore:no" label="やめる" dimColor onPress={() => void update($, RESTORE, r => ({ ...r, pick: null }))} />
+              </Box>
+            )}
+            <Button key="restore:close" label="閉じる" dimColor onPress={() => void update($, RESTORE, () => CLOSED)} />
+          </Box>
+        )}
         {news !== '' && <Text color="yellow">{news}</Text>}
         <Box flexDirection="column">
           <Button
             key="battle"
             label={tab === 'battle' ? 'ステータスに戻る' : isFighting ? '戦う (戦闘中)' : `戦う (気配 ${hero.encounters}${hero.bossSign > 0 ? '・ボス出現' : ''})`}
-            variant={tab === 'battle' ? undefined : 'primary'}
+            variant={tab === 'status' ? 'primary' : undefined}
+            dimColor={tab !== 'status' && tab !== 'battle'}
             onPress={() => toggle('battle')}
           />
-          <Button key="growth" label={tab === 'growth' ? 'ステータスに戻る' : `成長 (SP ${sp.free})`} onPress={() => toggle('growth')} />
-          <Button key="tab" label={tab === 'achievements' ? 'ステータスに戻る' : '実績を見る'} onPress={() => toggle('achievements')} />
-          <Button key="gear" label={tab === 'gear' ? 'ステータスに戻る' : '装備'} onPress={() => toggle('gear')} />
+          <Button
+            key="dungeon"
+            label={tab === 'dungeon' ? 'ステータスに戻る' : hero.delve ? `ダンジョン (地下 ${hero.delve.floor} 階)` : `ダンジョン (記録 ${hero.deepest} 階)`}
+            dimColor={tab !== 'dungeon'}
+            onPress={() => toggle('dungeon')}
+          />
+          <Button key="growth" label={tab === 'growth' ? 'ステータスに戻る' : `成長 (SP ${sp.free})`} dimColor={tab !== 'growth'} onPress={() => toggle('growth')} />
+          <Button key="tab" label={tab === 'achievements' ? 'ステータスに戻る' : '実績を見る'} dimColor={tab !== 'achievements'} onPress={() => toggle('achievements')} />
+          <Button key="gear" label={tab === 'gear' ? 'ステータスに戻る' : '装備'} dimColor={tab !== 'gear'} onPress={() => toggle('gear')} />
+          <Button key="restore" label="控えから戻す" dimColor onPress={() => void (restoring.list === null ? openRestore($) : update($, RESTORE, () => CLOSED))} />
           <Button
             key="reset"
             label={isConfirming ? '本当にやり直す(すべて消えます)' : '冒険をやり直す'}
+            dimColor={!isConfirming}
             onPress={() => void (isConfirming ? reset($) : update($, CONFIRM, () => true))}
           />
-          {isConfirming && <Button key="reset-cancel" label="やめる" onPress={() => void update($, CONFIRM, () => false)} />}
+          {isConfirming && <Button key="reset-cancel" label="やめる" dimColor onPress={() => void update($, CONFIRM, () => false)} />}
         </Box>
       </Box>
     )

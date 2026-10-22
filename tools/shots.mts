@@ -54,7 +54,7 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
     // アイコンは 32x32 なので、1 枚ずつ載せると引き伸ばされる。iconStrip に通す
     return [
       m.headerSvg(14, '秋'),
-      i.iconStrip(['git-pane', 'fail-log', 'test-runner', 'cc-dash', 'usage-history', 'toast-inbox', 'mod-check', 'aqua-pet', 'turn-gacha', 'daily-quest', 'trophy-shelf']),
+      i.iconStrip(['git-pane', 'fail-log', 'run-guard', 'test-runner', 'cc-dash', 'usage-history', 'toast-inbox', 'mod-check', 'aqua-pet', 'turn-gacha', 'daily-quest', 'trophy-shelf', 'week-card']),
       i.bandSvg('固定', 2),
       i.bandSvg('開発', 10),
     ]
@@ -259,8 +259,16 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
     let b = bt.startBattle(worn, 20261021, false)
     b = bt.act(b, { kind: 'skill', id: 'scan' }, h.learned)
     b = bt.act(b, { kind: 'skill', id: 'slash' }, h.learned)
-    // 装備の画面 (gearSvg) と成長の画面 (growthSvg) も載せると重くなるので、ステータスと戦いだけ
-    return [m.statusSvg(worn), bt.battleSvg(worn, b)]
+    // 0.6.0 のダンジョン: Lv 24 の勇者が 16 階から潜り、19 階まで勝ち抜いて 20 階 (番人の階) を 5 歩進んだ所
+    const d = await load('dev-rpg/hooks/dungeon.ts')
+    let deep = m.startSession(
+      m.fromSaved({ xp: m.xpToReach(24), deepest: 17, learned: { slash: NOW, heal: NOW, scan: NOW, lint: NOW }, alloc: { str: 6, vit: 6, int: 4, agi: 0 } }),
+      NOW - 50 * MIN,
+    )
+    deep = d.enterDelve(deep, NOW - 300 * MIN, 16)
+    for (let i = 0; i < 4 * d.DELVE.steps + 5; i++) deep = d.stepDelve(deep, deep).hero
+    // 装備の画面 (gearSvg) と成長の画面 (growthSvg) も載せると重くなるので、ステータスと戦いとダンジョンだけ
+    return [m.statusSvg(worn), bt.battleSvg(worn, b), d.dungeonSvg(deep)]
   },
 
   'code-omikuji': async () => {
@@ -428,7 +436,7 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
     return [{ svg: m.tanzakuSvg({ id: 'h1', at: NOW, text: '画面越し 赤が緑に 変わる朝' }), at: 6 }]
   },
 
-  // 季節と時刻で背景が変わる。秋の夕方 (JST 17:30 = 15 分刻みの 70 番) で撮る
+  // 季節と時刻で背景が変わる。秋の夕方 (JST 17:30 = 15 分刻みの 70 番) で撮る。底に turn-gacha のかざりを置く
   'aqua-pet': async () => {
     const m = await load('aqua-pet/hooks/tank.ts')
     const fish = [
@@ -443,10 +451,15 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
     ]
     const tank = {
       ...m.INITIAL, turns: 80, bornAt: NOW - 12 * DAY, fullness: 80, fedAt: NOW, murk: 1, name: 'demo', isRunning: true, lastActiveAt: NOW, fish,
+      deco: ['kusa', 'shiro', 'takara', 'chinbotsu', 'kai'],
       view: { period: '夕', season: '秋', slot: 70, fullness: 80, isIdle: false, isUpset: false, isFeeding: false, days: 12 },
     }
-    // 2 枚目は夜の冬 (水の色と飾りが時間帯と季節で変わる)
-    return [m.drawTank(tank), m.drawTank({ ...tank, view: { ...tank.view, period: '夜', season: '冬', slot: 88 } }), m.fishListSvg(fish)]
+    // 2 枚目は夜の冬 (城の窓が灯り、雪が積もる)
+    return [
+      m.drawTank(tank),
+      m.drawTank({ ...tank, deco: ['ishi', 'ryuboku', 'shiro', 'tsubo', 'kusa'], view: { ...tank.view, period: '夜', season: '冬', slot: 88 } }),
+      m.fishListSvg(fish),
+    ]
   },
 
   'session-timeline': async () => {
@@ -593,9 +606,16 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
   'rule-watch': async () => {
     const m = await load('rule-watch/hooks/rules.ts')
     const e = (k: number, rule: string, detail = '') => ({ at: NOW - k * MIN, rule, detail })
-    const history = [e(140, 'memo'), e(95, 'english'), e(41, 'question', 'このまま公開しますか？'), e(6, 'question', '次は README を直しますか？')]
+    const history = [e(140, 'memo'), e(95, 'english'), e(52, 'log', '2026-10-22.md'), e(41, 'question', 'このまま公開しますか？'), e(18, 'logLine', '2026-10-22.md'), e(6, 'closing', '2026-10-22.md')]
     return [
-      m.paneSvg({ misses: [{ rule: 'question', detail: '次は README を直しますか？' }], counts: { english: 1, question: 2, memo: 1 }, history, isMemoPending: false, watching: ['english', 'question', 'memo'] }),
+      m.paneSvg({
+        misses: [{ rule: 'closing', detail: '2026-10-22.md' }],
+        counts: { english: 1, question: 1, memo: 1, log: 1, logLine: 1, closing: 1 },
+        history,
+        isMemoPending: false,
+        isLogPending: true,
+        watching: ['english', 'question', 'memo', 'log', 'logLine', 'closing'],
+      }),
     ]
   },
 
@@ -633,6 +653,26 @@ export const SHOTS: Record<string, () => Promise<Pic[]>> = {
       fileCount: 31,
     }
     return [m.paneSvg({ report, today: '2026-10-22', isOverridden: true })]
+  },
+  'run-guard': async () => {
+    const m = await load('run-guard/hooks/guard.ts')
+    const e = (k: number, groups: string[], command: string, action: string) => ({ at: NOW - k * MIN, groups, command, action })
+    const log = [
+      e(95, ['window'], 'Start-Process D:/repo/dist/app.exe', 'blocked'),
+      e(60, ['window', 'sound'], 'godot --path D:/repo/game', 'blocked'),
+      e(31, ['headless'], 'claude -p "テストの答えを出して"', 'blocked'),
+      e(12, ['sound'], 'ffplay -autoexit D:/repo/out/bgm.wav', 'asked-yes'),
+      e(4, ['window'], 'chrome http://localhost:3000', 'told'),
+    ]
+    return [m.paneSvg({ saved: { off: { window: false, sound: false, headless: true }, counts: { window: 3, sound: 2, headless: 1 }, log }, mode: '止める' })]
+  },
+  'week-card': async () => {
+    const m = await load('week-card/hooks/card.ts')
+    const turns = [14, 0, 22, 31, 18, 9, 12]
+    const week = turns.map((t, k) => ({ day: m.dayKey(NOW - (6 - k) * DAY), turns: t, tools: t * 6, inputTokens: t * 900, outputTokens: t * 2400, minutes: t * 2 }))
+    const snap = { level: 14, deepest: 23, cards: 31, fish: 6, quests: 45, streak: 4 }
+    const base = { day: m.dayKey(NOW - 7 * DAY), snap: { level: 12, deepest: 15, cards: 27, fish: 5, quests: 33, streak: 1 } }
+    return [m.cardSvg(NOW, m.usageOf(week, NOW), snap, base)]
   },
 }
 

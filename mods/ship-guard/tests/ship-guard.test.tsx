@@ -217,7 +217,7 @@ test('ペイン: 記録と状態。「このセッションは見張らない」
 })
 
 test('純関数: push を読む場所・送る範囲', () => {
-  expect(repoDirOf(`cd "D:/github公開用/claude-code-mods" && ${PUSH} origin main --tags`)).toBe('D:/github公開用/claude-code-mods')
+  expect(repoDirOf(`cd "D:/public-copy/claude-code-mods" && ${PUSH} origin main --tags`)).toBe('D:/public-copy/claude-code-mods')
   expect(repoDirOf('cd /d/repo && git status && cd sub; git push')).toBe('sub')
   expect(repoDirOf("git -C 'C:/a b/repo' push")).toBe('C:/a b/repo')
   expect(repoDirOf('Set-Location -LiteralPath "D:\\x"; if ($?) { git push }')).toBe('D:\\x')
@@ -249,11 +249,11 @@ test('git push: 確認済みで中身もきれいなら聞かずに通す。読�
   await startTurn($)
   await claudeAsks($, w, 'GitHub に公開しますか？', '公開する')
   w.asked.length = 0
-  const r = await bash($, `cd "D:/github公開用/claude-code-mods" && ${PUSH} origin main`)
+  const r = await bash($, `cd "D:/public-copy/claude-code-mods" && ${PUSH} origin main`)
   expect(r.deny).toBeUndefined()
   expect(w.asked).toEqual([])
   expect(w.git.length).toBe(1)
-  expect(w.git[0]?.cwd).toBe('D:/github公開用/claude-code-mods')
+  expect(w.git[0]?.cwd).toBe('D:/public-copy/claude-code-mods')
   expect(w.git[0]?.argv).toContain('log')
   expect(w.git[0]?.argv.slice(-3)).toEqual(['HEAD', '--not', '--remotes'])
   // gh release は読まない

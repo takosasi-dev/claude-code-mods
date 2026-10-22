@@ -1,7 +1,15 @@
 {
   "name": "usage-history",
-  "version": "0.1.2",
-  "description": "/history で日をまたいだ使い方の記録(日ごとのターン数・トークン・ツール回数)を縦棒グラフと曜日×時間帯のヒートマップで見る",
+  "version": "0.2.0",
+  "description": "/history で日をまたいだ使い方の記録(日ごとのターン数・トークン・ツール回数)を縦棒グラフと曜日×時間帯のヒートマップで見る (直近 7 日の数をほかの mod にも見せる。記録は毎日 1 回控えを取れる)",
   "author": { "name": "takosasi-dev" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "backupDir": {
+      "type": "string",
+      "title": "記録の控えのフォルダ",
+      "description": "毎日 1 回、記録をこのフォルダに控える(7 日分)。消えた時はペインの「控えから戻す」で戻せる (絶対パス)。空なら控えない",
+      "default": ""
+    }
+  }
 }

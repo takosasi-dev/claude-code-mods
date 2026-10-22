@@ -1046,3 +1046,115 @@ test('/config の theme が light 系なら明るい色で描き、切り替え�
   expect(await source()).toMatch(/fill="#0d1117"/)
   expect(await source()).not.toMatch(/fill="#ffffff"/)
 })
+
+// ---------------- 0.3.0 記録の控え・古い版では書かない ----------------
+
+const BACKUP = { options: { backupDir: 'C:/work/backup' } }
+const DIR = 'C:/work/backup/wait-games'
+const DAY = 86_400_000
+const slash = (p: string) => p.replace(/\\/g, '/')
+
+/** $.fs の代わり。控えのファイルは Map、plugin.json は version() の版を返す。書いた控えの path を数える */
+const fakeFs = (on: On, files: Record<string, unknown> = {}, version: () => string = () => '0.3.0') => {
+  const m = new Map(Object.entries(files).map(([p, v]) => [p, JSON.stringify(v)]))
+  const writes: string[] = []
+  on('fs.read', (_$, e) => {
+    const p = slash(e.path)
+    if (p.endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'wait-games', version: version() }) }
+    const t = m.get(p)
+    if (t === undefined) throw new Error('ENOENT')
+    return { value: t }
+  })
+  on('fs.write', (_$, e) => {
+    m.set(slash(e.path), e.text)
+    writes.push(slash(e.path))
+    return { value: undefined }
+  })
+  return { writes, file: (p: string) => JSON.parse(m.get(p) ?? 'null') as { day: string; value: unknown } | null }
+}
+
+/** 2048 で 1 手合わせて点を取る (最高点を超えれば記録を書く) */
+const score2048 = async (ui: { press: (q: { key: string }) => Promise<unknown> }, arm: (key: string, value: unknown) => unknown, tile: number) => {
+  arm('g2048', game([tile, tile, ...Array(14).fill(0)]))
+  await ui.press({ key: 'new-2048' })
+  await ui.press({ key: 'left' })
+}
+
+test('控えは設定のフォルダに 1 日 1 回だけ、知らない欄ごと書く。ターンの終わりにも日をまたいだら控える', BACKUP, async ($, on) => {
+  const fs = fakeFs(on)
+  const init = { ...EMPTY_STATS, best2048: 10, futureField: 1 }
+  const { clock, store, arm } = await boot($, on, init)
+  // 2026-10-20 は火曜 (曜日の枠 2)
+  expect(fs.writes).toEqual([`${DIR}/stats-2.json`])
+  expect(fs.file(`${DIR}/stats-2.json`)).toEqual({ day: '2026-10-20', value: init })
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await score2048(ui, arm, 16)
+  expect(store.get('stats')).toMatchObject({ best2048: 32, futureField: 1 })
+  await endTurn($, await startTurn($))
+  expect(fs.writes).toHaveLength(1)
+  // 日をまたいで動き続けても、次の日の最初のターンの終わりに控える (水曜の枠 3)
+  await clock.advance(DAY)
+  await endTurn($, await startTurn($))
+  expect(fs.writes).toEqual([`${DIR}/stats-2.json`, `${DIR}/stats-3.json`])
+  expect(fs.file(`${DIR}/stats-3.json`)).toMatchObject({ day: '2026-10-21', value: { best2048: 32, futureField: 1 } })
+  await endTurn($, await startTurn($))
+  expect(fs.writes).toHaveLength(2)
+})
+
+test('設定が空なら控えず、戻す欄には設定のしかたを出す', async ($, on) => {
+  const fs = fakeFs(on)
+  await boot($, on, { ...EMPTY_STATS, best2048: 10 })
+  await endTurn($, await startTurn($))
+  expect(fs.writes).toEqual([])
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'restore' })
+  expect(await ui.find({ type: 'Text', text: '設定の backupDir を入れると控えが取れます' })).toBeDefined()
+  expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 控えから戻すと、選んだ日の記録になる (確かめてから書く)`, BACKUP, async ($, on) => {
+    const old = { best2048: 9999, wins2048: 2, winsMines: 5, fastestMines: 3000, puzzles: { fifteen: { wins: 1, bestMoves: 80, fastest: 60_000 } }, futureField: 1 }
+    fakeFs(on, { [`${DIR}/stats-1.json`]: { day: '2026-10-19', value: old } })
+    const { store, toasts, last } = await boot($, on, { ...EMPTY_STATS, best2048: 10 })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ key: 'restore' }))?.props.dimColor).toBe(true)
+    await ui.press({ key: 'restore' })
+    // 今日の控え (開いた時に取った) と昨日の控えが、新しい順に並ぶ
+    expect((await ui.find({ key: 'day-2026-10-20' }))?.props.label).toBe('2026-10-20')
+    expect(await ui.find({ key: 'day-2026-10-19' })).toBeDefined()
+    expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+    await ui.press({ key: 'day-2026-10-19' })
+    expect(await ui.find({ type: 'Text', text: '2026-10-19: この日の記録に戻しますか。今の記録は上書きされます' })).toBeDefined()
+    // やめると書かない
+    await ui.press({ key: 'restore-no' })
+    expect(store.get('stats')).toMatchObject({ best2048: 10 })
+    await ui.press({ key: 'day-2026-10-19' })
+    await ui.press({ key: 'restore-ok' })
+    expect(store.get('stats')).toEqual(old)
+    // メモリの中の記録も読み直す
+    expect(last<GameStats>('stats')).toMatchObject({ best2048: 9999, winsMines: 5 })
+    expect(toasts).toContain('2026-10-19 の記録に戻しました')
+    expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+  })
+}
+
+// isStale は style.ts のモジュールの値を持つので、この試験はファイルの一番下に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、控えからも戻さない', BACKUP, async ($, on) => {
+  let version = '0.3.0'
+  fakeFs(on, { [`${DIR}/stats-1.json`]: { day: '2026-10-19', value: { ...EMPTY_STATS, best2048: 9999 } } }, () => version)
+  const { store, clock, toasts, arm } = await boot($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await score2048(ui, arm, 2)
+  expect(store.get('stats')).toMatchObject({ best2048: 4 })
+  version = '0.4.0'
+  await clock.advance(61_000)
+  await score2048(ui, arm, 8)
+  expect(store.get('stats')).toMatchObject({ best2048: 4 })
+  await ui.press({ key: 'restore' })
+  await ui.press({ key: 'day-2026-10-19' })
+  await ui.press({ key: 'restore-ok' })
+  expect(store.get('stats')).toMatchObject({ best2048: 4 })
+  // 開き直しのお願いは 1 回だけ
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
+})

@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { endsWithQuestion, isEnglish, mentionsDir, proseOf, questionLine } from '../hooks/rules'
+import { endsWithQuestion, hasLogLine, isClosing, isEnglish, isTodayLog, mentionsDir, proseOf, questionLine, remindText } from '../hooks/rules'
 
 const NOW = Date.parse('2026-10-22T05:00:00Z')
 const CWD = '/tmp/demo'
@@ -61,8 +61,8 @@ const setup = (on: On, below: World['below'] = 'none') => {
 
 const begin = ($: Engine) => $.session.start({ cwd: CWD, surface: 'vscode', isInteractive: true })
 /** メインの 1 ターン。中で fn (ツール呼び出し) をして、answer で終える */
-const turn = async ($: Engine, answer: string, fn: () => Promise<unknown> = async () => {}) => {
-  await $.turn.start({ text: 'やって', turnId: 't1' })
+const turn = async ($: Engine, answer: string, fn: () => Promise<unknown> = async () => {}, text = 'やって') => {
+  await $.turn.start({ text, turnId: 't1' })
   await fn()
   await $.turn.complete({ answer, durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
 }
@@ -221,4 +221,97 @@ test('ペイン: 数と記録。「Claude に伝える」で入力欄に入れ�
   await term.press({ key: 'remind' })
   expect(w.filled[0]).toBe('さっきの返事は約束ごとから外れていました。\n- 確認は選択肢で聞く: 選択肢を使わずに文で質問しました(続けて公開しますか？)\n約束に沿って直してください。')
   expect(w.toasts).toEqual(['入力欄に入れました(送信はしていません)'])
+})
+
+// ── 開発ログ (NOW は日本時間 2026-10-22 14:00)
+
+const LOG = 'D:\\notes\\devlog'
+const TODAY = 'D:/notes/devlog/2026-10-22.md'
+const LOGSET = { options: { logDir: LOG } }
+const DONE_LINE = `${JAPANESE}\n\n📝 Obsidianに開発ログを記録しました(2026-10-22.md)`
+
+test('純関数: 締めの言葉・知らせの 1 行・今日のログのファイル', () => {
+  expect(isClosing('ありがとう、一旦ここまでで')).toBe(true)
+  expect(isClosing('おつかれさま')).toBe(true)
+  expect(isClosing('次はテストを足して')).toBe(false)
+  expect(hasLogLine(DONE_LINE)).toBe(true)
+  expect(hasLogLine(`${JAPANESE}\n\n📝 メモしました\n開発ログも書きました`)).toBe(false)
+  expect(isTodayLog('D:\\notes\\devlog\\2026-10-22.md', LOG, NOW)).toBe(true)
+  expect(isTodayLog('D:/notes/devlog/2026-10-21.md', LOG, NOW)).toBe(false)
+  expect(isTodayLog('D:/notes/devlog/sub/2026-10-22.md', LOG, NOW)).toBe(false)
+  expect(isTodayLog(TODAY, '', NOW)).toBe(false)
+  // 日本時間の日付で見る (UTC 15:00 は日本時間の翌日)
+  expect(isTodayLog('D:/notes/devlog/2026-10-23.md', LOG, Date.parse('2026-10-22T15:00:00Z'))).toBe(true)
+  expect(mentionsDir('Add-Content "D:\\notes\\devlog\\2026-10-22.md" x', LOG, '2026-10-22.md')).toBe(true)
+  expect(mentionsDir('cat /d/notes/devlog/2026-10-22.md', LOG, '2026-10-22.md')).toBe(true)
+  expect(mentionsDir('cat /d/notes/devlog/2026-10-21.md', LOG, '2026-10-22.md')).toBe(false)
+})
+
+test('コミットの後に今日の開発ログを書かないと知らせ、今日のファイルを書いたら下ろす', LOGSET, async ($, on) => {
+  setup(on)
+  await begin($)
+  await turn($, JAPANESE, () => bash($, 'git commit -m "x"'))
+  expect(await band($)).toBe('約束ごと: コミットの後、今日の開発ログが未記入です')
+  // 次のターンでも残る。昨日のファイルでは下ろさない
+  await turn($, JAPANESE, () => write($, 'D:/notes/devlog/2026-10-21.md'))
+  expect(await band($)).toBe('約束ごと: コミットの後、今日の開発ログが未記入です')
+  await write($, TODAY)
+  expect(await band($)).toBe('')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const text = await shown(ui)
+  expect(text).toContain('区切りで開発ログ: 1 回')
+  expect(text).not.toContain('logDir に開発ログのフォルダを入れると始まります')
+})
+
+test('ログを書いてからコミットしたターンは待たない', LOGSET, async ($, on) => {
+  setup(on)
+  await begin($)
+  await turn($, DONE_LINE, async () => {
+    await write($, TODAY)
+    await bash($, 'git commit -m "x"')
+  })
+  expect(await band($)).toBe('')
+})
+
+test('開発ログを書いたのに知らせの 1 行が無いと知らせる。シェルで書いても書いた扱い', LOGSET, async ($, on) => {
+  const w = setup(on)
+  await begin($)
+  await turn($, JAPANESE, () => write($, TODAY))
+  expect(await band($)).toBe('約束ごと: 開発ログを書いたのに、記録しましたの 1 行がありません')
+  await turn($, DONE_LINE, () => bash($, 'cat note >> "/d/notes/devlog/2026-10-22.md"'))
+  expect(await band($)).toBe('')
+  // 書かなかったターンは 1 行が無くても知らせない
+  await turn($, JAPANESE)
+  expect(await band($)).toBe('')
+  await turn($, JAPANESE, () => write($, TODAY))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'remind' })
+  expect(w.filled[0]).toContain('- 開発ログの報告の 1 行: 開発ログを書いたのに、記録しましたの 1 行がありません(2026-10-22.md)。返事に「📝 Obsidianに開発ログを記録しました(ファイル名)」の 1 行を入れてください')
+  expect(await shown(ui)).toContain('開発ログの報告の 1 行: 2 回')
+})
+
+test('締めの言葉があったのに開発ログを書かないと知らせ、書けば知らせない', LOGSET, async ($, on) => {
+  setup(on)
+  await begin($)
+  await turn($, JAPANESE, async () => {}, 'ありがとう、一旦ここまで')
+  expect(await band($)).toBe('約束ごと: 締めの言葉があったのに、開発ログを書いていません')
+  await turn($, DONE_LINE, () => write($, TODAY), 'おつかれさま')
+  expect(await band($)).toBe('')
+  // サブエージェントの入力は依頼者の入力ではない
+  await $.turn.start({ text: 'ありがとう', turnId: 'a1', agentId: 'agent-1' })
+  await turn($, JAPANESE)
+  expect(await band($)).toBe('')
+})
+
+test('logDir が空なら開発ログは見ない', async ($, on) => {
+  setup(on)
+  await begin($)
+  await turn($, JAPANESE, () => write($, TODAY), 'ありがとう')
+  await turn($, JAPANESE, () => bash($, 'git commit -m "x"'))
+  expect(await band($)).toBe('')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const text = await shown(ui)
+  expect(text).toContain('区切りで開発ログ(見ていない): 0 回')
+  expect(text).toContain('logDir に開発ログのフォルダを入れると始まります')
+  expect(remindText([{ rule: 'closing', detail: '' }])).toContain('その日の総括も書き直してください')
 })

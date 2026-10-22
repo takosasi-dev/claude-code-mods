@@ -1,5 +1,5 @@
 // 経験値・レベル・実績・成長 (SP) の計算と、ステータス窓の SVG / terminal 用の行。どれも純関数
-import type { RpgEquip, RpgGachaCard, RpgHero, RpgSaved, RpgSession, RpgSlot, RpgStat } from '../types'
+import type { RpgDelve, RpgDelveFight, RpgEquip, RpgGachaCard, RpgHero, RpgSaved, RpgSession, RpgSlot, RpgStat } from '../types'
 import { clean, esc, isLight, short } from './style'
 
 // ---------------------------------------------------------------- 決まりごと
@@ -202,8 +202,8 @@ export const skillOf = (id: string) => SKILLS.find(s => s.id === id)
 
 /** ボスの id (並びは battle.ts の BOSSES と同じ)。倒すと SP がもらえる */
 export const BOSS_IDS = ['loop', 'outage', 'legacy'] as const
-/** SP の入り方: レベル 1 つで 2、実績 1 つで 1、3 勝ごとに 1、ボスを初めて倒すと 3 */
-export const SP_RULE = { level: 2, achievement: 1, winsPer: 3, boss: 3 } as const
+/** SP の入り方: レベル 1 つで 2、実績 1 つで 1、3 勝ごとに 1、ボスを初めて倒すと 3、ダンジョンを 10 階勝ち抜くごとに 2 */
+export const SP_RULE = { level: 2, achievement: 1, winsPer: 3, boss: 3, deepPer: 10, deep: 2 } as const
 
 const allocSum = (h: Pick<RpgSaved, 'alloc'>) => STATS.reduce((n, k) => n + h.alloc[k], 0)
 
@@ -245,6 +245,9 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'boss-all', name: '世界を救う', glyph: '救', hint: 'ボスを全部倒す', test: c => BOSS_IDS.every(id => c.h.defeated[id] !== undefined) },
   { id: 'skill-first', name: '新しい技', glyph: '技', hint: 'スキルを初めて覚える', test: c => Object.keys(c.h.learned).length >= 1 },
   { id: 'train-10', name: '鍛錬の成果', glyph: '錬', hint: '能力に SP を 10 振る', test: c => allocSum(c.h) >= 10 },
+  // ここからダンジョン (0.6.0)
+  { id: 'deep-5', name: '地下へ', glyph: '階', hint: 'ダンジョンの 5 階を勝ち抜く', test: c => c.h.deepest >= 5 },
+  { id: 'deep-10', name: '番人越え', glyph: '番', hint: 'ダンジョン 10 階の番人を倒す', test: c => c.h.deepest >= 10 },
 ]
 
 /** SP: もらった分 (内訳つき)・使った分・残り。使った分がもらった分を超えても (別のセッションと同時に使った時) 残りは 0 */
@@ -254,9 +257,10 @@ export function spOf(h: RpgSaved) {
   const fromAchievements = ACHIEVEMENTS.filter(a => h.achievements[a.id] !== undefined).length * SP_RULE.achievement
   const fromWins = Math.floor(h.wins / SP_RULE.winsPer)
   const fromBosses = BOSS_IDS.filter(id => h.defeated[id] !== undefined).length * SP_RULE.boss
-  const earned = fromLevel + fromAchievements + fromWins + fromBosses
+  const fromDeep = Math.floor((h.deepest ?? 0) / SP_RULE.deepPer) * SP_RULE.deep
+  const earned = fromLevel + fromAchievements + fromWins + fromBosses + fromDeep
   const used = allocSum(h) + SKILLS.reduce((n, s) => n + (h.learned[s.id] !== undefined ? s.sp : 0), 0)
-  return { earned, used, free: Math.max(0, earned - used), fromLevel, fromAchievements, fromWins, fromBosses }
+  return { earned, used, free: Math.max(0, earned - used), fromLevel, fromAchievements, fromWins, fromBosses, fromDeep }
 }
 
 /** 能力に 1 振る。SP が無ければそのまま */
@@ -301,6 +305,8 @@ export const INITIAL_SAVED: RpgSaved = {
   learned: {},
   defeated: {},
   bossSign: 0,
+  deepest: 0,
+  delve: null,
 }
 
 /** 遭遇はここまでためられる */
@@ -337,10 +343,55 @@ export const toSaved = (h: RpgHero): RpgSaved => {
     alloc: { ...h.alloc },
     learned: { ...h.learned },
     defeated: { ...h.defeated },
+    deepest: h.deepest,
+    delve: h.delve && { ...h.delve },
   }
   for (const k of SAVED_KEYS) out[k] = h[k]
   return out
 }
+
+const DELVE_NUMS = ['startedAt', 'floor', 'step', 'hp', 'mp', 'loot', 'cleared', 'seed'] as const
+export const DELVE_KEYS: readonly string[] = [...DELVE_NUMS, 'last']
+
+const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+
+function fightFrom(v: unknown): RpgDelveFight | null {
+  if (typeof v !== 'object' || v === null) return null
+  const o = v as Record<string, unknown>
+  if (!finite(o.floor) || !finite(o.level) || (o.result !== 'won' && o.result !== 'lost')) return null
+  return {
+    floor: Math.max(1, Math.floor(o.floor as number)),
+    name: short(clean(String(o.name ?? '')), 20),
+    level: Math.max(1, Math.floor(o.level as number)),
+    isBoss: o.isBoss === true,
+    shape: typeof o.shape === 'string' ? o.shape.slice(0, 12) : 'slime',
+    color: typeof o.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(o.color) ? o.color : '#3fb950',
+    result: o.result,
+    hitMe: finite(o.hitMe) ? Math.max(0, Math.floor(o.hitMe as number)) : 0,
+    loot: finite(o.loot) ? Math.max(0, Math.floor(o.loot as number)) : 0,
+  }
+}
+
+/** store のダンジョンを確かめる。形が違えば入口にいる (null) */
+export function delveFrom(v: unknown): RpgDelve | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const o = v as Record<string, unknown>
+  if (!DELVE_NUMS.every(k => finite(o[k]))) return null
+  const n = (k: (typeof DELVE_NUMS)[number]) => Math.max(0, Math.floor(o[k] as number))
+  return {
+    startedAt: n('startedAt'),
+    floor: Math.max(1, n('floor')),
+    step: n('step'),
+    hp: Math.min(100, n('hp')),
+    mp: Math.min(100, n('mp')),
+    loot: n('loot'),
+    cleared: n('cleared'),
+    seed: n('seed') >>> 0,
+    last: fightFrom(o.last),
+  }
+}
+
+const sameDelve = (a: RpgDelve | null, b: RpgDelve | null) => JSON.stringify(a) === JSON.stringify(b)
 
 /** id → 時刻 の表を、知っている id の数だけ拾う */
 function stamps(v: unknown, ids: readonly string[]): Record<string, number> {
@@ -382,6 +433,9 @@ export function fromSaved(raw: unknown): RpgSaved {
   }
   out.learned = stamps(o.learned, SKILLS.map(s => s.id))
   out.defeated = stamps(o.defeated, BOSS_IDS)
+  // ダンジョンは 0.6.0 から。無い (古い store) なら入口にいる
+  out.deepest = finite(o.deepest) ? Math.max(0, Math.floor(o.deepest as number)) : 0
+  out.delve = delveFrom(o.delve)
   // 装備は 0.2.0 から。無い (古い store) なら何も着けていない
   const eq = o.equip
   if (typeof eq === 'object' && eq !== null) {
@@ -396,9 +450,10 @@ export function fromSaved(raw: unknown): RpgSaved {
 /**
  * 今の store に、このセッションで増えた分 (mine − base) だけを足す。
  * 数は足し算、実績は和集合 (早い方の時刻)、日付は新しい方。同じ store を使う別のセッションの分を消さない。
- * 装備はこのセッションで変えた時だけ mine を書く (最後に書いた方が勝つ)
+ * 装備とダンジョンの潜りはこのセッションで変えた時だけ mine を書く (最後に書いた方が勝つ)。一番深い階は大きい方
  */
 export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): RpgSaved {
+  // ponytail: 2 つのセッションが同じ潜りを同時に進めると、後に書いた方の歩みだけが残る。歩みを差分で足すなら潜りを id ごとに持つ
   const out = {
     ...store,
     achievements: unionStamps(store.achievements, mine.achievements),
@@ -406,6 +461,8 @@ export function mergeSaved(store: RpgSaved, base: RpgSaved, mine: RpgSaved): Rpg
     defeated: unionStamps(store.defeated, mine.defeated),
     equip: { ...(sameEquip(mine.equip, base.equip) ? store.equip : mine.equip) },
     alloc: { ...store.alloc },
+    deepest: Math.max(store.deepest, mine.deepest),
+    delve: sameDelve(mine.delve, base.delve) ? store.delve : mine.delve,
   }
   for (const k of SAVED_KEYS) out[k] = Math.max(0, store[k] + mine[k] - base[k])
   out.encounters = Math.min(MAX_ENCOUNTERS, out.encounters)
@@ -451,15 +508,17 @@ export function withUnknown(raw: unknown, mine: RpgSaved): Record<string, unknow
     defeated: { ...unknownOf(o.defeated, BOSS_IDS), ...mine.defeated },
     alloc: { ...unknownOf(o.alloc, STATS), ...mine.alloc },
     equip,
+    // 同じ潜り (始めた時刻が同じ) なら、その中の知らない欄も残す
+    delve: mine.delve && { ...(isObj(o.delve) && o.delve.startedAt === mine.delve.startedAt ? unknownOf(o.delve, DELVE_KEYS) : {}), ...mine.delve },
   }
 }
 
 /**
- * 古い版のまま state に残っている勇者 (開いたまま /reload-plugins した時) に、新しい値 (0.3.0 の戦いと成長・0.4.0 のボスの気配) を足す。
+ * 古い版のまま state に残っている勇者 (開いたまま /reload-plugins した時) に、新しい値 (0.3.0 の戦いと成長・0.4.0 のボスの気配・0.6.0 のダンジョン) を足す。
  * 今の値 (s・HP・経験値バー) はそのまま。もう新しい形ならそのまま返す
  */
 export const upgradeHero = (h: RpgHero): RpgHero =>
-  (h as Partial<RpgHero>).alloc !== undefined && (h as Partial<RpgHero>).bossSign !== undefined
+  (h as Partial<RpgHero>).alloc !== undefined && (h as Partial<RpgHero>).bossSign !== undefined && (h as Partial<RpgHero>).deepest !== undefined
     ? h
     : { ...h, ...fromSaved(h), synced: fromSaved(h.synced) }
 

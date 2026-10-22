@@ -1,4 +1,4 @@
-import type { AquaFish, AquaPeriod, AquaSeason, AquaTank, AquaView, FishKind, FishStage, KnownFishKind } from '../types'
+import type { AquaFish, AquaPeriod, AquaSeason, AquaTank, AquaView, DecoId, FishKind, FishStage, KnownDecoId, KnownFishKind } from '../types'
 import { C, clean, dayPart, esc, frame, header, panel, season } from './style'
 
 export const HOUR = 3_600_000
@@ -150,13 +150,17 @@ export const INITIAL: AquaTank = {
   upsetUntil: 0,
   feedUntil: 0,
   fish: [],
+  deco: ['', '', '', '', ''],
   isNaming: false,
   isListing: false,
+  isDecorating: false,
+  pickSlot: 0,
+  restore: null,
   view: { period: '昼', season: '春', slot: 48, fullness: 70, isIdle: false, isUpset: false, isFeeding: false, days: 1 },
 }
 
 /** $.store に残す分 */
-export type Saved = Pick<AquaTank, 'turns' | 'bornAt' | 'fullness' | 'fedAt' | 'murk' | 'name' | 'fish'>
+export type Saved = Pick<AquaTank, 'turns' | 'bornAt' | 'fullness' | 'fedAt' | 'murk' | 'name' | 'fish' | 'deco'>
 export const toSaved = (t: AquaTank): Saved => ({
   turns: t.turns,
   bornAt: t.bornAt,
@@ -165,6 +169,7 @@ export const toSaved = (t: AquaTank): Saved => ({
   murk: t.murk,
   name: t.name,
   fish: t.fish,
+  deco: t.deco,
 })
 
 /**
@@ -188,8 +193,240 @@ export const fromSaved = (raw: unknown, now: number): Saved => {
     murk: clamp(Math.floor(num('murk', 0)), 0, MAX_MURK),
     name: typeof o.name === 'string' ? o.name.slice(0, 12) : '',
     fish: fishFrom(o.fish, turns, bornAt),
+    deco: decoFrom(o.deco),
   }
 }
+
+// ---------------------------------------------------------------- かざり (turn-gacha のカードで手に入る)
+
+/** 底の置き場の数 */
+export const DECO_SLOTS = 5
+/** 置き場の真ん中の x (左から) */
+export const SLOT_X = [46, 112, 180, 248, 314]
+
+type Rarity = 'N' | 'R' | 'SR' | 'SSR'
+export type GachaCounts = Record<Rarity, number>
+
+/**
+ * かざりの表。rarity のカードを need 種類持っていると手に入る。
+ * id は保存に使うので変えない。足す時は後ろに。home は魚が周りを泳ぐ物
+ */
+export const DECOS: readonly { id: KnownDecoId; name: string; rarity: Rarity; need: number; home?: boolean }[] = [
+  { id: 'kusa', name: '水草', rarity: 'N', need: 1 },
+  { id: 'ishi', name: '石', rarity: 'N', need: 4 },
+  { id: 'ryuboku', name: '流木', rarity: 'N', need: 8 },
+  { id: 'kai', name: '貝', rarity: 'R', need: 1 },
+  { id: 'tsubo', name: 'つぼ', rarity: 'R', need: 4 },
+  { id: 'shiro', name: '城', rarity: 'SR', need: 1, home: true },
+  { id: 'takara', name: '宝箱', rarity: 'SR', need: 4 },
+  { id: 'chinbotsu', name: '沈没船', rarity: 'SSR', need: 1, home: true },
+]
+const DECO_BY_ID = new Map<string, (typeof DECOS)[number]>(DECOS.map(d => [d.id, d]))
+
+/** かざりの名前。知らない物 (新しい版のかざり) は「なぞのかざり」、空きは「空き」 */
+export const decoName = (id: DecoId) => (id === '' ? '空き' : (DECO_BY_ID.get(id)?.name ?? 'なぞのかざり'))
+/** 手に入れ方の一言 */
+export const decoHint = (d: (typeof DECOS)[number]) => `${d.rarity} を ${d.need} 種そろえると${d.name}`
+
+const RARITIES: readonly Rarity[] = ['N', 'R', 'SR', 'SSR']
+
+/**
+ * turn-gacha の state (save と cards) から、持っているカードの種類の数をレア度ごとに数える。
+ * 確かめ方は dev-rpg の ownedCards と同じ。turn-gacha が無い・まだ読み込む前・形が違う時は undefined
+ */
+export function gachaCounts(save: unknown, cards: unknown): GachaCounts | undefined {
+  if (typeof save !== 'object' || save === null || !Array.isArray(cards)) return undefined
+  const book = (save as Record<string, unknown>).book
+  if (typeof book !== 'object' || book === null) return undefined
+  const out: GachaCounts = { N: 0, R: 0, SR: 0, SSR: 0 }
+  const seen = new Set<string>()
+  for (const c of cards) {
+    if (typeof c !== 'object' || c === null) continue
+    const o = c as Record<string, unknown>
+    if (typeof o.id !== 'string' || o.id === '' || seen.has(o.id) || !RARITIES.includes(o.rarity as Rarity)) continue
+    const n = ((book as Record<string, unknown>)[o.id] as Record<string, unknown> | undefined)?.count
+    if (typeof n !== 'number' || !(n > 0)) continue
+    seen.add(o.id)
+    out[o.rarity as Rarity]++
+  }
+  return out
+}
+
+/** 手に入っているかざり (表の順)。ガチャが無ければ無し */
+export const unlockedDecos = (counts: GachaCounts | undefined): KnownDecoId[] =>
+  counts ? DECOS.filter(d => counts[d.rarity] >= d.need).map(d => d.id) : []
+
+/** store の置き場の欄。文字でない物は空き。知らない id と、この版より多い置き場はそのまま持ち回る */
+const decoFrom = (raw: unknown): DecoId[] => {
+  const out: DecoId[] = Array.isArray(raw) ? raw.map(x => (typeof x === 'string' ? clean(x).slice(0, 32) : '')) : []
+  while (out.length < DECO_SLOTS) out.push('')
+  return out
+}
+
+/**
+ * slot に id を置く ('' なら外す)。id がほかの置き場にあれば、そこと入れ替える
+ * (同じかざりは 1 つだけ)。ほかの置き場はそのまま
+ */
+export const placeDeco = (deco: readonly DecoId[], slot: number, id: DecoId): DecoId[] => {
+  const out = decoFrom(deco)
+  if (slot < 0 || slot >= DECO_SLOTS) return out
+  const from = id === '' ? -1 : out.slice(0, DECO_SLOTS).indexOf(id)
+  if (from >= 0 && from !== slot) out[from] = out[slot] ?? ''
+  out[slot] = id
+  return out
+}
+
+/** 時刻帯で寄せる色 (夕は橙、夜は暗く) と寄せる量 */
+const DECO_TONE: Record<AquaPeriod, { to: string; k: number }> = {
+  朝: { to: '#ffd9a0', k: 0.1 },
+  昼: { to: '#ffffff', k: 0 },
+  夕: { to: '#d9803e', k: 0.22 },
+  夜: { to: '#061024', k: 0.45 },
+}
+/** 季節の水草の色 */
+const KUSA_COLOR: Record<AquaSeason, [string, string]> = {
+  春: ['#5fcf6a', '#9be38a'],
+  夏: ['#1f9e4a', '#2ea043'],
+  秋: ['#b5a33a', '#d29922'],
+  冬: ['#4f8f7a', '#6aa894'],
+}
+
+type Tone = { paint: (c: string) => string; season: AquaSeason; isNight: boolean }
+
+/** 冬は上に雪が積もる (cx・上端 y・半幅) */
+const snowCap = (t: Tone, x: number, y: number, w: number) =>
+  t.season === '冬' ? `<path d="M${f1(x - w)} ${f1(y + 2)} Q${x} ${f1(y - 5)} ${f1(x + w)} ${f1(y + 2)} Q${x} ${f1(y - 1)} ${f1(x - w)} ${f1(y + 2)} Z" fill="#f0f6fc" opacity=".92"/>` : ''
+
+/** かざり 1 つの絵。x は置き場の真ん中、b は底 (砂に少し埋まる) */
+const DECO_DRAW: Record<KnownDecoId, (x: number, b: number, t: Tone) => string> = {
+  kusa: (x, b, t) => {
+    const [c1, c2] = KUSA_COLOR[t.season]
+    return [
+      { dx: -8, h: 46, c: c1, d: 3.6 },
+      { dx: 0, h: 64, c: c2, d: 4.4 },
+      { dx: 8, h: 38, c: c1, d: 3.1 },
+    ]
+      .map(p => {
+        const px = x + p.dx
+        const a = `M${px} ${b} C${px - 8} ${f1(b - p.h * 0.4)} ${px + 8} ${f1(b - p.h * 0.7)} ${px} ${b - p.h}`
+        const z = `M${px} ${b} C${px - 2} ${f1(b - p.h * 0.4)} ${px + 12} ${f1(b - p.h * 0.7)} ${px + 8} ${b - p.h + 2}`
+        return `<path d="${a}" stroke="${t.paint(p.c)}" stroke-width="5" stroke-linecap="round" fill="none"><animate attributeName="d" values="${a};${z};${a}" dur="${p.d}s" repeatCount="indefinite"/></path>`
+      })
+      .join('')
+  },
+  ishi: (x, b, t) =>
+    `<ellipse cx="${x - 8}" cy="${b - 8}" rx="15" ry="10" fill="${t.paint('#6e7681')}"/>` +
+    `<ellipse cx="${x + 10}" cy="${b - 6}" rx="11" ry="7" fill="${t.paint('#8b949e')}"/>` +
+    `<ellipse cx="${x - 4}" cy="${b - 21}" rx="9" ry="6.5" fill="${t.paint('#57606a')}"/>` +
+    `<path d="M${x - 10} ${b - 25} Q${x - 4} ${b - 28} ${x + 1} ${b - 25}" stroke="#ffffff" stroke-width="1.2" fill="none" opacity=".25"/>` +
+    snowCap(t, x - 4, b - 27, 8),
+  ryuboku: (x, b, t) => {
+    const wood = t.paint('#7a5534')
+    return (
+      `<path d="M${x - 30} ${b - 3} C${x - 14} ${b - 14} ${x + 4} ${b - 8} ${x + 28} ${b - 24}" stroke="${wood}" stroke-width="7" stroke-linecap="round" fill="none"/>` +
+      `<path d="M${x - 4} ${b - 9} C${x} ${b - 22} ${x - 8} ${b - 30} ${x - 12} ${b - 38}" stroke="${wood}" stroke-width="4" stroke-linecap="round" fill="none"/>` +
+      `<path d="M${x + 12} ${b - 15} L${x + 22} ${b - 5}" stroke="${wood}" stroke-width="3" stroke-linecap="round"/>` +
+      `<path d="M${x - 26} ${b - 6} C${x - 12} ${b - 15} ${x + 4} ${b - 10} ${x + 24} ${b - 25}" stroke="${t.paint('#a07a52')}" stroke-width="1.4" fill="none" opacity=".6"/>` +
+      snowCap(t, x + 20, b - 23, 6)
+    )
+  },
+  kai: (x, b, t) => {
+    const shell = t.paint(t.season === '春' ? '#ffc4d6' : '#f4b6a2')
+    const ridge = t.paint('#c97a6a')
+    return (
+      `<path d="M${x - 15} ${b - 3} Q${x - 17} ${b - 24} ${x} ${b - 26} Q${x + 17} ${b - 24} ${x + 15} ${b - 3} Z" fill="${shell}"/>` +
+      [-10, -5, 0, 5, 10].map(dx => `<path d="M${x} ${b - 3} L${x + dx} ${b - 23}" stroke="${ridge}" stroke-width="1" opacity=".7"/>`).join('') +
+      `<rect x="${x - 6}" y="${b - 5}" width="12" height="5" rx="2" fill="${ridge}"/>` +
+      `<circle cx="${x + 20}" cy="${b - 5}" r="4" fill="${t.paint('#f0f6fc')}"/>` +
+      `<circle cx="${x + 18.6}" cy="${b - 6.4}" r="1.2" fill="#ffffff" opacity=".8"/>` +
+      (t.isNight ? `<circle cx="${x + 20}" cy="${b - 5}" r="8" fill="#f0f6fc" opacity=".15"><animate attributeName="opacity" values=".08;.3;.08" dur="3s" repeatCount="indefinite"/></circle>` : '')
+    )
+  },
+  tsubo: (x, b, t) =>
+    `<ellipse cx="${x - 2}" cy="${b - 12}" rx="19" ry="12" fill="${t.paint('#b0643a')}"/>` +
+    `<path d="M${x - 14} ${b - 20} Q${x - 2} ${b - 25} ${x + 10} ${b - 20}" stroke="${t.paint('#d9895a')}" stroke-width="2" fill="none" opacity=".7"/>` +
+    `<path d="M${x - 8} ${b - 23} L${x - 8} ${b - 1} M${x + 4} ${b - 23} L${x + 4} ${b - 1}" stroke="${t.paint('#7a3f20')}" stroke-width="1.6" opacity=".7"/>` +
+    `<ellipse cx="${x + 18}" cy="${b - 13}" rx="4.5" ry="8" fill="${t.paint('#8a4a28')}"/>` +
+    `<ellipse cx="${x + 19}" cy="${b - 13}" rx="2.6" ry="5.6" fill="#1a0d06"/>` +
+    snowCap(t, x - 2, b - 24, 12),
+  shiro: (x, b, t) => {
+    const wall = t.paint('#9aa4b2')
+    const dark = t.paint('#6e7681')
+    const roof = t.paint('#8957e5')
+    const lit = t.isNight
+    const win = (wx: number, wy: number, k: number) =>
+      lit
+        ? `<rect x="${wx}" y="${wy}" width="4" height="6" rx="2" fill="#ffd866"><animate attributeName="opacity" values=".55;1;.55" dur="${2 + k * 0.6}s" repeatCount="indefinite"/></rect>`
+        : `<rect x="${wx}" y="${wy}" width="4" height="6" rx="2" fill="#0d1117" opacity=".7"/>`
+    const merlons = (x0: number, n: number, y: number) => Array.from({ length: n }, (_, k) => `<rect x="${x0 + k * 5}" y="${y - 4}" width="3" height="4" fill="${wall}"/>`).join('')
+    return (
+      `<rect x="${x - 20}" y="${b - 34}" width="40" height="34" fill="${wall}"/>` +
+      merlons(x - 20, 8, b - 34) +
+      `<rect x="${x - 28}" y="${b - 48}" width="12" height="48" fill="${dark}"/>` +
+      `<rect x="${x + 16}" y="${b - 48}" width="12" height="48" fill="${dark}"/>` +
+      `<path d="M${x - 30} ${b - 48} L${x - 22} ${b - 60} L${x - 14} ${b - 48} Z" fill="${roof}"/>` +
+      `<path d="M${x + 14} ${b - 48} L${x + 22} ${b - 60} L${x + 30} ${b - 48} Z" fill="${roof}"/>` +
+      `<rect x="${x - 7}" y="${b - 54}" width="14" height="20" fill="${wall}"/>` +
+      `<path d="M${x - 9} ${b - 54} L${x} ${b - 70} L${x + 9} ${b - 54} Z" fill="${roof}"/>` +
+      `<path d="M${x} ${b - 70} L${x} ${b - 78}" stroke="${dark}" stroke-width="1"/><path d="M${x} ${b - 78} L${x + 7} ${b - 76} L${x} ${b - 74} Z" fill="${t.paint('#f85149')}"/>` +
+      `<path d="M${x - 6} ${b} V${b - 10} A6 6 0 0 1 ${x + 6} ${b - 10} V${b} Z" fill="#0d1117" opacity=".75"/>` +
+      win(x - 24, b - 40, 0) +
+      win(x + 20, b - 40, 1) +
+      win(x - 2, b - 48, 2) +
+      snowCap(t, x - 22, b - 59, 8) +
+      snowCap(t, x + 22, b - 59, 8) +
+      snowCap(t, x, b - 69, 9)
+    )
+  },
+  takara: (x, b, t) => {
+    const wood = t.paint('#8b5a2b')
+    const gold = t.paint('#e3b341')
+    return (
+      (t.isNight ? `<ellipse cx="${x}" cy="${b - 18}" rx="26" ry="16" fill="#ffd34d" opacity=".18"><animate attributeName="opacity" values=".1;.28;.1" dur="2.8s" repeatCount="indefinite"/></ellipse>` : '') +
+      `<rect x="${x - 17}" y="${b - 20}" width="34" height="20" rx="2" fill="${wood}"/>` +
+      `<path d="M${x - 16} ${b - 21} L${x - 20} ${b - 34} Q${x} ${b - 42} ${x + 20} ${b - 34} L${x + 16} ${b - 21} Z" fill="${t.paint('#a06a35')}"/>` +
+      `<path d="M${x - 15} ${b - 21} Q${x} ${b - 27} ${x + 15} ${b - 21} Z" fill="${t.paint('#ffd34d')}"/>` +
+      [-8, 0, 8].map(dx => `<circle cx="${x + dx}" cy="${b - 23}" r="2.6" fill="${gold}" stroke="${t.paint('#9e6a03')}" stroke-width=".6"/>`).join('') +
+      `<rect x="${x - 17}" y="${b - 13}" width="34" height="3" fill="${gold}"/>` +
+      `<rect x="${x - 3}" y="${b - 16}" width="6" height="8" rx="1" fill="${gold}"/>` +
+      `<path d="M${x + 9} ${b - 33} L${x + 10} ${b - 30} L${x + 13} ${b - 29} L${x + 10} ${b - 28} L${x + 9} ${b - 25} L${x + 8} ${b - 28} L${x + 5} ${b - 29} L${x + 8} ${b - 30} Z" fill="#fffbe0"><animate attributeName="opacity" values="0;1;0" dur="2.2s" repeatCount="indefinite"/></path>` +
+      snowCap(t, x, b - 39, 14)
+    )
+  },
+  chinbotsu: (x, b, t) => {
+    const hull = t.paint('#5a3d24')
+    const port = t.isNight ? '#7ee0c8' : '#0d1117'
+    return (
+      `<g transform="rotate(-10 ${x} ${b})">` +
+      `<path d="M${x - 38} ${b - 20} L${x + 36} ${b - 20} L${x + 26} ${b} L${x - 30} ${b} Z" fill="${hull}"/>` +
+      `<path d="M${x - 38} ${b - 20} L${x + 36} ${b - 20}" stroke="${t.paint('#8a6440')}" stroke-width="2"/>` +
+      [-20, -6, 8, 22].map((dx, k) => `<circle cx="${x + dx}" cy="${b - 11}" r="2.6" fill="${port}"${t.isNight ? ` opacity=".6"><animate attributeName="opacity" values=".3;.9;.3" dur="${f1(2.5 + k * 0.4)}s" repeatCount="indefinite"/></circle>` : ' opacity=".8"/>'}`).join('') +
+      `<path d="M${x - 4} ${b - 20} L${x - 4} ${b - 72}" stroke="${t.paint('#4a3320')}" stroke-width="3"/>` +
+      `<path d="M${x - 16} ${b - 66} L${x + 8} ${b - 66}" stroke="${t.paint('#4a3320')}" stroke-width="2"/>` +
+      `<path d="M${x - 2} ${b - 64} Q${x + 18} ${b - 52} ${x + 6} ${b - 30} L${x - 2} ${b - 34} Q${x + 6} ${b - 46} ${x - 2} ${b - 54} Z" fill="${t.paint('#c9b99a')}" opacity=".65"/>` +
+      `<path d="M${x + 30} ${b - 20} C${x + 34} ${b - 30} ${x + 28} ${b - 36} ${x + 32} ${b - 44}" stroke="${t.paint('#2ea043')}" stroke-width="2.4" fill="none" stroke-linecap="round"/>` +
+      `</g>` +
+      snowCap(t, x - 4, b - 70, 6)
+    )
+  },
+}
+
+/** 底のかざり。知らない id (新しい版のかざり) と空きは描かない */
+const decoSvg = (deco: readonly DecoId[] | undefined, v: AquaView) => {
+  if (!deco) return ''
+  const tone = DECO_TONE[v.period] ?? DECO_TONE.昼
+  const t: Tone = { paint: c => (tone.k > 0 ? mix(c, tone.to, tone.k) : c), season: v.season, isNight: v.period === '夜' }
+  let s = ''
+  deco.slice(0, DECO_SLOTS).forEach((id, i) => {
+    const draw = (DECO_DRAW as Partial<Record<string, (typeof DECO_DRAW)['kusa']>>)[id]
+    if (draw) s += `<g class="deco-${id}">${draw(SLOT_X[i] ?? 180, FLOOR + 8, t)}</g>`
+  })
+  return s
+}
+
+/** 魚が周りを泳ぐかざり (城・沈没船) の x。左から */
+const homesOf = (deco: readonly DecoId[] | undefined) =>
+  (deco ?? []).slice(0, DECO_SLOTS).flatMap((id, i) => (DECO_BY_ID.get(id)?.home ? [SLOT_X[i] ?? 180] : []))
 
 // ---------------------------------------------------------------- SVG
 
@@ -516,8 +753,8 @@ const fishShape = (f: AquaFish, body: string, fill: string, tailAnim: string, ey
 
 const colorOf = (f: AquaFish) => FISH_COLORS[f.id % FISH_COLORS.length] ?? '#f78166'
 
-/** f は魚、i は並びの番号 (泳ぐ高さと速さの種、グラデーションの id) */
-const fish = (f: AquaFish, i: number, m: Mood) => {
+/** f は魚、i は並びの番号 (泳ぐ高さと速さの種、グラデーションの id)。home があれば、その x のかざりの周りを回る */
+const fish = (f: AquaFish, i: number, m: Mood, home?: number) => {
   const r = rng(i * 7919 + 13)
   r() // 0.2.x で大きさに使っていた 1 個を読み飛ばし、泳ぐ高さを前と同じにする
   const color = colorOf(f)
@@ -563,7 +800,12 @@ const fish = (f: AquaFish, i: number, m: Mood) => {
     }
   }
 
-  const path = `M${x1} ${y} C${f1(x1 + 60)} ${f1(y - 14)} ${f1(x2 - 60)} ${f1(y + 14)} ${x2} ${y} C${f1(x2 - 60)} ${f1(y - 12)} ${f1(x1 + 60)} ${f1(y + 12)} ${x1} ${y}`
+  // かざりの周りは楕円で回る。左端から上を通って右へ (前半は右向き、後半は下を通って左向き。向きの返しと合う)
+  const cy = FLOOR - 46
+  const path =
+    home === undefined
+      ? `M${x1} ${y} C${f1(x1 + 60)} ${f1(y - 14)} ${f1(x2 - 60)} ${f1(y + 14)} ${x2} ${y} C${f1(x2 - 60)} ${f1(y - 12)} ${f1(x1 + 60)} ${f1(y + 12)} ${x1} ${y}`
+      : `M${home - 46} ${cy} A46 28 0 0 1 ${home + 46} ${cy} A46 28 0 0 1 ${home - 46} ${cy}`
   return {
     grad,
     body:
@@ -628,11 +870,12 @@ export const drawTank = (t: AquaTank): string => {
   // 季節の飾り: 春は花びら、夏は泡を増やしてきらめき、秋は落ち葉、冬は雪
   const deco = v.season === '春' ? petals() : v.season === '夏' ? glints() : v.season === '秋' ? leaves() : snow()
   const extraBubbles = v.season === '夏' ? 8 : 0
-  // 育った魚を手前に (後に描く)
+  // 育った魚を手前に (後に描く)。城・沈没船があれば、若い順に 1 匹ずつその周りを回る
+  const homes = homesOf(t.deco)
   const fishes = fishOf(t)
     .map((f, i) => ({ f, i }))
     .sort((a, b) => a.f.turnsSeen - b.f.turnsSeen)
-    .map(({ f, i }) => fish(f, i, mood))
+    .map(({ f, i }, k) => fish(f, i, mood, homes[k]))
   const surface0 = `M0 ${TOP} Q45 ${TOP - 3} 90 ${TOP} T180 ${TOP} T270 ${TOP} T360 ${TOP}`
   const surface1 = `M0 ${TOP} Q45 ${TOP + 3} 90 ${TOP} T180 ${TOP} T270 ${TOP} T360 ${TOP}`
 
@@ -654,6 +897,7 @@ export const drawTank = (t: AquaTank): string => {
     rays(c) +
     sand(rng(31)) +
     plants() +
+    decoSvg(t.deco, v) +
     bubbles((t.isRunning ? 11 : 5) + extraBubbles, t.isRunning) +
     deco +
     (v.isFeeding ? pellets() : '') +

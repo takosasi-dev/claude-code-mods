@@ -17,7 +17,7 @@ The mods' on-screen text is in Japanese.
 | mod-hub | `/mod` | Lists the mods that have a screen (those that open a pane or draw a band) with icons. Filter by name or description, pin to the top, sort by category (Dev, Status, Tools, Fun), by name, or by recently opened. A small seasonal ornament in the header |
 | cc-dash | `/dash` | A session dashboard. Tiles for elapsed time, turns, tools and errors, a bar chart of turn durations, a tool timeline, and ring gauges for usage. "My layout" lets you choose which panels to show and in what order |
 | work-bar | Shows above the prompt automatically | While working: elapsed time, the current tool, and a band of flowing light. While waiting: a summary of the last turn and buttons for canned prompts |
-| aqua-pet | `/aquarium` | An aquarium that reacts to your work. Each fish grows turn by turn from fry to juvenile to adult to big one, and new fish (10 species, rarer ones later) arrive at milestones. It shakes red on errors. Buttons to feed, name, clean, and list the fish. The water color and light follow Japan time (orange with a setting sun in the evening, moon and stars at night), and the decorations follow the season (petals, bubbles, fallen leaves, snow) |
+| aqua-pet | `/aquarium` | An aquarium that reacts to your work. Each fish grows turn by turn from fry to juvenile to adult to big one, and new fish (10 species, rarer ones later) arrive at milestones. It shakes red on errors. Buttons to feed, name, clean, and list the fish. The water color and light follow Japan time (orange with a setting sun in the evening, moon and stars at night), and the decorations follow the season (petals, bubbles, fallen leaves, snow). Cards collected in turn-gacha unlock ornaments (water plant, stones, driftwood, shell, pot, castle, treasure chest, sunken ship) that you can place in 5 spots on the floor (fish swim around the castle and the ship). The record is backed up daily and can be restored from the pane |
 | project-board | `/projects` | A freshness chart, list, and details for the handoff notes (*.md) in a folder |
 | git-pane | `/git` | The git state of the current folder. Branch, a diff bar of changed lines, recent commits. Never writes to git |
 | token-meter | `/tokens` | Stacked bars of tokens per turn and the cache hit rate |
@@ -28,13 +28,13 @@ The mods' on-screen text is in Japanese.
 | test-runner | `/testrun` | Runs your configured test command from a button. A signal light and the last 20 results; "fix this" when it fails. Also picks up tests Claude runs, shows a line above the prompt while they fail, and toasts when a commit is attempted with failing tests |
 | prompt-book | `/prompts` | Save prompts you use often and put them into the prompt with a button. Tags, use counts, sorting |
 | live-commentary | `/jikkyo` | Sports-style play-by-play of what Claude is doing, in the status line. Tones: fiery, calm, Kansai |
-| turn-gacha | `/gacha` | A gacha pull every time a turn ends. 60 N / R / SR / SSR cards, a card book, and 6 collection achievements. Cards can be equipped in dev-rpg. Completing daily-quest tasks gives bonus pulls |
-| dev-rpg | `/rpg` | An RPG that earns experience as you work. Levels, titles, 22 achievements. Ending turns builds up "monster presence", which you spend to fight 8 kinds of monsters and 3 bosses with buttons. Bosses sometimes appear on their own; an appeared boss can be fought without spending presence and gives 1.5x experience. HP lost in battle comes back after 15 minutes of rest or in a new session. Spend SP from levels, achievements, wins, and bosses on stats (strength, vitality, wisdom, agility) and learn 10 skills. Equip turn-gacha cards as weapon, armor, and charm to raise your stats. Completing daily-quest tasks gives experience |
+| turn-gacha | `/gacha` | A gacha pull every time a turn ends. 60 N / R / SR / SSR cards, a card book, and 6 collection achievements. Cards can be equipped in dev-rpg. Completing daily-quest tasks gives bonus pulls. Records are backed up daily and can be restored from the pane |
+| dev-rpg | `/rpg` | An RPG that earns experience as you work. Levels, titles, 22 achievements. Ending turns builds up "monster presence", which you spend to fight 8 kinds of monsters and 3 bosses with buttons. Bosses sometimes appear on their own; an appeared boss can be fought without spending presence and gives 1.5x experience. HP lost in battle comes back after 15 minutes of rest or in a new session. Spend SP from levels, achievements, wins, and bosses on stats (strength, vitality, wisdom, agility) and learn 10 skills. Equip turn-gacha cards as weapon, armor, and charm to raise your stats. Completing daily-quest tasks gives experience. Delve a turn-driven dungeon (1 floor per 8 turns, a guardian every 10 floors, rest floors every 5) for your deepest floor and bring the loot home with "帰る". Daily backups of the save |
 | code-omikuji | `/omikuji` | Today's coding fortune. Shake the cylinder, the stick number spins and stops, and a washi-paper fortune unfolds. 238 messages, plus lines that appear only on days of their season |
 | agent-watch | `/agent-watch` | A band timeline of running subagents (elapsed time, tool count, state). Buttons switch to that conversation and back to the main one |
 | canvas-pane | `/canvas` | Adds a tool `show` that Claude can call. Ask "chart the sales in the pane" and it draws bar, line, and pie charts, tables, Markdown, or SVG in the pane. Flip through the last 20 |
 | rule-switch | `/rules` | Turn rules such as "answer in Japanese" or "don't commit" on and off with buttons, and put them in the system prompt. You can add your own |
-| wait-games | `/games` | Games to play during long turns: 2048, Minesweeper, 15 puzzle, Lights Out, Sudoku (4x4 / 9x9), and Concentration. Keeps wins, fewest moves, and fastest time per game. Tells you when the turn ends |
+| wait-games | `/games` | Games to play during long turns: 2048, Minesweeper, 15 puzzle, Lights Out, Sudoku (4x4 / 9x9), and Concentration. Keeps wins, fewest moves, and fastest time per game. Tells you when the turn ends. Records are backed up daily and can be restored from the pane |
 | spec-board | `/specs` | Specs waiting for review or in progress in [SpecStatus](https://github.com/takosasi-dev/spec-status), and what to do next. Press one for details (read only) |
 | ci-pane | `/ci` | The PR for the current branch (state, reviews, check dots) and GitHub Actions results. Uses `gh`. Nothing in it triggers anything |
 | port-watch | `/ports` | Listening TCP ports, with a mark on ports that appeared during the session. A button to copy the URL, and a press-twice button to stop it (development runtimes only) |
@@ -45,14 +45,14 @@ The mods' on-screen text is in Japanese.
 | session-timeline | `/timeline` | The turns and tool calls of this session as a horizontal band chronology. Colored by tool type, red marks for failures, thin bands for subagents, a yellow edge on turns of a minute or more |
 | file-map | `/filemap` | The files read or written in this session as rectangles grouped by folder (a treemap). Bigger means touched more; orange was written, blue was only read |
 | toast-inbox | `/inbox` | An inbox that keeps up to 100 toasts and status lines from other mods. Unread count, counts per mod, filter by mod, mark all as read, clear. Press a notification to open the pane of the mod that sent it |
-| usage-history | `/history` | A record of your usage across days. Bars of turns or output tokens per day (7 / 30 days), total and daily average, and a heatmap of weekday by hour |
+| usage-history | `/history` | A record of your usage across days. Bars of turns or output tokens per day (7 / 30 days), total and daily average, and a heatmap of weekday by hour. Shares the last 7 days with other mods (week-card). Daily backups |
 | fail-log | `/errors` | Keeps up to 200 failed tool calls. Bars of "frequent failures" grouping similar ones, a recent list, and counts for today and overall. Subagent failures are shown in purple |
-| daily-quest | `/quest` | Three daily tasks (from 8 kinds such as turns, editing files, tests, and commits). Progress bars, rewards, streak, and the last 7 days. Rewards go to dev-rpg as experience and to turn-gacha as bonus pulls |
-| trophy-shelf | `/trophies` | Gathers the records of dev-rpg, turn-gacha, aqua-pet, wait-games, and daily-quest on one shelf, and collects trophies with the date each was first earned |
-| mod-check | `/mod-check` | Shows whether each mod in this collection is loaded, owns its command (or fell back to a spare name), and exposes its state; also prints a pasteable plain-text report |
+| daily-quest | `/quest` | Three daily tasks (from 8 kinds such as turns, editing files, tests, and commits). Progress bars, rewards, streak, and the last 7 days. Rewards go to dev-rpg as experience and to turn-gacha as bonus pulls. Records are backed up daily and can be restored from the pane |
+| trophy-shelf | `/trophies` | Gathers the records of dev-rpg, turn-gacha, aqua-pet, wait-games, and daily-quest on one shelf, and collects trophies with the date each was first earned. Includes 3 dungeon-depth trophies |
+| mod-check | `/mod-check` | Shows whether each mod in this collection is loaded, owns its command (or fell back to a spare name), and exposes its state; also prints a pasteable plain-text report. Asks you to reopen VS Code (band and toast) when a sibling mod's version changes mid-session. A Checklist tab lets you mark on-screen checks good, bad or not yet, and copies the results |
 | compact-cue | band above the prompt, `/cue` | When the context fills up, tells you in the band and a toast: right after tests pass, a commit, or writing a handoff note, "now is a good time to /compact"; in the middle of editing, "wait for a break point". The pane shows a usage ring and where you are. It only tells you; it never compacts |
 | ship-guard | always, `/guard` | When Claude runs git push, gh release, gh repo create, or npm publish without first getting a yes through AskUserQuestion, asks you "run it?" on the spot and blocks it if you say no. The pane shows the record and an on/off switch. Before git push, it also checks that the commits being pushed are authored with a noreply address and add no personal email or path with a user name, and asks again even after a yes if they do |
-| rule-watch | band above the prompt, `/rulewatch` | Tells you in the band when Claude's reply breaks your house rules: it answered in English, ended with a question instead of using AskUserQuestion, or committed without updating the handoff note. The pane shows counts and a log; "Tell Claude" puts a short note into the prompt |
+| rule-watch | band above the prompt, `/rulewatch` | Watches Claude's replies against house rules: English replies, plain-text questions without choices, a handoff memo or dev log not written after a commit, a dev log written without the "logged" line, and closing words with no dev log. Flags them above the prompt; /rulewatch shows counts and history, and "Claude に伝える" puts a note in the prompt box |
 | enc-guard | always, `/enc` | When Claude steps into an encoding or line-ending trap, tells Claude how to fix it (or blocks it, by setting): Set-Content / Add-Content without -Encoding, a .ps1 with Japanese text but no BOM, a .bat / .cmd with non-ASCII characters, and Python's open without encoding= / newline= on Windows |
 | release-draft | `/release` | Collects the commits since the last tag and the plugin.json / package.json versions that went up, and shows a CHANGELOG draft (Added / Changed / Fixed) with a suggested next version. "Write the CHANGELOG with this" asks Claude to finish it. Reads git only |
 | reply-frame | Always on | Frames Claude's replies in orange and your messages in blue, with rounded corners |
@@ -60,6 +60,8 @@ The mods' on-screen text is in Japanese.
 | long-turn-toast | Always on | Shows a toast for turns that took long (over 120 seconds by default) |
 | usage-pane | `/usage-pane` | Shows a usage JSON as 3 bars |
 | devlog-pane | `/devlog` | Shows today's dev log (YYYY-MM-DD.md) from a folder |
+| run-guard | always, `/runguard` | Stops Claude, before it runs, from launching windowed apps, playing sounds, or running `claude -p` without isolation while checking its work, and tells it how to do it headless/silently instead. Per-group on/off and a log |
+| week-card | `/week` | One card with your week of usage plus how much your quests, gacha collection, RPG level and dungeon depth, and aquarium fish grew, and puts a Markdown weekly-report snippet into the prompt box |
 
 reply-frame is also published at [takosasi-dev/reply-frame](https://github.com/takosasi-dev/reply-frame). The one here is a newer version that adds the frame around your own messages.
 
@@ -136,6 +138,10 @@ These are the SVG parts drawn in a VS Code pane (made-up data; buttons and such 
 <tr>
 <td align="center" valign="top"><b>enc-guard</b><br><img src="docs/images/enc-guard.png" width="250" alt="enc-guard"></td>
 <td align="center" valign="top"><b>release-draft</b><br><img src="docs/images/release-draft.png" width="250" alt="release-draft"></td>
+<td align="center" valign="top"><b>run-guard</b><br><img src="docs/images/run-guard.png" width="250" alt="run-guard"></td>
+</tr>
+<tr>
+<td align="center" valign="top"><b>week-card</b><br><img src="docs/images/week-card.png" width="250" alt="week-card"></td>
 </tr>
 </table>
 
@@ -190,7 +196,7 @@ In the desktop app, open + next to the prompt, then Plugins, enter `takosasi-dev
 
 mod-hub lists only the mods loaded after mod-hub, so install mod-hub first. Categories and icons are defined only for the mods in this repository; other mods go under "Other". toast-inbox and mod-check also watch the mods loaded after them, so we recommend installing them right after mod-hub.
 
-If a command name clashes with another plugin or a built-in, the command becomes the mod's name, such as `/edit-log`, `/todo-board`, `/test-runner`, `/prompt-book`, `/live-commentary`, `/turn-gacha`, `/dev-rpg`, `/code-omikuji`, `/gitpane`, `/token-meter`, `/mod-hub`, `/canvas-pane`, `/rule-switch`, `/wait-games`, `/spec-board`, `/ci-pane`, `/port-watch`, `/pre-check`, `/face-band`, `/done-chime`, `/turn-haiku`, `/session-timeline`, `/file-map`, `/toast-inbox`, `/usage-history`, `/fail-log`, `/compact-cue`, `/ship-guard`, `/rule-watch`, `/enc-guard`, `/release-draft`, `/daily-quest`, `/trophy-shelf`, or `/modcheck`.
+If a command name clashes with another plugin or a built-in, the command becomes the mod's name, such as `/edit-log`, `/todo-board`, `/test-runner`, `/prompt-book`, `/live-commentary`, `/turn-gacha`, `/dev-rpg`, `/code-omikuji`, `/gitpane`, `/token-meter`, `/mod-hub`, `/canvas-pane`, `/rule-switch`, `/wait-games`, `/spec-board`, `/ci-pane`, `/port-watch`, `/pre-check`, `/face-band`, `/done-chime`, `/turn-haiku`, `/session-timeline`, `/file-map`, `/toast-inbox`, `/usage-history`, `/fail-log`, `/compact-cue`, `/ship-guard`, `/rule-watch`, `/enc-guard`, `/release-draft`, `/daily-quest`, `/trophy-shelf`, `/modcheck`, `/run-guard`, or `/week-card`.
 
 ### Install several at once
 
@@ -204,7 +210,7 @@ claude plugin install toast-inbox --marketplace takosasi-dev/claude-code-mods
 claude plugin install mod-check --marketplace takosasi-dev/claude-code-mods
 ```
 
-<details><summary>Dev (14 mods): project-board, git-pane, edit-log, todo-board, test-runner, spec-board, ci-pane, port-watch, pre-check, fail-log, ship-guard, rule-watch, enc-guard, release-draft</summary>
+<details><summary>Dev (15 mods): project-board, git-pane, edit-log, todo-board, test-runner, spec-board, ci-pane, port-watch, pre-check, fail-log, ship-guard, rule-watch, enc-guard, release-draft, run-guard</summary>
 
 ```sh
 claude plugin install project-board --marketplace takosasi-dev/claude-code-mods
@@ -221,11 +227,12 @@ claude plugin install ship-guard --marketplace takosasi-dev/claude-code-mods
 claude plugin install rule-watch --marketplace takosasi-dev/claude-code-mods
 claude plugin install enc-guard --marketplace takosasi-dev/claude-code-mods
 claude plugin install release-draft --marketplace takosasi-dev/claude-code-mods
+claude plugin install run-guard --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
 
-<details><summary>Status (11 mods): cc-dash, work-bar, token-meter, session-recap, agent-watch, session-timeline, file-map, usage-history, usage-pane, devlog-pane, compact-cue</summary>
+<details><summary>Status (11 mods): cc-dash, work-bar, token-meter, session-recap, agent-watch, session-timeline, file-map, usage-history, compact-cue, usage-pane, devlog-pane</summary>
 
 ```sh
 claude plugin install cc-dash --marketplace takosasi-dev/claude-code-mods
@@ -236,9 +243,9 @@ claude plugin install agent-watch --marketplace takosasi-dev/claude-code-mods
 claude plugin install session-timeline --marketplace takosasi-dev/claude-code-mods
 claude plugin install file-map --marketplace takosasi-dev/claude-code-mods
 claude plugin install usage-history --marketplace takosasi-dev/claude-code-mods
+claude plugin install compact-cue --marketplace takosasi-dev/claude-code-mods
 claude plugin install usage-pane --marketplace takosasi-dev/claude-code-mods
 claude plugin install devlog-pane --marketplace takosasi-dev/claude-code-mods
-claude plugin install compact-cue --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
@@ -255,7 +262,7 @@ claude plugin install done-chime --marketplace takosasi-dev/claude-code-mods
 
 </details>
 
-<details><summary>Fun (10 mods): aqua-pet, live-commentary, turn-gacha, dev-rpg, code-omikuji, wait-games, face-band, turn-haiku, daily-quest, trophy-shelf</summary>
+<details><summary>Fun (11 mods): aqua-pet, live-commentary, turn-gacha, dev-rpg, code-omikuji, wait-games, face-band, turn-haiku, daily-quest, trophy-shelf, week-card</summary>
 
 ```sh
 claude plugin install aqua-pet --marketplace takosasi-dev/claude-code-mods
@@ -268,6 +275,7 @@ claude plugin install face-band --marketplace takosasi-dev/claude-code-mods
 claude plugin install turn-haiku --marketplace takosasi-dev/claude-code-mods
 claude plugin install daily-quest --marketplace takosasi-dev/claude-code-mods
 claude plugin install trophy-shelf --marketplace takosasi-dev/claude-code-mods
+claude plugin install week-card --marketplace takosasi-dev/claude-code-mods
 ```
 
 </details>
@@ -282,16 +290,16 @@ claude plugin install long-turn-toast --marketplace takosasi-dev/claude-code-mod
 
 </details>
 
-All 46 at once (bash / zsh):
+All 48 at once (bash / zsh):
 
 ```sh
-for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard rule-watch enc-guard release-draft daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
+for m in mod-hub toast-inbox mod-check cc-dash work-bar aqua-pet project-board git-pane token-meter focus-timer session-recap edit-log todo-board test-runner prompt-book live-commentary turn-gacha dev-rpg code-omikuji agent-watch canvas-pane rule-switch wait-games spec-board ci-pane port-watch pre-check face-band done-chime turn-haiku session-timeline file-map usage-history compact-cue fail-log ship-guard rule-watch enc-guard release-draft daily-quest trophy-shelf reply-frame danger-frame long-turn-toast usage-pane devlog-pane run-guard week-card; do claude plugin install "$m" --marketplace takosasi-dev/claude-code-mods; done
 ```
 
 PowerShell:
 
 ```powershell
-foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','rule-watch','enc-guard','release-draft','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
+foreach ($m in 'mod-hub','toast-inbox','mod-check','cc-dash','work-bar','aqua-pet','project-board','git-pane','token-meter','focus-timer','session-recap','edit-log','todo-board','test-runner','prompt-book','live-commentary','turn-gacha','dev-rpg','code-omikuji','agent-watch','canvas-pane','rule-switch','wait-games','spec-board','ci-pane','port-watch','pre-check','face-band','done-chime','turn-haiku','session-timeline','file-map','usage-history','compact-cue','fail-log','ship-guard','rule-watch','enc-guard','release-draft','daily-quest','trophy-shelf','reply-frame','danger-frame','long-turn-toast','usage-pane','devlog-pane','run-guard','week-card') { claude plugin install $m --marketplace takosasi-dev/claude-code-mods }
 ```
 
 Regenerate this list with `node tools/plugin_dirs.mts --readme --en` (without `--en` for the Japanese README).
@@ -339,6 +347,12 @@ D:\work\claude-code-mods\mods\mod-hub;D:\work\claude-code-mods\mods\toast-inbox;
 - enc-guard checks a .ps1 BOM before writing for Write and by reading the file after writing for Edit. It does not watch Out-File or `>` (in this PowerShell setup they write UTF-8 with a BOM)
 - release-draft reads the folder where Claude last ran `git commit` (the `cd` target), or the session folder before any commit. Versions compare the tag with the current working tree, so uncommitted bumps show too
 - test-runner picks up commands shaped like tests (`npm test`, `pytest`, `cargo test`, `node --test`, `claude plugin test`, ...) or starting like your `testCommand`. Background runs (`run_in_background`) are not counted
+- From 0.10.0, mods that write records stop writing and ask you (toast) to reopen VS Code when they notice a newer version was installed while the session still runs the old one. mod-check flags changed sibling versions in the band (only when loading from a cloned folder)
+- "控えから戻す" overwrites the current record with the chosen day. Backups start from the day you set `backupDir`
+- run-guard only reads Bash and PowerShell command strings. It cannot see apps started inside scripts or claude.exe spawned from node
+- rule-watch counts a dev log as written by Write / Edit and by paths in shell commands. Writes through MCP tools are not counted
+- In the dev-rpg dungeon you take one step per turn and fight the floor's enemy automatically after 8 steps. If you fall, you keep half of the bag's experience
+- week-card starts its daily snapshots on the day you install it, so the growth numbers appear from the next day. It computes the dev-rpg level with a copy of dev-rpg's formula
 
 ## Mods that need settings
 
@@ -358,7 +372,10 @@ These mods show "not set" until you set the file or folder they read. Set it in 
 | ship-guard | `checkBeforePush` | Check the contents before push (default on) |
 | ship-guard | `allowedEmails` / `privateWords` | Emails not to flag (comma separated, `@example.org` for a whole domain) and words to flag in added lines or author names |
 | rule-watch | `checkEnglish` / `checkQuestion` | Watch for English replies and text questions (default on) |
-| rule-watch | `memoDir` / `memoGraceTurns` | Folder of handoff notes (empty skips the note check) and how many turns to wait after a commit (default 0) |
+| rule-watch | `memoDir` / `memoGraceTurns` | Folder of handoff notes (empty skips the note check) and how many turns to wait for the memo and dev log after a commit (default 0) |
+| rule-watch | `logDir` | Dev log folder. Watches today's `YYYY-MM-DD.md` (JST) in it for a missing log after a commit, a missing "logged" line, and a missing log when you close the day (empty turns it off) |
+| run-guard | `mode` / `windowApps` | What to do on a hit: `止める` (default; block and return the fix), `聞く` (ask), or `伝えるだけ` (just tell), and exe names always treated as windowed (comma-separated, empty by default) |
+| aqua-pet, dev-rpg, turn-gacha, daily-quest, wait-games, usage-history | `backupDir` | Folder for daily backups under `<backupDir>/<mod>/` (7 days kept). Restore with "控えから戻す" in the pane (empty: no backups) |
 | enc-guard | `mode` / `checkPython` | Whether to tell ("知らせる") or block ("止める") when found (default tell), and whether to check Python's open (default on, Windows only) |
 | spec-board | `pythonPath` | Absolute path to python (`python` or `py` also works if on PATH) |
 | spec-board | `specstatusScript` | Absolute path to SpecStatus's `specstatus.py` |
@@ -404,6 +421,7 @@ claude plugin test mods/cc-dash
 - The mods added in 0.6.0 (session-timeline, file-map, toast-inbox, usage-history), the shared look, and the light theme are likewise confirmed only by tests and pictures taken with headless Chrome; checking them on the real screen is still to come
 - The mods added in 0.7.0 (fail-log, daily-quest, trophy-shelf, mod-check), the time-of-day and seasonal looks, and reordering in /dash are also confirmed only by tests and pictures taken with headless Chrome
 - The mods added in 0.8.0 (compact-cue, ship-guard) and test-runner's watching are also confirmed only by tests and pictures taken with headless Chrome
+- The mods added in 0.10.0 (run-guard, week-card), the dungeon, aquarium ornaments, backups and the checklist are also confirmed only by tests and headless Chrome pictures. The /mod-check Checklist tab lists what to look at on screen
 - The mods added in 0.9.0 (rule-watch, enc-guard, release-draft) and ship-guard's pre-push check are also confirmed only by tests and pictures taken with headless Chrome
 - The function-hook API is still in early access and may change between Claude Code versions
 

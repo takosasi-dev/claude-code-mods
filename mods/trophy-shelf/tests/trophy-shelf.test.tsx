@@ -98,7 +98,7 @@ test('他の mod の値の確かめ方とトロフィーの判定 (純関数)', 
   expect([levelOf(0), levelOf(359), levelOf(360), levelOf(1260), levelOf(1760), levelOf(1e9)]).toEqual([1, 4, 5, 10, 12, 99])
 
   const s = snapshotOf(RICH)
-  expect(s.rpg).toEqual({ level: 12, achievements: 3, wins: 12, bosses: 1 })
+  expect(s.rpg).toEqual({ level: 12, achievements: 3, wins: 12, bosses: 1, deepest: 0 })
   // 表に無いカード (gone) は数えない
   expect(s.gacha).toEqual({ owned: 4, total: 6, ssr: 1, pulls: 30 })
   expect(s.aqua).toEqual({ kinds: 3, fish: 4, days: 12 })
@@ -252,4 +252,18 @@ test('水槽の魚 10 種のトロフィー (aqua-pet 0.4.0 で 10 種になっ�
   expect(doneIds(tank(ten.slice(0, 6)))).toContain('aqua-6')
   expect(doneIds(tank(ten.slice(0, 6)))).not.toContain('aqua-10')
   expect(doneIds(tank(ten))).toContain('aqua-10')
+})
+
+test('ダンジョンのトロフィー (dev-rpg 0.6.0 の一番深い階)。古い dev-rpg なら 0 階', () => {
+  const deep = (deepest: unknown) => ({ ...RICH, hero: { ...RICH.hero, deepest } })
+  expect(snapshotOf(RICH).rpg?.deepest).toBe(0)
+  expect(doneIds(deep(9))).not.toContain('rpg-deep10')
+  expect(doneIds(deep(10))).toContain('rpg-deep10')
+  expect(doneIds(deep(29))).not.toContain('rpg-deep30')
+  expect(doneIds(deep(30))).toContain('rpg-deep30')
+  for (const id of ['rpg-deep10', 'rpg-deep30', 'rpg-deep100']) expect(doneIds(deep(100))).toContain(id)
+  expect(doneIds(deep('x'))).not.toContain('rpg-deep10')
+  const j = judge(snapshotOf(deep(12)), {}).find(x => x.trophy.id === 'rpg-deep30')
+  expect(j).toMatchObject({ cur: 12, goal: 30, isKnown: true, isDone: false })
+  expect(shelfLines(snapshotOf(deep(12)), {}).map(l => l.text)).toContain('未取得 地下三十階 12 / 30 (ダンジョンの 30 階を勝ち抜く)')
 })

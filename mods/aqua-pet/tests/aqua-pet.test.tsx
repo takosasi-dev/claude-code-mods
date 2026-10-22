@@ -4,6 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { AquaFish, AquaTank, FishKind } from '../types'
 import {
+  DECOS,
   FEED_MS,
   INITIAL,
   KINDS,
@@ -13,8 +14,11 @@ import {
   fishCount,
   fishListSvg,
   fromSaved,
+  gachaCounts,
   kindFor,
   migrateFish,
+  placeDeco,
+  unlockedDecos,
   periodAt,
   seasonAt,
   slotAt,
@@ -53,8 +57,19 @@ const fakeStore = (on: On, init: Record<string, unknown> = {}) => {
 }
 
 /** 下の hook は全部ここで足す (test が $ を呼んだ後は足せない) */
-const boot = async ($: Engine, on: On, saved?: Partial<AquaTank>, opts: { failTool?: () => boolean; now?: number; theme?: () => string } = {}) => {
+const boot = async (
+  $: Engine,
+  on: On,
+  saved?: Partial<AquaTank>,
+  opts: { failTool?: () => boolean; now?: number; theme?: () => string; gacha?: () => { save: unknown; cards: unknown } } = {},
+) => {
   const clock = mock.clock(on, { now: opts.now ?? NOW })
+  // turn-gacha の state の代わり (無ければ turn-gacha が入っていない。dev-rpg の試験と同じ形)
+  const gacha = opts.gacha
+  if (gacha) {
+    on('state.get', { plugin: 'turn-gacha', key: 'save' }, () => ({ value: { value: gacha().save as never, version: 1 } }))
+    on('state.get', { plugin: 'turn-gacha', key: 'cards' }, () => ({ value: { value: gacha().cards as never, version: 1 } }))
+  }
   const theme = opts.theme
   if (theme) {
     on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme(), provider: { plugin: 'core', tier: 'core' }, isLocked: false }] as never }))
@@ -606,6 +621,156 @@ test('新しい版が足した欄は、水槽の中も魚の中も消さずに�
   expect(fromSaved({ turns: 1, fish: [{ ...aFish(0, 'maru', 1), name: 'a\x07', more: 2 }] }, NOW).fish[0]).toEqual({ ...aFish(0, 'maru', 1, NOW), name: 'a', more: 2 })
 })
 
+// ---- 0.5.0 かざり (turn-gacha のカードで手に入る) ----
+
+/** turn-gacha の state の形。ids のカードを 1 枚ずつ持っている */
+const CARDS = [
+  ...['n01', 'n02', 'n03', 'n04', 'n05'].map(id => ({ id, rarity: 'N', slot: 'weapon', name: id })),
+  { id: 'r01', rarity: 'R', slot: 'armor', name: 'r01' },
+  { id: 's01', rarity: 'SR', slot: 'charm', name: 's01' },
+  { id: 'x01', rarity: 'SSR', slot: 'weapon', name: 'x01' },
+]
+const gachaOf = (ids: string[]) => ({ save: { book: Object.fromEntries(ids.map(id => [id, { count: 1, firstAt: NOW }])), total: ids.length }, cards: CARDS })
+const decoTank = (deco: string[], now = NOW, over: Partial<AquaTank> = {}) => {
+  const t: AquaTank = { ...INITIAL, turns: 25, fedAt: now, bornAt: now, deco, ...over }
+  return drawTank({ ...t, view: viewAt(t, now) })
+}
+
+test('かざりは持っているカードのレア度と種類の数で手に入る (ガチャが無ければ無し)', () => {
+  // N 4 種・R 1 種・SR 1 種 (count 0 と表に無いカードと同じ id の重複は数えない)
+  const counts = gachaCounts(
+    { book: { n01: { count: 1 }, n02: { count: 3 }, n03: { count: 1 }, n04: { count: 1 }, n05: { count: 0 }, r01: { count: 1 }, s01: { count: 2 }, zz: { count: 1 } } },
+    [...CARDS, CARDS[0], { id: 'bad', rarity: 'UR' }, null],
+  )
+  expect(counts).toEqual({ N: 4, R: 1, SR: 1, SSR: 0 })
+  expect(unlockedDecos(counts)).toEqual(['kusa', 'ishi', 'kai', 'shiro'])
+  expect(unlockedDecos({ N: 99, R: 99, SR: 99, SSR: 99 })).toEqual(DECOS.map(d => d.id))
+  // turn-gacha が無い・読み込む前・形が違う
+  for (const [save, cards] of [[undefined, CARDS], [{ book: {} }, undefined], [{}, CARDS], [null, []]] as const) expect(gachaCounts(save, cards)).toBeUndefined()
+  expect(unlockedDecos(undefined)).toEqual([])
+  // 一番珍しい沈没船は SSR、城は SR
+  expect(DECOS.find(d => d.id === 'chinbotsu')?.rarity).toBe('SSR')
+  expect(DECOS.find(d => d.id === 'shiro')?.rarity).toBe('SR')
+})
+
+test('置く・外す・入れ替える (同じかざりは 1 つ)、知らないかざりと増えた置き場は残す', () => {
+  const empty = ['', '', '', '', '']
+  const a = placeDeco(empty, 0, 'kusa')
+  expect(a).toEqual(['kusa', '', '', '', ''])
+  const b = placeDeco(a, 2, 'shiro')
+  expect(b).toEqual(['kusa', '', 'shiro', '', ''])
+  // ほかの置き場にある物を選ぶと入れ替わる
+  expect(placeDeco(b, 0, 'shiro')).toEqual(['shiro', '', 'kusa', '', ''])
+  expect(placeDeco(b, 1, 'shiro')).toEqual(['kusa', 'shiro', '', '', ''])
+  // 置いてある所に別の物を置くと置き換わる、'' で外す
+  expect(placeDeco(b, 2, 'kai')).toEqual(['kusa', '', 'kai', '', ''])
+  expect(placeDeco(b, 2, '')).toEqual(['kusa', '', '', '', ''])
+  // 範囲の外は何もしない。知らない id と 6 つ目以降の置き場はそのまま
+  expect(placeDeco(['kirin', '', '', '', '', 'x6'], 1, 'kusa')).toEqual(['kirin', 'kusa', '', '', '', 'x6'])
+  expect(placeDeco(b, 9, 'kai')).toEqual(b)
+  // store の欄: 文字でない物は空き、短ければ足す、無ければ全部空き
+  expect(fromSaved({ turns: 1, deco: ['kusa', 3, null, 'kirin'] }, NOW).deco).toEqual(['kusa', '', '', 'kirin', ''])
+  expect(fromSaved({ turns: 1 }, NOW).deco).toEqual(empty)
+  expect(fromSaved({ turns: 1, deco: 'kusa' }, NOW).deco).toEqual(empty)
+})
+
+test('かざりを水槽の底に描く (知らない物は描かない)。城と沈没船の周りを魚が回る', () => {
+  const none = decoTank(['', '', '', '', ''])
+  expect(none).not.toContain('class="deco-')
+  const all = decoTank(['kusa', 'shiro', 'takara', 'chinbotsu', 'kirin'])
+  for (const id of ['kusa', 'shiro', 'takara', 'chinbotsu']) expect(all).toContain(`class="deco-${id}"`)
+  expect(all).not.toContain('deco-kirin')
+  // 8 種とも描け、それぞれ違う絵
+  const one = DECOS.map(d => decoTank([d.id, '', '', '', '']))
+  one.forEach((s, i) => expect(s).toContain(`class="deco-${DECOS[i]?.id}"`))
+  expect(new Set(one).size).toBe(DECOS.length)
+  // 魚の数だけ泳ぎ、城・沈没船の周りは楕円で回る (かざりは魚とえさの目印を使わない)
+  expect(count(all, 'animateMotion')).toBe(4)
+  expect(count(all, 'A46 28')).toBe(4) // 2 匹 × 半円 2 つ
+  expect(count(none, 'A46 28')).toBe(0)
+  expect(all).not.toContain('fill="freeze"')
+  // 置き場の中だけ数える (6 つ目以降は描かない)
+  expect(decoTank(['', '', '', '', '', 'shiro'])).not.toContain('deco-shiro')
+})
+
+test('かざりの色は時刻帯と季節に合わせる (夜は城の窓が灯る・冬は雪が積もる)', () => {
+  const at = (s: string) => decoTank(['kusa', 'shiro', 'ishi', '', ''], jst(s))
+  const [noon, evening, night] = [at('2026-10-20T12:00:00'), at('2026-10-20T17:30:00'), at('2026-10-20T22:00:00')]
+  expect(night).toContain('fill="#ffd866"')
+  for (const s of [noon, evening]) expect(s).not.toContain('fill="#ffd866"')
+  // 城の壁の色が昼と夕と夜で違う
+  const wall = (s: string) => /class="deco-shiro"><rect [^>]*fill="(#[0-9a-f]{6})"/.exec(s)?.[1]
+  expect(new Set([noon, evening, night].map(wall)).size).toBe(3)
+  // 水草の色は季節で違い、冬は石と城に雪
+  const kusa = (s: string) => /class="deco-kusa"><path [^>]*stroke="(#[0-9a-f]{6})"/.exec(s)?.[1]
+  const seasons = ['04-10', '07-20', '10-20', '01-20'].map(d => at(`2026-${d}T12:00:00`))
+  expect(new Set(seasons.map(kusa)).size).toBe(4)
+  const caps = (s: string) => count(s, 'fill="#f0f6fc" opacity=".92"')
+  expect(caps(seasons[3] ?? '')).toBeGreaterThan(0)
+  expect(caps(seasons[2] ?? '')).toBe(0)
+})
+
+test('かざりを全部置いた一番重い状態でも SVG は上限内で、毎回同じ', () => {
+  for (const h of ['12:00', '22:00']) {
+    const now = jst(`2026-01-20T${h}:00`)
+    const t: AquaTank = { ...INITIAL, turns: 500, murk: 10, isRunning: true, fedAt: now, bornAt: now, deco: ['shiro', 'chinbotsu', 'takara', 'kai', 'kusa'] }
+    const full = { ...t, view: { ...viewAt(t, now), isFeeding: true, isUpset: true } }
+    expect(drawTank(full)).toBe(drawTank(full))
+    expect(drawTank(full).length).toBeLessThan(131_072)
+  }
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: かざりのボタンで置き場を選んで置く・入れ替える・外す (store に残し、知らない欄は消さない)`, async ($, on) => {
+    const saved = { turns: 25, bornAt: NOW, fullness: 70, fedAt: NOW, murk: 0, name: '', deco: ['', '', '', '', 'kirin'], futureField: 1 }
+    const { store, tank } = await boot($, on, saved as Partial<AquaTank>, { gacha: () => gachaOf(['n01', 'n02', 'n03', 'n04', 'r01', 's01']) })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ key: 'put-kusa' })).toBeUndefined()
+    await ui.press({ key: 'deco' })
+    expect((await ui.find({ key: 'deco' }))?.props.label).toBe('かざりを閉じる')
+    expect((await ui.find({ key: 'slot-0' }))?.props.label).toBe('1 空き')
+    expect((await ui.find({ key: 'slot-4' }))?.props.label).toBe('5 なぞのかざり')
+    // 手に入っている物だけボタン、ほかは手に入れ方
+    for (const id of ['kusa', 'ishi', 'kai', 'shiro']) expect(await ui.find({ key: `put-${id}` })).toBeDefined()
+    for (const id of ['ryuboku', 'tsubo', 'takara', 'chinbotsu']) expect(await ui.find({ key: `put-${id}` })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'SSR を 1 種そろえると沈没船' })).toBeDefined()
+    // 開いている間は、えさは主のボタンでない
+    expect((await ui.find({ key: 'feed' }))?.props.dimColor).toBe(true)
+    await ui.press({ key: 'put-kusa' })
+    expect(store.saved()?.deco).toEqual(['kusa', '', '', '', 'kirin'])
+    await ui.press({ key: 'slot-2' })
+    await ui.press({ key: 'put-shiro' })
+    await ui.press({ key: 'slot-0' })
+    await ui.press({ key: 'put-shiro' })
+    expect(store.saved()?.deco).toEqual(['shiro', '', 'kusa', '', 'kirin'])
+    expect((await tank()).deco).toEqual(['shiro', '', 'kusa', '', 'kirin'])
+    expect((await ui.find({ key: 'slot-0' }))?.props.label).toBe('1 城')
+    if (surface === 'vscode') expect(await svgOf(ui)).toContain('class="deco-shiro"')
+    else expect(await ui.find({ type: 'Text', text: 'かざり 城・水草・なぞのかざり' })).toBeDefined()
+    await ui.press({ key: 'take' })
+    expect(store.saved()?.deco).toEqual(['', '', 'kusa', '', 'kirin'])
+    // 1 ターン後も、知らない欄と知らないかざりは残る
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+    const s = store.saved() as Record<string, unknown> & Partial<AquaTank>
+    expect(s.turns).toBe(26)
+    expect(s.futureField).toBe(1)
+    expect(s.deco).toEqual(['', '', 'kusa', '', 'kirin'])
+    await ui.press({ key: 'deco' })
+    expect(await ui.find({ key: 'slot-0' })).toBeUndefined()
+    expect((await ui.find({ key: 'feed' }))?.props.dimColor).toBeFalsy()
+  })
+
+  test(`${surface}: turn-gacha が無ければ、かざりの欄に入れ方を出し、置くボタンは出さない`, async ($, on) => {
+    await boot($, on, { turns: 5 })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'deco' })
+    expect(await ui.find({ type: 'Text', text: 'turn-gacha を入れると、持っているカードでかざりが手に入ります' })).toBeDefined()
+    for (const d of DECOS) expect(await ui.find({ key: `put-${d.id}` })).toBeUndefined()
+    expect(await ui.find({ key: 'slot-0' })).toBeDefined()
+  })
+}
+
 test('知らない種類の魚は残って、まる魚の形で描かれ、一覧では「なぞの魚」', async ($, on) => {
   const odd = { ...aFish(1, 'maru', 30), kind: 'kirin' } as AquaFish
   const draw = (fish: AquaFish[]) => drawTank({ ...INITIAL, fish, view: viewAt({ ...INITIAL, fedAt: NOW, bornAt: NOW }, NOW) })
@@ -620,4 +785,113 @@ test('知らない種類の魚は残って、まる魚の形で描かれ、一�
     [0, 'maru', 6],
     [1, 'kirin', 31],
   ])
+})
+
+// ---- 0.5.0 記録の控え・古い版では書かない ----
+
+const BACKUP = { options: { backupDir: 'C:/work/backup' } }
+const slash = (p: string) => p.replace(/\\/g, '/')
+
+/** $.fs の代わり。控えのファイルは Map、plugin.json は version() の版を返す。書いた控えの path を数える */
+const fakeFs = (on: On, files: Record<string, string> = {}, version: () => string = () => '0.5.0') => {
+  const m = new Map(Object.entries(files))
+  const writes: string[] = []
+  on('fs.read', (_$, e) => {
+    const p = slash(e.path)
+    if (p.endsWith('/plugin.json')) return { value: JSON.stringify({ name: 'aqua-pet', version: version() }) }
+    const t = m.get(p)
+    if (t === undefined) throw new Error('ENOENT')
+    return { value: t }
+  })
+  on('fs.write', (_$, e) => {
+    m.set(slash(e.path), e.text)
+    writes.push(slash(e.path))
+    return { value: undefined }
+  })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  return { writes, toasts, file: (p: string) => JSON.parse(m.get(p) ?? 'null') as { day: string; value: Record<string, unknown> } | null }
+}
+
+test('控えは設定のフォルダに 1 日 1 回だけ、知らない欄ごと書く', BACKUP, async ($, on) => {
+  const fs = fakeFs(on)
+  const saved = { turns: 7, bornAt: NOW, fullness: 70, fedAt: NOW, murk: 0, name: 'たま', futureField: 1 }
+  const { clock } = await boot($, on, saved as Partial<AquaTank>)
+  // 2026-10-20 は火曜 (曜日の枠 2)
+  expect(fs.writes).toEqual(['C:/work/backup/aqua-pet/tank-2.json'])
+  expect(fs.file('C:/work/backup/aqua-pet/tank-2.json')).toEqual({ day: '2026-10-20', value: saved })
+  for (const id of ['t1', 't2']) {
+    await $.turn.start({ text: 'hi', turnId: id })
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' })
+  }
+  expect(fs.writes).toHaveLength(1)
+  // 日をまたいで動き続けても、次の日の最初の書き込みで控える (水曜の枠 3)
+  await clock.advance(13 * 3_600_000)
+  await $.turn.start({ text: 'hi', turnId: 't3' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer' })
+  expect(fs.writes).toEqual(['C:/work/backup/aqua-pet/tank-2.json', 'C:/work/backup/aqua-pet/tank-3.json'])
+  expect(fs.file('C:/work/backup/aqua-pet/tank-3.json')).toMatchObject({ day: '2026-10-21', value: { turns: 9, futureField: 1 } })
+})
+
+test('設定が空なら控えず、戻す欄には設定のしかたを出す', async ($, on) => {
+  const fs = fakeFs(on)
+  await boot($, on, { turns: 3 })
+  expect(fs.writes).toEqual([])
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'restore' })
+  expect(await ui.find({ type: 'Text', text: '設定の backupDir を入れると控えが取れます' })).toBeDefined()
+  expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: 控えから戻すと、選んだ日の記録になる (確かめてから書く)`, BACKUP, async ($, on) => {
+    const old = { turns: 50, bornAt: NOW - 9 * 86_400_000, fullness: 70, fedAt: NOW, murk: 0, name: 'もと', fish: migrateFish(50, NOW), deco: ['shiro', '', '', '', ''], futureField: 1 }
+    fakeFs(on, { 'C:/work/backup/aqua-pet/tank-1.json': JSON.stringify({ day: '2026-10-19', value: old }) })
+    const { store, tank } = await boot($, on, { turns: 3, bornAt: NOW, fullness: 70, fedAt: NOW })
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'restore' })
+    // 今日の控え (開いた時に取った) と昨日の控えが、新しい順に並ぶ
+    expect((await ui.find({ key: 'day-2026-10-20' }))?.props.label).toBe('2026-10-20')
+    expect(await ui.find({ key: 'day-2026-10-19' })).toBeDefined()
+    expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+    await ui.press({ key: 'day-2026-10-19' })
+    expect(await ui.find({ type: 'Text', text: '2026-10-19: この日の記録に戻しますか。今の記録は上書きされます' })).toBeDefined()
+    // やめると書かない
+    await ui.press({ key: 'restore-no' })
+    expect(store.saved()?.turns).toBe(3)
+    await ui.press({ key: 'day-2026-10-19' })
+    await ui.press({ key: 'restore-ok' })
+    expect(store.saved()).toMatchObject({ turns: 50, name: 'もと', futureField: 1, deco: ['shiro', '', '', '', ''] })
+    expect((await tank()).turns).toBe(50)
+    expect((await tank()).restore).toBeNull()
+    expect(await infoOf(ui)).toContain('もと / 育てた日数 10日 / 累計 50ターン')
+    expect(await ui.find({ key: 'restore-ok' })).toBeUndefined()
+  })
+}
+
+// isStale は style.ts のモジュールの値を持つので、この試験は最後に置く
+test('新しい版が入ったら、古い版のこのセッションは store に書かず、控えからも戻さない', BACKUP, async ($, on) => {
+  let version = '0.5.0'
+  const { toasts } = fakeFs(on, { 'C:/work/backup/aqua-pet/tank-1.json': JSON.stringify({ day: '2026-10-19', value: { turns: 50 } }) }, () => version)
+  const { store, clock } = await boot($, on, { turns: 3, bornAt: NOW, fullness: 70, fedAt: NOW })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(store.saved()?.turns).toBe(4)
+  version = '0.6.0'
+  await clock.advance(61_000)
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  expect(store.saved()?.turns).toBe(4)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'feed' })
+  expect(store.saved()?.fullness).toBe(70)
+  await ui.press({ key: 'restore' })
+  await ui.press({ key: 'day-2026-10-19' })
+  await ui.press({ key: 'restore-ok' })
+  expect(store.saved()?.turns).toBe(4)
+  // 開き直しのお願いは 1 回だけ
+  expect(toasts.filter(t => t.includes('開き直す'))).toHaveLength(1)
 })

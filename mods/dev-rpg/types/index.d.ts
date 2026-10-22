@@ -51,6 +51,44 @@ export type RpgSaved = {
   defeated: Record<string, number>
   /** ここから 0.4.0。湧いたボスの気配 (0 か 1)。あれば気配を使わずにボスに挑めて、経験値が 1.5 倍 */
   bossSign: number
+  /** ここから 0.6.0。ダンジョンで勝ち抜いた一番深い階 (0 はまだ)。2 つのセッションでは大きい方 */
+  deepest: number
+  /** 今潜っているダンジョン。入口にいれば null */
+  delve: RpgDelve | null
+}
+
+/** 最後の階の戦いの写し (絵と一言に使う) */
+export type RpgDelveFight = {
+  floor: number
+  name: string
+  level: number
+  isBoss: boolean
+  shape: string
+  color: string
+  result: 'won' | 'lost'
+  /** 勇者が受けた量と、袋に入れた経験値 */
+  hitMe: number
+  loot: number
+}
+
+/** ダンジョンの 1 回の潜り。ターンを終えるたびに 1 歩進み、決まった歩数で次の階の敵と戦う */
+export type RpgDelve = {
+  /** 潜り始めた時刻 (同じ潜りかを見分ける) */
+  startedAt: number
+  /** 今いる階 (この階の敵とまだ戦っていない) */
+  floor: number
+  /** 次の階の敵までの歩み (0 から DELVE.steps まで) */
+  step: number
+  /** 潜っている間の HP と MP (%)。入口では 100 */
+  hp: number
+  mp: number
+  /** 袋の経験値。帰ると持ち帰り、力尽きると半分になる */
+  loot: number
+  /** 勝ち抜いた階の数 (この潜りの間) */
+  cleared: number
+  /** 乱数の種 (階ごとの敵と戦いが決まる) */
+  seed: number
+  last: RpgDelveFight | null
 }
 
 /** このセッションの間だけの値 */
@@ -151,7 +189,13 @@ export type RpgBattle = {
   hitMe: number
 }
 
-export type RpgTab = 'status' | 'gear' | 'achievements' | 'battle' | 'growth'
+export type RpgTab = 'status' | 'gear' | 'achievements' | 'battle' | 'growth' | 'dungeon'
+
+/** 記録の控え 1 日分 (hooks/style.ts の Backup と同じ形) */
+export type RpgBackup = { day: string; value: unknown }
+
+/** 「控えから戻す」の画面。list が null なら閉じている。pick は確かめ中の日 */
+export type RpgRestore = { list: RpgBackup[] | null; pick: string | null }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -164,6 +208,8 @@ declare module 'claude-code' {
       news: string
       /** 今の戦い。戦っていなければ null */
       battle: RpgBattle | null
+      /** 「控えから戻す」の画面 */
+      restore: RpgRestore
     }
     /** turn-gacha が他の mod に見せている物のうち、dev-rpg が読む分だけ (書くのは turn-gacha) */
     'turn-gacha': {

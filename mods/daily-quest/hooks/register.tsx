@@ -3,7 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { QuestCounts, QuestDay, QuestSave } from '../types'
 import { addCounts, applyPending, countTool, countTurn, dayOf, EMPTY, fromSaved, isEmpty, jstDate, paneLines, paneSvg, streakOf, subCounts, withUnknown } from './quest'
-import { followTheme, readTheme } from './style'
+import { backup, backupDir, backupOf, closeRestore, resetRestore, restoreButton, restoreCard, setBackupDir } from './backup'
+import { followTheme, mayWrite, readTheme, rememberVersion } from './style'
 
 const PANE = 'daily-quest'
 const TITLE = 'きょうのお題'
@@ -52,11 +53,36 @@ async function refresh($: $) {
 }
 
 async function load($: $) {
-  const saved = (await readStore($))?.saved
-  if (saved) await update($, SAVED, () => saved)
+  const got = await readStore($)
+  if (got) await update($, SAVED, () => got.saved)
   else await update($, NOTE, () => BROKEN)
   await refresh($)
+  // その日はじめてなら、読んだ生の値 (知らない欄ごと) を控える
+  if (backupDir) await backup($, STORE_KEY, got?.raw, await $.clock.now())
 }
+
+/** day の控えに戻し、メモリの中 (他の mod が読む今日のお題・連続日数・通算) も読み直す。古い版のままなら戻さない */
+const restoreDay = ($: $, day: string) =>
+  serial(async () => {
+    if (!(await mayWrite($, await $.clock.now()))) return
+    const value = await backupOf($, STORE_KEY, day)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      $.ui.toast('控えを読めなかったので、戻していません', { timeoutMs: 8000 })
+      return
+    }
+    const isSaved = await $.store.set(STORE_KEY, value).then(
+      () => true,
+      () => false,
+    )
+    if (!isSaved) {
+      $.ui.toast('控えの記録を書けませんでした', { timeoutMs: 8000 })
+      return
+    }
+    await update($, NOTE, () => '')
+    await load($)
+    closeRestore($)
+    $.ui.toast(`${day} の記録に戻しました`)
+  })
 
 /**
  * まだ流していない数を store に足す。書く直前に読み直す (別のセッションの分を消さない)。
@@ -72,6 +98,11 @@ const flush = ($: $) =>
       return
     }
     const store = got.saved
+    const now = await $.clock.now()
+    // 日をまたいで動き続けるセッションも、その日はじめて書く前に控える
+    if (backupDir) await backup($, STORE_KEY, got.raw, now)
+    // 新しい版が入ったのに古い版のまま動いている時は書かない。進みは流さずに残す (トーストで開き直しを頼む)
+    if (!(await mayWrite($, now))) return
     const r = applyPending(store, p.date, p.counts)
     // この版の知らない欄 (新しい版が足した物) は読んだまま残す
     const isSaved = await $.store.set(STORE_KEY, withUnknown(got.raw, r.next)).then(
@@ -112,12 +143,15 @@ const openPane = async ($: $) => {
   return { text: 'きょうのお題を開きました。' }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  setBackupDir(options)
   followTheme(on)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await readTheme($)
+    await rememberVersion($).catch(() => {})
+    resetRestore()
     // /quest が拒まれたら /daily-quest にする
     const got = await $.command.register({ name: 'quest', description: DESCRIPTION }).catch(() => undefined)
     ownsMain = got?.command === 'quest'
@@ -196,6 +230,10 @@ export const register: Register = on => {
           </Box>
         )}
         {note !== '' && <Text color="yellow">{note}</Text>}
+        <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1}>
+          {restoreButton($, t, STORE_KEY)}
+        </Box>
+        {restoreCard($, t, day => void restoreDay($, day))}
       </Box>
     )
   })
