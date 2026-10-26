@@ -32,6 +32,10 @@ jobs:
       - name: Claude Code を入れる
         run: npm install --prefix "${{ runner.temp }}/cc" --no-fund --no-audit @anthropic-ai/claude-code@2.1.310
 
+      # 試験の時刻の表示は日本時間を前提に書いてある (05:00Z → 14:00)
+      - name: 時間帯を日本時間にする
+        run: tzutil /s "Tokyo Standard Time"
+
       # エンジンの型が無いので tsc は飛ばされる(validate と試験だけ)
       - name: 全 mod の validate と試験
         env:
