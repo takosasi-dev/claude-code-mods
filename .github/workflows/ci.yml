@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # 試験に cmd.exe・PowerShell・Windows のパスを扱う物があるので Windows で回す
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # tools/check_all.mts は node 24 の型の取り外しでそのまま動く
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      # plugin validate・plugin test を走らせるエンジン。版を決めて入れる
+      - name: Claude Code を入れる
+        run: npm install --prefix "${{ runner.temp }}/cc" --no-fund --no-audit @anthropic-ai/claude-code@2.1.310
+
+      # エンジンの型が無いので tsc は飛ばされる(validate と試験だけ)
+      - name: 全 mod の validate と試験
+        env:
+          CLAUDE_EXE: ${{ runner.temp }}/cc/node_modules/@anthropic-ai/claude-code-win32-x64/claude.exe
+        run: node tools/check_all.mts
